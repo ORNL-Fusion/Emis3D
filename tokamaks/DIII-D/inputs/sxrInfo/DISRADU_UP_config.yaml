@@ -1,0 +1,40 @@
+# DISRADU_UP configuration file
+
+NAME: "DISRADU_UP"
+GROUP_NAME: "DISRADU"
+NUM_CHANNELS: 15
+TYPE: "planar"
+CHANNEL_TAGS: ['DISRADU16', 'DISRADU17', 'DISRADU18','DISRADU19', 'DISRADU20', 'DISRADU21',
+               'DISRADU22', 'DISRADU23', 'DISRADU24', 'DISRADU25', 'DISRADU26', 'DISRADU27',
+               'DISRADU28', 'DISRADU29', 'DISRADU30']
+
+BUILD_TYPE: "FROM PRIMITIVES" # Build the camera from primitives, not using a CAD file
+SLIT_WIDTH: 0.003  # 3 mm slit (circular)
+SLIT_HEIGHT: 0.003 # 3 mm slit (circular)
+FOIL_WIDTH: 0.005  # width of the diode
+FOIL_HEIGHT: 0.002  # height of the diode
+FOIL_CORNER_CURVATURE: 0.0005
+SLIT_SENSOR_SEPARATION: 0.0305  # 2.98 cm between the slit and the diode array
+FOIL_SEPARATION: 0.00212  # 2.12 mm between diodes
+FOIL_POSITIONS: [6.5, 5.5, 4.5, 3.5, 2.5, 1.5, 0.5, -0.5, -1.5,
+                -2.5, -3.5, -4.5, -5.5, -6.5, -7.5] # Foil shift relative to the center of the sensor
+# This is where the center of the diode is, example: 0.5 * FOIL_SEPARATION
+
+# Disrad toroidal location is at 225R+1, switched to 210R+1 in 2010, switched back to 225R+1 in 2018.
+# Location in Emis3D = 360 - 225.0 = 135.0
+CAMERA_POSITION_R_Z_PHI: [2.29, 0.78, 135.0] # R, z position of the camera
+# NOTE: Phi is in degrees in Emis3D coordinates = 360 - DIII-D coordinates
+CAMERA_ROTATION: 94.8 # Rotate the camera this amount, in degrees, towards R=0, z=0
+CAMERA_DOWNWARD_FACING: True # True for -z cameras, False for +z cameras (RM on DIII-D)
+
+# Optional stuff below!
+
+# Chord information, testing/sxr_chords.py uses this to make sure that everything is correct
+r0:   [2.29, 2.29, 2.29, 2.29, 2.29, 2.29, 2.29, 2.29, 2.29, 2.29, 2.29,
+       2.29, 2.29, 2.29, 2.29]
+rf:   [1.02, 1.02, 1.02, 1.02, 1.02, 1.02, 1.02, 1.02, 1.02, 1.02, 1.02,
+       1.02, 1.02, 1.17, 1.22]
+z0:   [0.78, 0.78, 0.78, 0.78, 0.78, 0.78, 0.78, 0.78, 0.78, 0.78, 0.78,
+       0.78, 0.78, 0.78, 0.78]
+zf:   [0.07, 0.16, 0.25, 0.35, 0.44, 0.53, 0.61, 0.71, 0.8 , 0.88, 0.97,
+       1.06, 1.15, 1.19, 1.23]

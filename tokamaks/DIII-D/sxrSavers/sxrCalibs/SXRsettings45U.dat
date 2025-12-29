@@ -1,0 +1,156 @@
+******** Record of changes to toroidal SXR-45 settings and filter settings
+
+Rc is current sensing resistor on each channel preamp [Ohms]. 0 is put if disconnected. Gain is additional second stage amplifier gain (if present).
+Rc can be 1e3 Ohm (lo setting) or 1e5 (hi setting). Gain can be 1 or 10 
+Slit is fixed at 2.2 mm x 4.7 mm with 16% loss from toroidal clipping due to heat shield
+hi ND filter is polkadot Moly foil (25 um thick with 100 um holes) with T = 0.0035
+lo ND filter is polkadot Moly foil (25 um thick with 100 um holes) with T = 0.087
+
+**** Settings for 2017 (shots xxx - 172691) ********
+Filter 1 - 10 um Ti (120 degrees, full CCW on lower (left) filter wheel ch 1-7; 80 degrees, full CCW on upper (right) filter wheel ch 8-12)
+Filter 2 - ND1 (140 degrees on lower filter wheel, 100 degrees on upper filter wheel)
+Filter 3 - ND2 (160 degrees on lower filter wheel, 125 degrees on upper filter wheel)
+Filter 4 - 25 um Be (180 degrees on lower filter wheel, 145 degrees on upper filter wheel)
+Filter 5 - 125 um Be (200 degrees, full CW on lower filter wheel, 165 degrees, full CW on upper filter wheel)
+
+**** Settings for Fall 2017 - 2018 (shots 172692 - 178300)****
+Filter 1 - 100 um SS (dummy for bakes), full CCW, 0 degrees on lower (left, ch 1-7), 160 degrees on upper (right, ch 8 - 12)
+Filter 2 - 125 um Be (default SXR), 330 degrees on lower, 135 degrees on upper
+Filter 3 - 12.5 um Be (low Te SXR), 305 degrees on lower, 105 degrees on upper
+Filter 4 - hi ND (disruptions Prad), 280 degrees on lower, 80 degrees on upper
+Filter 5 - lo ND (ELM Prad), full CW, 260 degrees on lower, 55 degrees on upper 
+
+**** Settings for Spring 2019 - Spring 2020 (shots 178300 - ) ****
+Filter 1 - 100 um SS (dummy for bakes), full CCW, 300 degrees on lower (left, ch 1-7), 100 degrees on upper (right, ch 8 - 12)
+Filter 2 - 125 um Be (default SXR), 280 degrees on lower, 70 degrees on upper
+Filter 3 - 12.5 um Be (low Te SXR), 250 degrees on lower, 45 degrees on upper
+Filter 4 - hi ND (disruptions Prad), 220 degrees on lower, 20 degrees on upper
+Filter 5 - lo ND (ELM Prad), full CW, 190 degrees on lower, 350 degrees on upper 
+
+***** Settings for Spring 2021 - 
+Filter 1 - 100 um SS (dummy for bakes), full CCW, 310 degrees on lower (left, ch 1-7), 100 degrees on upper (right, ch 8 - 12)
+Filter 2 - 125 um Be (default SXR), 290 degrees on lower, 70 degrees on upper
+Filter 3 - 12.5 um Be (low Te SXR), 260 degrees on lower, 45 degrees on upper
+Filter 4 - hi ND (disruptions Prad), 230 degrees on lower, 20 degrees on upper
+Filter 5 - lo ND (ELM Prad), full CW, 190 degrees on lower, 350 degrees on upper 
+
+shot	Rc	Gain	Filt
+168847	100k	1	5
+169420	1k	10	2
+169425	1k	1	2
+169493	1k	10	2
+169519	100k	1	5
+170467	1k	1	3
+170711	100k	1	5
+172241	1k	1	3
+172261	100k	1	5
+172762	100k	1	1	! dummy for bake
+173305	1k	1	4
+173685	1k	1	1	! dummy for boronization
+173713	100k	1	2
+174567	100k	1	1	! dummy for boronization
+174735	100k	1	2
+175071	100k	1	3
+175122	100k	1	2
+175385	100k	1	1	! dummy for boronization
+175460	100k	1	2
+176625	100k	1	1	! dummy for bake
+176678	100k	1	2
+178300	100k	1	1	! dummy for start of ops and bakes
+178337	100k	1	2
+178497	100k	1	1	! dummy for boronization
+178540	100k	1	2	
+178661	1k	10	5
+178685	100k	1	2
+178932	1k	1	4
+178953	100k	1	2
+178990	100k	1	5	! super high gain Prad for breakdown experiment
+179016	100k	1	2
+179235	100k	1	1	! dummy for boronization
+179279	100k	1	2
+180000	1k	1	4
+180024	1k	1	1	! dummy for bake
+180118	1k	1	4
+180136	1k	1	1	! dummy for bake
+180165	100k	1	2
+180571	100k	1	1	! dummy for bake
+180648	100k	1	2	
+180185	100k	1	1	! dummy for bake
+182576	100k	1	2
+183133	100k	1	1	! dummy for boronization
+183140	100k	1	2
+183363	100k	1	1	! dummy for bake
+183606	100k	1	2
+183787	100k	1	1	! dummy for bake
+184063	100k	1	2
+184400	1k	1	4	
+184423	100k	1	2
+184598	100k	10	3
+184649	100k	1	1	! dummy for bake
+184765	100k	1	2
+185020	1k	1	5
+185044	100k	1	2
+185934	100k	1	1	
+186163	1k	10	5
+186180	100k	1	2
+186262	1k	1	4
+186275	100k	1	2
+186306	100k	1	1	! dummy for bake
+186579	1k	1	4
+186589	100k	1	2
+186771	100k	1	1	! dummy for bake
+186886	100k	1	2
+188100	100k	1	1	! dummy for install and startup
+188752	100k	1	2
+189078	100k	1	1	! dummy for bake
+189168	1k	1	5
+189173	1k	1	4
+189178	100k	1	2
+189780	100k	1	1	! dummy for bake
+189866	100k	1	2
+190135	1k	1	4
+190151	100k	1	2
+190338	1k	1	4
+190351	100k	1	2
+190933	1k	1	4
+190952	100k	1	2
+191085	100k	1	1	! dummy for bake
+191353	1k	1	5
+191370	100k	1	2
+191540	1k	1	5
+191572	1k	1	1	! dummy for bake
+191773	100k	1	5
+191903	1k	1	5
+191913	1k	1	1	! dummy for bake
+192192	1k	1	5
+192202	100k	1	2
+192363	1k	1	5
+192374	100k	1	2
+192653	100k	1	1	! dummy for bake
+192713	100k	1	2
+193559	100k	1	1	! dummy for bake
+194000	100k	1	2
+194483	100k	1	1	! dummy for bake
+194785	1k	1	4
+194831	1k	1	1	! dummy for bake
+194850	100k	1	2
+194980	1k	1	5	
+194988	100k	1	2
+195215	1k	1	4
+195244	1k	1	1	! dummy for bake
+195857	100k	1	2
+196476	100k	1	1	! dummy for bake
+196507	100k	1	2	
+198000	1k	1	1	! dummy for bake
+198399	100k	1	2
+198818	100k	1	1	! dummy for bake
+199011	100k	1	2	
+199660	100k	1	1	! dummy for bake
+199676	100k	1	2
+200231	1k	1	5
+200301	1k	1	1	! dummy for bake
+200363	100k	1	2
+200803	1k	1	5
+200828	100k	1	2
+201355	100k	1	1	! dummy for bake
+201419	100k	1	1	

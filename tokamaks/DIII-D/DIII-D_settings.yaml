@@ -1,0 +1,41 @@
+# Config file for the DIII-D tokamak
+
+
+# --- Machine parameters
+MACHINE:
+  device: 'DIII-D'
+  volume:  19.5 # m3
+  majorRadius: 1.67 # m
+  minorRadius: 0.67 # m
+  wallFileName: 'V1_FirstWall.txt'
+  numInjectors: 2 # number of dismit injectors
+  PFC_STL_PATH: 'd3d_CAD_full.stl' # stl CAD file of the tokamak
+  STL_UNITS: 'm'
+
+
+# --- SXR/Bolometer parameter filenames
+BOLOMETERS:
+  # In channel order from 1 to 32
+  SX90PF_UP:
+    configFileName: 'SX90PF_UP_config.yaml'
+  SX90PF_DOWN:
+    configFileName: 'SX90PF_DOWN_config.yaml'
+
+  # In channel order from 1 to 32
+  SX90MF_UP:
+    configFileName: 'SX90MF_UP_config.yaml'
+  SX90MF_DOWN:
+    configFileName: 'SX90MF_DOWN_config.yaml'
+
+  # In channel order from 1 to 30
+  DISRADU_DOWN:
+    configFileName: 'DISRADU_DOWN_config.yaml'
+  DISRADU_UP:
+    configFileName: 'DISRADU_UP_config.yaml'
+
+  # In channel order from 1 to 12
+  SX45F_DOWN:
+    configFileName: 'SX45F_DOWN_config.yaml'
+  SX45F_UP:
+    configFileName: 'SX45F_UP_config.yaml'
+

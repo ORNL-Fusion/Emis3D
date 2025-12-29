@@ -1,0 +1,47 @@
+# SX90MF_DOWN configuration file
+
+NAME: "SX90MF_DOWN"
+GROUP_NAME: "SX90MF"
+NUM_CHANNELS: 16
+TYPE: "planar"
+CHANNEL_TAGS: ['SX90MF17', 'SX90MF18','SX90MF19', 'SX90MF20', 'SX90MF21', 'SX90MF22',
+               'SX90MF23', 'SX90MF24', 'SX90MF25', 'SX90MF26', 'SX90MF27', 'SX90MF28',
+               'SX90MF29', 'SX90MF30', 'SX90MF31', 'SX90MF32']
+ 
+BUILD_TYPE: "FROM PRIMITIVES" # Build the camera from primitives, not using a CAD file
+SLIT_WIDTH: 0.003  # 3 mm slit (circular)
+SLIT_HEIGHT: 0.003 # 3 mm slit (circular)
+FOIL_WIDTH: 0.005  # width of the diode
+FOIL_HEIGHT: 0.002  # height of the diode
+FOIL_CORNER_CURVATURE: 0.0005
+SLIT_SENSOR_SEPARATION: 0.02898  # 2.98 cm between the slit and the diode array
+FOIL_SEPARATION: 0.00212  # 2.12 mm between diodes
+FOIL_POSITIONS: [-7.5, -6.5, -5.5, -4.5, -3.5, -2.5, -1.5, -0.5,
+                0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] # Foil shift relative to the center of the sensor
+# This is where the center of the diode is, example: 0.5 * FOIL_SEPARATION
+CAMERA_POSITION_R_Z_PHI: [2.304, -0.731, 270] # R, z position of the camera
+# NOTE: Phi is in degrees in Emis3D coordinates = 360 - DIII-D coordinates
+CAMERA_ROTATION: -85 # Rotate the camera this amount, in degrees, towards R=0, z=0
+CAMERA_DOWNWARD_FACING: False # True for -z cameras, False for +z cameras (RM on DIII-D)
+
+# Optional stuff below!
+
+# Chord information, testing/sxr_chords.py uses this to make sure that everything is correct
+r0:   [2.34545188, 2.34701932, 2.34851461, 2.34990158, 2.3511379 ,
+       2.35219084, 2.35302388, 2.3536101 , 2.35393239, 2.3539894 ,
+       2.35378865, 2.35335122, 2.35270473, 2.35188108, 2.35091862,
+       2.349853  ]
+rf:   [1.06044364, 1.01342034, 0.96856155, 0.9269525 , 0.88986307,
+       0.85827482, 0.83328356, 0.81569706, 0.80602839, 0.8043181 ,
+       0.81034061, 0.82346339, 0.84285824, 0.86756753, 0.89644135,
+       0.92840989]
+z0:   [-0.75895965, -0.75648211, -0.75376948, -0.75082535, -0.74767389,
+       -0.74432828, -0.74083153, -0.73723203, -0.73359937, -0.72997033,
+       -0.72640754, -0.72297149, -0.71969293, -0.71659854, -0.71371871,
+       -0.71106255]
+zf:   [ 0.10778936,  0.0334633 , -0.04791571, -0.13623938, -0.23078331,
+       -0.33115164, -0.43605396, -0.54403914, -0.65301895, -0.76189014,
+       -0.86877382, -0.97185545, -1.07021196, -1.1630437 , -1.24943866,
+       -1.3291236 ]
+
+

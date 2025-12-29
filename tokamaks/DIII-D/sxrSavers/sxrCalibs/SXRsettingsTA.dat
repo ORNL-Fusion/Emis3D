@@ -1,0 +1,27 @@
+******* Record of changes to toroidal array SXR gains *****
+Rc is current sensing resistor preamps [Ohms] for each array. No additional gain in pre-amps after this, i.e. digitized voltage = I*Rc. Unless states otherwise, Rc is same across
+entire array.
+
+**** 165 filter settings 2018 ****
+Ch  detector	filter
+1	CdTe	25 um Ta
+2	CdTe	12.5 um Mo
+3	CdTe	250 um Be
+4	CdTe	12.5 um Ta
+5	CdTe	open
+6	CdTe	6 um Cu
+7	CdTe	3.2 mm Al
+8	CdTe	250 um Cu
+9	Si	open
+10	Si	250 um Be
+11	Si	125 um Be
+12	Si 	6 um Cu
+
+shot		Rc(45)	Rc(165)	Rc(195) 
+142673		500k	200k	500k	
+all of 2012  	500k	500k	500k
+153166 (May 2013) 500k	200k	500k
+155862 (Feb 2014) 500k  off	500k
+178392 (June 10, 2019) 100k 1/3 MOhm 500k
+
+178392 - All 165 resistors were at 1 MOhm. Switch in 3 MOhm for Ch. 1, 2, 4, 8 (lowest signal levels)

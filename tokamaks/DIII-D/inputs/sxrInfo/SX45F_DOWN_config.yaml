@@ -1,0 +1,35 @@
+# SX45F_DOWN configuration file
+
+NAME: "SX45F_DOWN"
+GROUP_NAME: "SX45F"
+NUM_CHANNELS: 5
+TYPE: "planar"
+CHANNEL_TAGS: ['SX45F01', 'SX45F02', 'SX45F03','SX45F04', 'SX45F05',
+               'SX45F06', 'SX45F07']
+
+BUILD_TYPE: "FROM PRIMITIVES" # Build the camera from primitives, not using a CAD file
+SLIT_WIDTH: 0.0036  # 3 mm slit (circular)
+SLIT_HEIGHT: 0.0036 # 3 mm slit (circular)
+FOIL_WIDTH: 0.005  # width of the diode
+FOIL_HEIGHT: 0.002  # height of the diode
+FOIL_CORNER_CURVATURE: 0.0005
+SLIT_SENSOR_SEPARATION: 0.026  # 2.6 cm between the slit and the diode array
+FOIL_SEPARATION: 0.00212  # 2.12 mm between diodes
+FOIL_POSITIONS: [2.5, 1.3, -1.2, -3.0, -4.6,
+                -6.3, -9.0] # Foil shift relative to the center of the sensor
+# This is where the center of the diode is, example: 0.5 * FOIL_SEPARATION
+
+# Location in Emis3D = 360 - 45 = 315
+CAMERA_POSITION_R_Z_PHI: [2.304, 0.731, 315.0] # R, z position of the camera
+# NOTE: Phi is in degrees in Emis3D coordinates = 360 - DIII-D coordinates
+CAMERA_ROTATION: 164 # Rotate the camera this amount, in degrees, towards R=0, z=0
+CAMERA_DOWNWARD_FACING: True # True for -z cameras, False for +z cameras (RM on DIII-D)
+
+# Optional stuff below!
+
+# Chord information, testing/sxr_chords.py uses this to make sure that everything is correct
+r0:   [2.304, 2.304, 2.304, 2.304, 2.304, 2.304, 2.304]
+rf:   [2.19,  1.98,   1.53, 1.12,   1.01,  1.01,  1.01]
+z0:   [0.731, 0.731, 0.731, 0.731, 0.731, 0.731, 0.731]
+zf:   [-0.83, -1.06, -1.24, -1.34, -1.01, -0.65, -0.28]
+

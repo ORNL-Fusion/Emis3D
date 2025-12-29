@@ -1,0 +1,488 @@
+******* Record of changes to poloidal SXR gains and filter settings *****
+Rc is current sensing resistor on each channel preamp [Ohms]. 0 is put if disconnected. Gain is additional second stage amplifier gain (if present).
+
+**** Settings for 2007-2008 ********
+Filter 0 - closed (162 degrees)
+Filter 1 - disruption prad (200 um pinhole, 50 um thick moly foil, with no filter, 144 degrees)
+Filter 2 - ELM prad (300 um x 2 mm slit, 50 um thick moly foil, with no filter, 108 degrees)
+Filter 3 - Low Te SXR (1 mm x 2 mm slit, 50 um thick moly foil, with 12 um diamond filter, 72 degrees)
+Filter 4 - Mid Te SXR (1 mm x 2 mm slit, 50 um thick moly foil, with 15 um diamond filter, 36 degrees)
+Filter 5 - Hi Te SXR (1 mm x 2 mm slit, 50 um thick moly foil, with 32 um diamond filter, 0 degrees)
+
+**** Settings for 2009-2010 ********
+Filter 0 - closed (162 degrees)
+Filter 1 - disruption prad (200 um pinhole with no filter, 144 degrees)
+Filter 2 - ELM prad (300 um x 2 mm slit with no filter, 108 degrees)
+Filter 3 - Low Te SXR (1 mm x 3 mm slit with 12 um diamond filter, 72 degrees)
+Filter 4 - Mid Te SXR (1 mm x 3 mm slit with 18 um diamond filter, 36 degrees)
+Filter 5 - Hi Te SXR (1 mm x 3 mm slit with 10 um Ti filter, 0 degrees)
+
+***** Settings for 2011 ****
+Filter 0 - closed (162 degrees)
+Filter 1 - disruption prad (200 um pinhole with no filter, 144 degrees)
+Filter 2 - ELM prad (300 um x 2 mm slit with no filter, 108 degrees)
+Filter 3 - Low Te SXR (1 mm x 3 mm slit with 12 um Be filter, 72 degrees)
+Filter 4 - Mid Te SXR (1 mm x 3 mm slit with 25 um Be filter, 36 degrees)
+Filter 5 - Hi Te SXR (1 mm x 3 mm slit with 125 um Be filter, 0 degrees)
+
+****** Settings for 2012, 2013 ******
+Filter 0 - closed (162 degrees)
+Filter 1 - disruption prad (200 um pinhole in 50 um thick SS foil with no filter, 144 degrees)
+Filter 2 - ELM prad (300 um x 2 mm slit in 25 um thick moly foil with no filter, 108 degrees)
+Filter 3 - Low Te SXR (1 mm x 3 mm slit in 1.3 mm thick tantalum with 12 um Be filter, 72 degrees)
+Filter 4 - visible light (1 mm x 3 mm slit in 25 um thick moly foil with 1 mm fused silica filter, 36 degrees)
+Filter 5 - Hi Te SXR (1 mm x 3 mm slit in 25 um thick moly foil with 125 um Be filter, 0 degrees) - default setting
+
+****** Settings for 2014 - 2024 ******
+Filter 0 - closed (162 degrees)
+Filter 1 - disruption prad (200 um pinhole in 50 um thick SS foil with no filter, 144 degrees)
+Filter 2 - ELM prad (300 um x 2 mm slit in 25 um thick moly foil with no filter, 108 degrees)
+Filter 3 - Low Te SXR (1 mm x 3 mm slit in 1.3 mm thick tantalum with 12 um Be filter, 72 degrees)
+Filter 4 - intermediate prad (400 um pinhole in 50 um thick SS foil with no filter, 36 degrees)
+Filter 5 - Hi Te SXR (1 mm x 3 mm slit in 25 um thick moly foil with 125 um Be filter, 0 degrees) - default setting
+
+shot		Rc(RM)	Rc(RP) Gain(RM) Gain(RP) Filt(RM)Filt(RP)
+128162		500	500	1	1	2	2
+128208		500	500	1	1	0	0
+128218		500	500	1	1	1	1
+128234		500	500	1	1	0	0
+128340		500	500	1	1	2	2
+128342		500	500	1	1	0	0
+128387  	500     500     1	1	2       2
+128340		500	500	1	1	0	0
+128420		500     500     1	1	2       2
+128458	      	500     500     1	1	2       2
+128623		500	500	1	1	1	1
+128937		500	500	1	1	2	2
+128955		500	500	1	1	0	0
+128958		500	500	1	1	2	2
+128969		500	500	1	1	0	0
+129008		2e5	2e5	1	1	5	5	
+129047		2e5	2e5	1	1	3	3
+129188		2e5	2e5	1	1	2	2
+129191		2e5	2e5	1	1	3	3
+129220		2e5	2e5	1	1	2	2
+129223		2e5	2e5	1	1	3	3
+129260		2e5	2e5	1	1	3	3
+129290		2e5	2e5	1	1	3	3
+129314		2e5	2e5	1	1	0	0
+129423		500	500	1	1	2	2
+129472		500	500	1	1	2	0
+129481		500	500	1	1	2	2
+129547		500	500	1	1	0	0
+129624		500	500	1	1	2	2
+129685		500	500	1	1	2	2	
+129735		2e5	2e5	1	1	5	5
+129743		2e5	2e5	1	1	3	3
+129755		2e5	2e5	1	1	5	5
+129762		2e5	2e5	1	1	4	4
+129769		2e5	2e5	1	1	3	3
+129790		2e5	2e5	1	1	5	5
+129799		2e5	2e5	1	1	4	4
+129809		2e5	2e5	1	1	3	3	! (RM1 was partially closed/open)
+129815		2e5	2e5	1	1	3	3 
+130091		500	500	1	1	5	5	! (RM1 filter wheel broken)
+130118		500	500	1	1	2	0	! RM1 filter wheel broken)
+131076		500	500	1	1	0	0
+131083		500	500	1	1	2	2
+131100		500	500	1	1	2	1
+131148		500	500	1	1	2	2
+131196		500	500	1	1	2	1
+131479		500	500	1	1	2	1
+131815		2e5	2e5	1	1	3	3
+132000		500	2e5	1	1	3	3	! Matt put in low resistors due to oscillations
+132316		2e5	2e5	1	1	3	3
+132719		500	500	1	1	2	1
+132850		500	500	1	1	3	3
+133925		500	500	1	1	2	1
+133955		500	500	1	1	0	0
+134189		500	500	1	1	2	1
+135781		2e3	2e3	1	1	1	1
+135977		2e3	2e3	1	1	1	1
+136198		2e3	2e3	1	1	4	4
+136199		1e5 	1e5	1	1	4 	4
+136200		2e3	2e3	10	10	4	4
+136203		2e3	2e3	10	10	3	3
+136204		1e5	1e5	1	1	3	3
+136206		2e3	2e3	10	10	3	3
+136615		2e3 	2e3	1	1 	1	1
+136649		1e5	1e5	1	1	4	4
+136700		2e3	2e3	10	10	4	4
+137599		2e3 	2e3	1	1	1	1
+137605		2e3	2e3	1	1	5	5
+137606		2e3	2e3	10	10	5	5
+137627		2e3	2e3 	10	10	4	4
+138164		2e3	2e3	1	1	1	1
+138219		2e3	2e3	10	10	4	4
+138491		2e3	2e3	1	1	1	1
+138656		2e3	2e3	10	10	4	4	
+138931		0	0	1	1	0	0	
+139504		2e3	2e3	10	10	4	4
+139621		2e3	2e3	1	1	1	1
+139641		2e3	2e3	10	10	4	4
+140529		2e3	2e3	10	10	5	5
+140667		2e3	2e3 	10	10	0	0
+140901		2e3	2e3 	10	10	4	4
+141725		2e3	2e3	1	1	1	1
+141762		2e3	500 	1	1	1	1
+141795		2e3	500	10	10	0	0
+141926		2e3	500	10	10	4 	4 
+141933		1e5	2e4	1	1	4	4
+141934		1e5	2e4 	10	10	4	4
+142034		2e3	500	10	10	4	4
+142134		2e3	500	1	1	2	2
+142166		1e5	2e4 	1	1	4	4
+142281		2e3 	500 	10	10	0 	0
+142536		2e3 	500 	10	10	4	4
+142659		2e3	500	1	1	1	1
+142734		2e3	500	1	1	0	0
+143975		1e5 	1e5 	10	10	4	4	
+143977		1e5 	1e5 	1	1	4	4
+143980		500 	500 	10	10	4	4
+144235		1e5	500 	10	10	4	4
+144398		1e5	1e5	1	1	0	0
+144410		1e5	1e5 	1	1	3	3
+144544		1e5	1e5	1	1	5	5
+145338		1e5	1e5	10	10	5	5
+145347		1e5	1e5	1	1	5	5
+145374		1e5	1e5	10	10	5	5
+145375		1e5	1e5	10	10	4	4
+145431		1e5	1e5	1	1	5	5
+145486		500	500	1	1	1	1
+145527		500	500	10	10	2 	2
+145564		1e5	1e5	10	10	3	3
+145600		500 	500	10	10	2	2
+145811		1e5	1e5 	10	10	3	3
+145850		1e5	1e5	1	1	5	5
+146020		1e5	1e5	10	10	5	5
+146038		1e5	1e5	1	1	5	5
+146121		1e5	1e5	10	10	5	5
+146148		1e5 	1e5	1	1	5	5
+146190		500 	500	10	10	5	5
+146192		500 	500	10	10	2	2
+146214		1e5 	1e5	1	1	5	5
+146378		1e5 	1e5	10	10	3	3
+146426		1e5	1e5	1	1 	3 	3
+146428		1e5 	1e5 	10	10	3 	3
+146429		1e5	1e5 	10	10	4	4
+146430		1e5	1e5	1	1	3	3
+146466		1e5	1e5	1	1	5	5
+146515		1e5	1e5	1	1	3	3
+146518		1e5	1e5	1	1	3	3
+146527		1e5	1e5	1	1	5	5
+146680		500	500	1	1	1	1
+146687		500 	500	10	10	1	1 
+146711		1e5	1e5	1	1	5	5 
+148665		1e5	1e5	1	1	5	5
+148690		1e5	1e5	1	1	3	3 
+148692		1e5	1e5	10	10	3	3
+148711		500	500	10	10	3	3
+148717		1e5	1e5	10	10	3	3
+148742		1e5	1e5	1	1	2	2
+148754		1e5	1e5	1	1	1	1	
+149075		1e5	1e5	1	1	5	5 	! may have been changed earlier, not sure
+150169		500	500	1	1	2	2
+150188		1e5	1e5	1	1	5	5 
+150232		500	500	1	1	2	2
+150346		1e5 	1e5	1	1	3	3
+150352		1e5  	1e5	10	10	3	3
+150372		1e5 	1e5	1	1	3	3
+150401		1e5 	1e5	10	10	3	3
+150450		500	500	1	1	2	2
+150456		500	500	1	1	1	1
+150474		1e5	1e5	1	1	5	5
+150682		500 	500	1	1	1	1 
+150705		1e5	1e5	1	1	5	5 
+150871		500  	500	1	1	2	2
+152507		1e5 	1e5	1	1	5	5
+152712		1e5	1e5	1	1	0	0
+152775		1e5	1e5	1	1	5	5
+153230		1e5 	1e5	1	1	0	0
+153394		1e5	1e5	1	1	5	5
+153638		1e5	1e5	10	10	5	5
+153718		1e5	1e5	10	10	3	3
+153883		500 	500	10	10	2	2
+153977		1e5	1e5	10	10	3	3 
+154008		500 	500	1	1	1	1 
+154016		500 	500	1	1	2	2
+154032		1e5	1e5	1	1	5	5
+154132		500 	500	1	1	2	2
+154161		500 	500	1	1	1 	1 
+154168		500 	500	10	10	1	1
+154174		500	500	1	1	1	1
+154222		500 	500	1	1	0	0
+154461		1e5	1e5	10	10	3	3
+154530		500	500	1	1	3	3
+154550		1e5	1e5	10	10	3	3
+154572		1e5	1e5	1	1	3	3
+154604		500	500	1	1	2	2
+154626		1e5	1e5	1	1	5	5
+154790		1e5	1e5	10	10	3	3
+155044		500	500	1	1	2	2
+155050		1e5	1e5	1	1	5	5
+155078		1e5	1e5	1	1	0	0
+155637		500	500	1	1	2	2
+155862		500	500	1	1	0	0
+156695		1e5	1e5	10	10	3	3
+156717		1e5	1e5	1	1	5	5
+156919		500	500	1	1	4	4
+156978		500	500	1	1	0	0
+157455		500	500	10	10	2	2
+157547		1e5	1e5	1	1	3	3
+157557		1e5	1e5	10	10	3	3
+157584		1e5	1e5	1	1	5	5
+157777		1e5	1e5	1	1	3	3
+157783		1e5	1e5	10	10	3	3
+157801		1e5	1e5	1	1	5	5
+158071		1e5	1e5	1	1	5	5
+158095		1e5	1e5	1	1	3	3
+158114		1e5	1e5	10	10	3	3
+158120		1e5	1e5	1	1	3	3
+158127		1e5	1e5	1	1	5	5
+158173		500	500	1	1	4	4
+158233		500	500	1	1	0	0
+158292		1e5	1e5	1	1	5	5
+158504		1e5	1e5	1	1	0	0
+158758		1e5	1e5	1	1	5	5
+158840		500	500	1	1	4	4
+158845		1e5	1e5	10	10	3	3
+158880		1e5	1e5	1	1	5	5
+159027		500	500	1	1	4	4
+159062		500	500	1	1	0	0
+159090		1e5	1e5	1	1	5	5
+159482		500	500	1	1	4	4
+159488		500	500	1	1	2	2
+159489		500	500	1	1	4	4
+159491		500	500	1	1	2	4
+159526		500	500	1	1	0	0
+159674		1e5	1e5	10	10	3	3
+159706		1e5	1e5	1	1	5	5
+159858		1e5	1e5	1	1	0	0
+160084		500	500	10	10	2	2
+160186		500	500	1	1	2	2
+160187		500	500	1	1	4	4
+160195		500	500	10	10	4	4
+160216		500	500	1	1	4	4
+160217		500	500	10	10	4	4
+160227		1e5	1e5	1	1	5	5
+160602		500	500	1	1	4	4	
+160631		1e5	1e5	1	1	5	5	! modified 2/22/2016 due to apparent error
+162810		500	500	1	1	1	1
+162824		500	500	1	1	4	1
+162860		1e5	1e5	1	1	5	5 
+163098		1e5	1e5	1	1	0	0
+163234		1e5	1e5	1	1	5	5
+163266		500	500	1	1	4	4
+163282		500	500	1	1	2	2
+163289		1e5	1e5	1	1	0	0
+163300		1e5	1e5	1	1	5	5	! not certain about exact shot number
+163557		1e5	1e5	1	1	0	0
+163624		1e5	1e5	1	1	5	5
+163673		1e5	1e5	1	1	0	0
+163743		1e5	1e5	1	1	5	5
+163841		1e5	1e5	1	1	0	0
+164298		1e5	1e5	1	1	5	5
+164380		500	500	1	1	1	1
+164414		1e5	1e5	1	1	5	5
+164822		1e5	1e5	1	1	0	0
+164864		1e5	1e5	1	1	3	3
+164972		1e5	1e5	1	1	1	1
+165359		1e5	1e5	10	10	3	3
+165390		1e5	1e5	1	1	5	5
+165656		1e5	1e5	1	1	0	0	! closed for boronization
+165788		1e5	1e5	1	1	5	5
+165973		1e5	1e5	10	10	5	5
+165974		500	500	1	1	5	5
+165975		500	500	10	10	5	5
+165976		1e5	1e5	10	10	5	5
+165982		1e5	1e5	1	1	5	5
+165986		1e5	1e5	10	10	5	5
+165987		1e5	1e5	10	10	3	3
+166018		1e5	1e5	1	1	5	5 
+166180		1e5	1e5	1	1	0	0	! closed for boronization
+166215		1e5	1e5	1	1	5	5
+168845		1e5	1e5	1	1	5	5
+169420		500	500	10	10	2	2
+169519		1e5	1e5	1	1	5	5
+169797		1e5	1e5	1	1	0	0	! closed for boronization
+169948		1e5	1e5	1	1	5	5
+170467		500	500	1	1	1	1
+170545		1e5	1e5	1	1	5	5
+170687		500	500	1	1	4	4
+170711		1e5	1e5	1	1	5	5
+170903		1e5	1e5	1	1	0	0	! closed for boronization
+171282		1e5	1e5	1	1	5	5
+171322		1e5	1e5	10	10	3	3
+171366		1e5	1e5	1	1	5	5
+172241		500	500	1	1	4	4	
+172267		1e5	500	1	1	5	4
+172283		500	500	1	1	4	4
+172287		1e5	1e5	10	10	5	5
+172319		500	500	1	1	4	4
+172353		1e5	1e5	1	1	0	0	! closed for boronization
+173305		500	500	1	1	4	4
+173530		1e5	1e5	1	1	5	5
+173609		500	500	1	1	4	4
+173685		500	500	1	1	0	0	! closed for boronization
+173713		1e5	1e5	1	1	5	5
+174311		1e5	1e5	10	10	3	3
+174344		1e5	1e5	1	1	5	5
+174567		1e5	1e5	1	1	0	0	! closed for boronization
+174735		1e5	1e5	1	1	5	5
+175071		1e5	1e5	10	10	3	3
+175122		1e5	1e5	1	1	5	5
+175385		1e5	1e5	1	1	0	0	! closed for boronization
+175459		1e5	1e5	1	1	5	3	
+175546		1e5	1e5	1	1	5	5
+175665		1e5	500	1	10	3	2
+175695		1e5	1e5	1	1	3	2
+175712		1e5	1e5	1	1	3	3
+175806		1e5	1e5 	1	1	5	5
+175876		1e5	1e5	1	1	3	3
+175915		1e5	1e5	1	1	5	5
+176373		1e5	1e5	10	10	5	5
+176405		1e5	1e5	1	1	1	1
+176625		1e5	1e5	1	1	0	0	! closed for bake
+176678		1e5	1e5	1	1	5	5
+176819		500	500	1	1	4	4
+176872		1e5	1e5	1	1	5	5
+176950		500	500	1	1	4	4
+176961		1e5	1e5	1	1	5	5
+178300		1e5	1e5	1	1	0	0	! closed for start of ops and bakes
+178337		1e5	1e5	1	1	5	5
+178497		1e5	1e5	1	1	0	0	! closed for boronization
+178540		1e5	1e5	1	1	5	5
+178661		1e5	1e5	10	10	3	3
+178685		1e5	1e5	1	1	5	5
+178933		500	500	1	1	4	4
+178935		500	500	1	1	1	1
+178942		500	500	1	1	4	4
+178952		1e5	1e5	1	1	5	5
+179236		1e5	1e5	1	1	0	0	! closed for boronization
+179279		1e5	1e5	1	1	1	1
+180000		500	500	1	1	4	4
+180024		500	500	1	1	0	0	! closed for bake
+180118		500	500	10	10	4	4
+180119		500	500	1	1	4	4
+180121		500	500	1	10	4	4	
+180122		500	500	1	1	4	4
+180130		500	500	1	1	1	1
+180131		500	500	1	1	4	4
+180136		500	500	1	1	0	0	! closed for bake
+180165		1e5	1e5	1	1	2	3	! strange settings for Tomas W LBO	
+180203          1e5     1e5     10      10      5       5       ! default filter settings restored by Jim
+180205          1e5     1e5     1       10      5       5       
+180235		1e5	1e5	1	1	3	3
+180312		1e5	1e5	1	1	5	5
+180571		1e5	1e5	1	1	0	0	! closed for bake
+180649		1e5	1e5	1	1	5	5	
+180185		1e5	1e5	1	1	0	0	! closed for bake
+182576		1e5	1e5	1	1	5	5
+182715		1e5	1e5	1	1	3	3	! change to low Te for LBO experiment
+182780		1e5	1e5	1	1	5	5
+183107		500	500	1	1	4	4
+183107		500	500	1	1	0	0	! close for bake
+183140		1e5	500	1	10	3	2	! custom settings for Tomas LBO
+183146		1e5	1e5	1	1	3	2	! Tomas changing gain of RP1
+183258		500	500	1	1	4	4
+183287		1e5	1e5	1	1	5	5
+183351		500	500	1	1	4	4
+183663		500	500	1	1	0	0	! close for bake
+183484  	1e5	1e5	1	1	5	5
+183787		1e5	1e5	1	1	0	0	! close for bake
+184063		1e5	1e5	1	1	5	5
+184400		500	500	1	1	4	4
+184423		1e5	1e5	1	1	5	5
+184598		1e5	1e5	10	10	3	3
+184649		1e5	1e5	1	1	0	0	! close for bake
+184765		1e5	1e5	1	1	5	5
+184787		1e5	1e5	1	1	3	3
+184820		1e5	1e5	1	1	5	5
+184974		500	500	1	1	4	4
+184980		1e5	1e5	1	1	3	3
+185020		1e5	1e5	10	10	3	3
+185044		1e5	1e5	1	1	5	5
+185267		500	500	1	1	4	4
+185285		1e5	1e5	1	1	5	5
+185431		500	500	1	1	4	4
+185482		1e5	1e5	1	1	5	5
+185574		500	500	1	1	1	1
+185935		1e5	1e5	1	1	5	5
+186163		1e5	1e5	10	10	3	3
+186179		1e5	1e5	1	1	5	5
+186262		500	500	1	1	4	4
+186275		1e5	1e5	1	1	5	5
+186306		1e5	1e5	1	1	0	0	! close for bake
+186579		500	500	1	1	4	4
+186589		1e5	1e5	1	1	5	5
+186771		1e5	1e5	1	1	0	0	! close for bake
+186886		1e5	1e5	1	1	5	5
+188100		1e5	1e5	1	1	0	0	! close for install and startup
+188752		1e5	1e5	1	1	5	5
+189000		1e5	1e5	1	1	3	2	! Tomas W transport experiment
+189004		1e5	1e5	10	1	3	2
+189006		1e5	1e5	1	2	3	2
+189033		1e5	1e5	1	1	5	5
+189078		1e5	1e5	1	1	0	0	! close for bake
+189163		1e5	1e5	1	1	5	5
+189168		500	500	1	1	2	2	
+189173		500	500	1	1	4	4
+189178		1e5	1e5	1	1	5	5
+189780		1e5	1e5	1	1	0	0	! close for bake
+189866		1e5	1e5	1	1	5	5
+190135		500	500	1	1	4	4
+190151		1e5	1e5	1	1	5	5
+190338		500	500	1	1	4	4
+190351		1e5	1e5	1	1	5	5
+190933		500	500	1	1	4	4
+190952		1e5	1e5	1	1	5	5
+191085		1e5	1e5	1	1	0	0	! close for boronization
+191353		1e5	1e5	10	10	3	3
+191370		1e5	1e5	1	1	5	5
+191540		1e5	1e5	1	1	3	3
+191557		1e5	1e5	10	10	3	3
+191572		1e5	1e5	1	1	0	0	! close for boronization
+191773		1e5	1e5	1	1	5	5
+191903		1e5	1e5	10	10	3	3
+191913		1e5	1e5	1	1	0	0	! close for bake
+191958		1e5	1e5	1	1	5	5
+192192		1e5	1e5	10	10	3	3
+192202		1e5	1e5	1	1	5	5
+192363		1e5	1e5	10	10	3	3
+192366		1e5	1e5	1	10	3	3	
+192374		1e5	1e5	1	1	5	5
+192653		1e5	1e5	1	1	0	0	! close for bake
+192713		1e5	1e5	1	1	5	5
+193559		1e5	1e5	1	1	0	0	! close for bake
+194000		1e5	1e5	1	1	5	5
+194483		1e5	1e5	1	1	0	0	! close for bake
+194785		500	500	1	1	4	4
+194831		500	500	1	1	0	0	! close for bake
+194850		1e5	1e5	1	1	5	5
+194980		1e5	1e5	10	10	3	3
+194988		1e5	1e5	1	1	5	5	
+195215		500	500	1	1	4	4
+195244		500	500	1	1	0	0	! close for bake
+195857		1e5	1e5	1	1	5	5
+196476		1e5	1e5	1	1	0	0	! close for bake
+196507		1e5	1e5	1	1	5	5
+196618		1e5	1e5	1	1	4	4
+196619		500	500	1	1	4	4	
+198000		500	500	1	1	0	0	! close for bake
+198399		1e5	1e5	1	1	5	5	
+198818		1e5	1e5	1	1	0	0	! close for bake
+198906		1e5	1e5	1	1	3	3
+199145		1e5	1e5	1	1	5	5
+199660		1e5	1e5	1	1	0	0	! close for bake
+199676		1e5	1e5	1	1	5	5
+200231		1e5	1e5	10	10	3	3
+200301		1e5	1e5	1	1	0	0	! close for bake
+200363		1e5	1e5	1	1	5	5
+200460		1e5	1e5	1	1	3	3
+200507		1e5	1e5	1	1	5	5
+200803		1e5	1e5	10	10	3	3
+200828		1e5	1e5	1	1	5	5
+201207		1e5	1e5	1	1	3	3
+201257		1e5	1e5	1	1	5	5
+201355		1e5	1e5	1	1	0	0	! close for bake
+201419		1e5	1e5	1	1	5	5
