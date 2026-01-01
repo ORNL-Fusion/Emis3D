@@ -17,7 +17,7 @@ MACHINE:
 BOLOMETERS:
   # In channel order from 1 to 32
   SX90PF_UP:
-    configFileName: 'SX90PF_UP_config.yaml'
+    configFileName: 'SX90PF_UP_config.yaml' # NOTE: 
   SX90PF_DOWN:
     configFileName: 'SX90PF_DOWN_config.yaml'
 

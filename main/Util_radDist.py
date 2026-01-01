@@ -30,6 +30,23 @@ def radDist_ElongatedRing_parallel(input) -> None:
     )
 
 
+def radDist_ElongatedRing_parallel_return_radDist(input):
+    """
+    Computes Elongated Ring radDists based on input rzArray
+    """
+    rzArray = input[0]
+    config = input[1]
+    elongatedRing = radDist.ElongatedRing(
+        startR=rzArray[0], startZ=rzArray[1], config=config
+    )
+    elongatedRing.build()
+
+    print(
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}m, z = {rzArray[1]:.2f}m"
+    )
+    return elongatedRing
+
+
 def radDist_Helical_parallel(input) -> None:
     """
     Computes helical radDists based on input rzArray

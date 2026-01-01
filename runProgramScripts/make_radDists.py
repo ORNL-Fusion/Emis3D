@@ -9,7 +9,7 @@ python make_radDists.py
 
 Written by Jeffrey Herfindal, Feb. 13, 2025
 
-Overall radDist creation procedure
+Overall radDist creation procedure used in this program:
 1. Create a config file under /inputs/{tokamakName}/{shot}/
 2. This program loads that configuration file
 3. This program creates the R, z grid
@@ -40,7 +40,7 @@ TODO:
 import os
 import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath("../.."))
 
 from concurrent.futures import ProcessPoolExecutor
 
@@ -51,10 +51,18 @@ from main.Util import config_loader
 import numpy as np
 
 if __name__ == "__main__":
-    # if True:
+
+    # ------------------------------------------------------
+    # --- Only change these variables! ---
+    # ------------------------------------------------------
     # This should be the path after /inputs/{tokamak}/radDists/:
     tokamakName = "DIII-D"
     configFileName = "184407_injectionLocation_225/helical_config.yaml"
+    # ------------------------------------------------------
+    # --- Do not change anything below this line ---
+    # ------------------------------------------------------
+
+    # --- Start of program
     pathFileName = os.path.join(
         EMIS3D_INPUTS_DIRECTORY, tokamakName, "radDists", configFileName
     )
@@ -76,18 +84,29 @@ if __name__ == "__main__":
         sys.exit()
 
     numProcessors = int(config["numProcessors"])
-    # --- Need to load the tokamak to get wall information
-    tok = Tokamak(
-        tokamakName=tokamakName,
-        mode="Analysis",
-        reflections=False,
-        eqFileName=config["eqFileName"],
-    )
-    rzArray = Util_radDist.callRZGridTokamak(
-        tok,
-        numRgrid=config["GRID"]["NumRStartGrid"],
-        numZgrid=config["GRID"]["NumZStartGrid"],
-    )
+
+    # --- Load the tokamak if rArray and zArray are blank in the configuration file
+    if len(config["GRID"]["rLimits"]) == 0 or len(config["GRID"]["zLimits"]) == 0:
+        # --- Need to load the tokamak to get wall information
+        tok = Tokamak(
+            tokamakName=tokamakName,
+            mode="Analysis",
+            reflections=False,
+            eqFileName=config["eqFileName"],
+        )
+        rzArray = Util_radDist.callRZGridTokamak(
+            tok,
+            numRgrid=config["GRID"]["NumRStartGrid"],
+            numZgrid=config["GRID"]["NumZStartGrid"],
+        )
+    else:
+        rzArray = Util_radDist.createRZGrid(
+            rLimits=config["GRID"]["rLimits"],
+            zLimits=config["GRID"]["zLimits"],
+            numRgrid=config["GRID"]["NumRStartGrid"],
+            numZgrid=config["GRID"]["NumZStartGrid"],
+            wallcurve=None,
+        )
 
     # --- Remove polSigma and elongations from the config file since we don't
     # need to pass all of them to each radDist
