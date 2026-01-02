@@ -510,7 +510,8 @@ class Tokamak(object):
                 print(f"Input fieldLinePhi of {fieldLineStartPhi}, not availble!")
                 print(f"Possible fieldLinePhi(s): {self.get_fieldLines_startPhis()}")
 
-        ax.legend()
+            ax.legend()
+
         ax.set_xlabel("x (m)")
         ax.set_ylabel("y (m)")
         ax.set_zlabel("z (m)")  # pyright: ignore[reportAttributeAccessIssue]
