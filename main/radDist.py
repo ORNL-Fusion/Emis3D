@@ -11,6 +11,7 @@ import os
 
 import numpy as np
 from cherab.tools.emitters import RadiationFunction
+import pdb
 from matplotlib import cm
 from raysect.core.math import translate
 from raysect.optical import VolumeTransform  # type: ignore
@@ -163,9 +164,17 @@ class RadDist(ABC):
 
                 # Add the emission to the existing arrays
                 for emissionName in self.info["emissionNames"]:
-                    emission = self.evaluate(
-                        R_, z_, phi, theta, emissionName=emissionName
+
+                    # Choose between original emission and emission from Ben's ElongatedHelical Class
+                    
+                    # emission = self.evaluate(
+                    #     R_, z_, phi, theta, emissionName=emissionName
+                    # )
+
+                    emission = self.evaluate_ben(
+                        x_, y_, z_, phi, emissionName=emissionName
                     )
+                
 
                     if emissionName not in self.data["emisSqArray"]:
                         self.data["emisSqArray"][emissionName] = np.zeros(numBins)
@@ -525,7 +534,7 @@ class Helical(RadDist):
             startPhi=self.info["startPhiRad"],
             numTransists=numTransists,
         )
-        startPhideg = f"{int(np.rad2deg(self.info["startPhiRad"]))}"
+        startPhideg = f'{int(np.rad2deg(self.info["startPhiRad"]))}'
 
         if startPhideg not in self.tokamak.fieldLines:
             raise RuntimeError(
@@ -575,6 +584,69 @@ class Helical(RadDist):
         )
 
         localEmis[emissionName] = localEmis[emissionName]
+
+        return localEmis
+    
+    def evaluate_ben(self, x, y, z, phi, emissionName=None):
+        # Return the emissivity (W/m^3/rad) at the point (x,y,z) according to this
+        
+        localEmis = {}
+
+        # first we need to convert from x,y,z to R,Z,phi
+        Z = z
+        
+        R = np.empty(len(x))
+        phi0 = np.empty(len(x))
+
+        for i in range(len(x)):
+            R[i], phi0[i] = XY_To_RPhi(x[i], y[i])
+            
+        # # readjust range of phi to center on injector location
+        # if phi0 <= self.tokamak.injectionPhiTor - np.pi:
+        #     phi0 = phi0 + 2.0 * np.pi
+
+        vertExtendParam = 3.0  # for vertical extension of plasma... hardcoded for now
+
+        # next we need the R,Z position of our helical structure at this phi
+        flR, flZ = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
+
+        # now for bivariate normal distribution in poloidal plane.
+        # elongated in approximate poloidal direction of field line
+
+        # first we need to decompose (R,Z) in terms of parallel/perpendicular
+        # to approximate field line. Approximated as the perpendicular direction
+        # to the vector from (major radius, zoffset) to (flR, flZ)
+        # "cent0" = (major radius, zoffset), "cent1" = (flR, flZ), "point" = (R,Z)
+        
+        # Assume zoffset is zero, I can't find this explicitly set anywhere
+        self.zoffset = 0        
+        
+        cent0ToCent1Vec = [flR - self.tokamak.info['MACHINE']['majorRadius'], flZ - self.zoffset]
+        cent0ToCent1Vec[1] = cent0ToCent1Vec[1] / vertExtendParam
+        cent0ToCent1VecMag = np.sqrt(
+            cent0ToCent1Vec[0] ** 2 + cent0ToCent1Vec[1] ** 2
+        )
+        cent0ToCent1VecNormed = [x / cent0ToCent1VecMag for x in cent0ToCent1Vec]
+        perpVecNormed = [-cent0ToCent1VecNormed[1], cent0ToCent1VecNormed[0]]
+        cent1ToPointVec = [R - flR, Z - flZ]
+        paralleldist = (
+            cent1ToPointVec[0] * cent0ToCent1VecNormed[0]
+            + cent1ToPointVec[1] * cent0ToCent1VecNormed[1]
+        )
+        perpdist = (
+            cent1ToPointVec[0] * perpVecNormed[0]
+            + cent1ToPointVec[1] * perpVecNormed[1]
+        )
+
+        emis = (
+            (1.0 / (2.0 * np.pi * self.info["elongation"] * (self.info["polSigma"]**2)))
+            * np.exp(
+                -0.5 * (perpdist**2) / (self.info["polSigma"] * self.info["elongation"]) ** 2
+            )
+            * np.exp(-0.5 * (paralleldist**2) / self.info["polSigma"]**2)
+        )
+        
+        localEmis[emissionName] = emis
 
         return localEmis
 
