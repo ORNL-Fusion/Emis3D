@@ -26,10 +26,9 @@ def point3d_to_rz(point):
 
 
 t = Tokamak(
-    tokamakName="DIII-D",
+    tokamakName="JET",
     mode="Build",
     reflections=False,
-    eqFileName="g184407.02100",
     loadBolometers=True,
 )
 

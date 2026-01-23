@@ -1,0 +1,34 @@
+# Config file for a basic Emis3D run
+
+# List of folder(s) containing radDists that are independent of injection location
+radDistDirectories_LocIndependent: ['elongatedRing']
+
+# List of folder(s) containing radDists that are dependent of injection location
+# The program will combine these to solve for multiple injections
+radDistDirectories_LocDependent: [] #['184407_injectionLocation_225']
+injectionLocation: 225 # Injection location in degrees
+numProcessorsFitting: 7 # Number of processors to use while fitting the radDists to the bolometer data
+
+shot: 184407
+tstart: 2100 # Start time of the simultaion, same units as the SXR/bolometer signal
+tend: 2100 # End time of the simulation, can be equal to tstart to reconstruct one timestep
+dt: 0.3 # Averaging window 
+varyScaleFactor: True # False = the program will not vary the constant by the scale factor
+scale_def: "von_mises" # Options: "linear", "exponential", "constant", "von_mises"
+
+# Path for each data file relative to inputs/{tokamakName}/sxrData/
+BOLOMETERS:
+  SX90PF:
+    dataFileName: '184407/184407_SX90PF_PROCESSED.h5'
+    scalingFactor: 5.00 # Multiply the calibrated data by this factor
+  SX90MF:
+    dataFileName: '184407/184407_SX90MF_PROCESSED.h5'
+    scalingFactor: 4.96
+  DISRADU:
+    dataFileName: '184407/184407_DISRADU_PROCESSED.h5'
+    scalingFactor: 1.0
+  #SX45F:
+  #  dataFileName: '184407/184407_SX45F_PROCESSED.h5'
+  #  scalingFactor: 1.0 
+
+

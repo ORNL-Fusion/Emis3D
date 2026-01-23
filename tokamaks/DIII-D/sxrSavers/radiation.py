@@ -18,7 +18,6 @@ from scipy.signal import savgol_filter
 from Util_SXR import filter_data
 from main.Globals import *
 from main.Util import read_h5
-import scipy.integrate
 
 
 class SXRSignal:

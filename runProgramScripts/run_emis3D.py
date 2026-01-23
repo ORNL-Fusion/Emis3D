@@ -17,7 +17,6 @@ import time
 import numpy as np
 import main.Emis3D as Emis3D
 import main.Util_emis3D as Util_emis3D
-from concurrent.futures import ProcessPoolExecutor
 
 
 if __name__ == "__main__":

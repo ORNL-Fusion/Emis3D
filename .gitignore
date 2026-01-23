@@ -208,9 +208,16 @@ marimo/_lsp/
 __marimo__/
 
 # Emis3D specific items, keeping non-shot related information
-tokamaks/*/inputs/eqdsks/*
-tokamaks/*/inputs/Ini_Build_Files/*
-inputs/*
-inputs/DIII-D/radDists/184407_injectionLocation_225/*
 
+# Ignore all tokamak input files except for DIII-D injection location files
+tokamaks/*
+
+# Keep the DIII-D folder
+!tokamaks/DIII-D/
+!tokamaks/DIII-D/**
+
+# Ignore all input files
+inputs/*
+
+*.pyc
 .DS_Store

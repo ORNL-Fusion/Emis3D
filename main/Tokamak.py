@@ -52,7 +52,7 @@ class Tokamak(object):
         Basic tokamak class which loads information specific to the TokamakName.
 
         This class loads the configuration file for the tokamak within
-        ../tokamaks/{DIII-D, SPARC, etc}/{DIII-D, SPARC, etc}_settings.yaml
+        ../tokamaks/{DIII-D, JET, SPARC, etc}/{DIII-D, JET, SPARC, etc}_settings.yaml
 
         The file should contain information about the SXR/bolometer arrays,
         wall file location, volume, majorRadius, minorRadius, etc.
@@ -223,7 +223,6 @@ class Tokamak(object):
             return
 
         # Building a closed universe
-
         if hasattr(self, "wall") and load_stl == False:
             if self.wall is not None:
                 # --- Outer wall
@@ -247,15 +246,15 @@ class Tokamak(object):
 
                 # Top and bottom of tokamak
                 Box(
-                    lower=Point3D(-10, -10, self.wall["maxz"] - 0.1),
-                    upper=Point3D(10, 10, self.wall["maxz"]),
+                    lower=Point3D(-10, -10, self.wall["maxz"] * 1.5 - 0.1),
+                    upper=Point3D(10, 10, self.wall["maxz"] * 1.5),
                     parent=self.world,
                     material=AbsorbingSurface(),
                     name="Top of machine",
                 )
                 Box(
-                    lower=Point3D(-10, -10, self.wall["minz"] - 0.1),
-                    upper=Point3D(10, 10, self.wall["minz"]),
+                    lower=Point3D(-10, -10, self.wall["minz"] * 1.5 - 0.1),
+                    upper=Point3D(10, 10, self.wall["minz"] * 1.5),
                     parent=self.world,
                     material=AbsorbingSurface(),
                     name="Bottom of machine",
