@@ -141,6 +141,7 @@ celerybeat.pid
 .venv
 env/
 venv/
+Emis3DVenv/
 ENV/
 env.bak/
 venv.bak/
