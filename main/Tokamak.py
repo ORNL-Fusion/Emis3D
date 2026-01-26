@@ -227,7 +227,7 @@ class Tokamak(object):
             if self.wall is not None:
                 # --- Outer wall
                 Cylinder(
-                    radius=self.wall["maxr"] + 0.1,
+                    radius=self.wall["maxr"] * 2.0,
                     height=self.wall["maxz"] * 3.0,
                     material=AbsorbingSurface(),
                     name="Outer wall",

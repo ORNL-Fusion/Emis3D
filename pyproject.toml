@@ -1,0 +1,24 @@
+[project]
+name = "Emis3D"
+# version = "alpha"
+requires-python = ">=3.12"
+dependencies = [
+  "freeqdsk",
+  "cherab",
+  "h5py",
+  "pyyaml",
+]
+# note that numpy, matplotlib, and raysect among other packages are installed with cherab
+
+authors = [
+	{name = "Jeffrey Herfindal", email = "herfindalj@fusion.gat.edu"},
+	{name = "Grant Bodner", email = "bodnerg@fusion.gat.edu"},
+	{name = "Benjamin Stein-Lubrano", email = "bsteinlu@mit.edu"},
+]
+readme = "README.txt"
+
+[project.optional-dependencies]
+ipython = [
+    "ipykernel",
+    "ipympl",
+]

@@ -1,0 +1,27 @@
+# Elongated ring radDist configuration file for shot 184407
+
+distType: "ElongatedRing"
+tokamakName: "JET"
+saveRunsDirectoryName: "elongatedRing" # To save the radDists. Program will still create subfolders of each run within this directory
+shotNumber: 95709
+units: "Radiance" # Options: Power (W) or Radiance (W/m2/sr)
+injectionLocation: 225 # Toroidal injection location of the disruption mitigation system [degrees] (right-handed coordinate system!)
+numBins: 18 # The number of bins toroidally for the radiation distribution
+eqFileName: "" # Name of the equilibrium file to be used. Only requred for helical distributions
+polSigmas:  [0.3] # format: [0.3, 0.4, 0.5] 
+elongations: [0.25]
+rotationAngles: [30] # Rotate the elongated ring around its axis, doesn't matter for helical distributions 0, 30, 60, 90, 120, 150
+numProcessors: 1 # Number of processors to use while creating radDists (aka, 5 will create 5 at the same time)
+# You'll need to balance this with the numProcessors called under BOLOMETER_PROPS
+
+
+GRID:
+  # Add R and z limits here, if none the program will default to using the wall
+  rLimits: [2.05, 2.06] # in meters, if left empty ([]) the program will use the wall to find the limits
+  zLimits: [0.35, 0.36]
+  NumRStartGrid: 1 # Number of points in the R grid, 10 is usually sufficient
+  NumZStartGrid: 1 # Number of points in the z grid, 20 is usually sufficient
+
+BOLOMETER_PROPS:
+  pixelSamples: 5000 # Resolution of the observed chord in Cherab
+  numProcessors: 1 # Number of processors to use while observing the world in Cherab
