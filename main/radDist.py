@@ -521,7 +521,7 @@ class Helical(RadDist):
             self.setFieldLine()
 
     def setFieldLine(self) -> None:
-        numTransists = 2.0
+        numTransists = 1.0
 
         self.tokamak.set_fieldlines(
             startR=[self.info["startR"]],
