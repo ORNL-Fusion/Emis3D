@@ -165,10 +165,10 @@ class RadDist(ABC):
                 for emissionName in self.info["emissionNames"]:
 
                     # Choose between original emission and emission from Ben's ElongatedHelical Class
-                    
+
                     emission = self.evaluate(
                         R_, z_, phi, theta, emissionName=emissionName
-                    )                
+                    )
 
                     if emissionName not in self.data["emisSqArray"]:
                         self.data["emisSqArray"][emissionName] = np.zeros(numBins)
@@ -570,7 +570,9 @@ class Helical(RadDist):
         vertExtendParam = 3.0  # for vertical extension of plasma... hardcoded for now
 
         # next we need the R,Z position of our helical structure at this phi
-        flR, flZ = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
+        flR, flZ = self.tokamak.find_RZ_Fline(
+            str(self.info["startPhi"]), emissionName, inputPhis=phi
+        )
 
         # now for bivariate normal distribution in poloidal plane.
         # elongated in approximate poloidal direction of field line
@@ -578,34 +580,44 @@ class Helical(RadDist):
         # first we need to decompose (R,Z) in terms of parallel/perpendicular
         # to approximate field line. Approximated as the perpendicular direction
         # to the vector from (major radius, zoffset) to (flR, flZ)
-        # "cent0" = (major radius, zoffset), "cent1" = (flR, flZ), "point" = (R,Z)    
-        
-        cent0ToCent1Vec = [flR - self.tokamak.info['MACHINE']['majorRadius'], flZ]
-        cent0ToCent1Vec[1] = cent0ToCent1Vec[1] / vertExtendParam
-        cent0ToCent1VecMag = np.sqrt(
-            cent0ToCent1Vec[0] ** 2 + cent0ToCent1Vec[1] ** 2
-        )
-        cent0ToCent1VecNormed = [x / cent0ToCent1VecMag for x in cent0ToCent1Vec]
-        perpVecNormed = [-cent0ToCent1VecNormed[1], cent0ToCent1VecNormed[0]]
-        cent1ToPointVec = [R - flR, z - flZ]
-        paralleldist = (
-            cent1ToPointVec[0] * cent0ToCent1VecNormed[0]
-            + cent1ToPointVec[1] * cent0ToCent1VecNormed[1]
-        )
-        perpdist = (
-            cent1ToPointVec[0] * perpVecNormed[0]
-            + cent1ToPointVec[1] * perpVecNormed[1]
-        )
-
-        emis = (
-            (1.0 / (2.0 * np.pi * self.info["elongation"] * (self.info["polSigma"]**2)))
-            * np.exp(
-                -0.5 * (perpdist**2) / (self.info["polSigma"] * self.info["elongation"]) ** 2
+        # "cent0" = (major radius, zoffset), "cent1" = (flR, flZ), "point" = (R,Z)
+        if self.tokamak.info is not None:
+            cent0ToCent1Vec = [flR - self.tokamak.info["MACHINE"]["majorRadius"], flZ]
+            cent0ToCent1Vec[1] = cent0ToCent1Vec[1] / vertExtendParam
+            cent0ToCent1VecMag = np.sqrt(
+                cent0ToCent1Vec[0] ** 2 + cent0ToCent1Vec[1] ** 2
             )
-            * np.exp(-0.5 * (paralleldist**2) / self.info["polSigma"]**2)
-        )
-        
-        localEmis[emissionName] = emis
+            cent0ToCent1VecNormed = [x / cent0ToCent1VecMag for x in cent0ToCent1Vec]
+            perpVecNormed = [-cent0ToCent1VecNormed[1], cent0ToCent1VecNormed[0]]
+            cent1ToPointVec = [R - flR, z - flZ]
+            paralleldist = (
+                cent1ToPointVec[0] * cent0ToCent1VecNormed[0]
+                + cent1ToPointVec[1] * cent0ToCent1VecNormed[1]
+            )
+            perpdist = (
+                cent1ToPointVec[0] * perpVecNormed[0]
+                + cent1ToPointVec[1] * perpVecNormed[1]
+            )
+
+            emis = (
+                (
+                    1.0
+                    / (
+                        2.0
+                        * np.pi
+                        * self.info["elongation"]
+                        * (self.info["polSigma"] ** 2)
+                    )
+                )
+                * np.exp(
+                    -0.5
+                    * (perpdist**2)
+                    / (self.info["polSigma"] * self.info["elongation"]) ** 2
+                )
+                * np.exp(-0.5 * (paralleldist**2) / self.info["polSigma"] ** 2)
+            )
+
+            localEmis[emissionName] = emis
 
         return localEmis
 
@@ -698,4 +710,3 @@ class ElongatedRing(RadDist):
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
         return [float(phi)] * numChan
-
