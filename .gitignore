@@ -214,3 +214,7 @@ inputs/*
 inputs/DIII-D/radDists/184407_injectionLocation_225/*
 
 .DS_Store
+main/elongated_helical_class.py
+main/elongated_helical_class_gmb.py
+testingScripts/fieldLineTester_gmb.py
+testingScripts/radDistTester_DIII-D_gmb.py
