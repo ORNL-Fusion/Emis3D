@@ -11,7 +11,6 @@ import os
 
 import numpy as np
 from cherab.tools.emitters import RadiationFunction
-import pdb
 from matplotlib import cm
 from raysect.core.math import translate
 from raysect.optical import VolumeTransform  # type: ignore
@@ -699,3 +698,4 @@ class ElongatedRing(RadDist):
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
         return [float(phi)] * numChan
+
