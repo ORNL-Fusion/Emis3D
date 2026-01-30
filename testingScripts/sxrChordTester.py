@@ -34,7 +34,7 @@ t = Tokamak(
 
 
 # Plot in 3D to see if it is at the correct toroidal location
-if True:
+if False:
     t.plot()
 
 # --- Plot each individual bolometer

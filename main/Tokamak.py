@@ -227,7 +227,7 @@ class Tokamak(object):
             if self.wall is not None:
                 # --- Outer wall
                 Cylinder(
-                    radius=self.wall["maxr"] + 0.1,
+                    radius=self.wall["maxr"] * 3.0,
                     height=self.wall["maxz"] * 3.0,
                     material=AbsorbingSurface(),
                     name="Outer wall",
@@ -269,7 +269,9 @@ class Tokamak(object):
                     STL_SCALE = 1.0e-3
 
                 PFC_STL_PATH = os.path.join(
-                    self.input_dir, "CAD_stl_files", "d3d_CAD_full.stl"
+                    self.input_dir,
+                    "CAD_stl_files",
+                    self.info["MACHINE"]["PFC_STL_PATH"],
                 )
                 if os.path.isfile(PFC_STL_PATH):
                     pfcs = import_stl(PFC_STL_PATH, scaling=STL_SCALE)
