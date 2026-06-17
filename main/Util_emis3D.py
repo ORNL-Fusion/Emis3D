@@ -48,6 +48,23 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
     return A * np.ones(dphi.shape[0])
 
 
+def scale_step(A: float, B: float, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.ndarray:
+    A_arr1 = np.array([A, B]) # this is the un-generalized step. Ideally the function would just take
+                              # A as an array input instead of floats
+    A_arr = np.concatenate((A_arr1, A_arr1, A_arr1))
+    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs+(2*np.pi), bolo_phi_locs-(2*np.pi)))
+
+    amplitudes = np.zeros(shape=phi.shape)
+    bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
+    phi_arr = np.tile(phi, (len(bolo_phis), 1)).transpose()
+    dists = np.abs(bolo_phis_arr-phi_arr)
+    dists_diffs = dists - np.min(dists, 1)[:, np.newaxis]
+    nearest_bolo_phi_indxs = np.argwhere(dists_diffs <1e-9)[:,1]
+    amplitudes = A_arr[nearest_bolo_phi_indxs]
+
+    return amplitudes
+
+
 def scale_wrapper(
     a: float,
     b: float,
@@ -93,6 +110,10 @@ def scale_wrapper(
         return scale_linear(a, b, dphi)
     elif scale_def == "constant":
         return scale_constant(a, dphi)
+    # elif scale_def == "step":
+    #     return scale_step(a, b, bolo_phi_locs, phi)
+    elif scale_def == "step":
+        return scale_step(a, b, phi, bolo_phi_locs)
     else:
         return np.ones(dphi.shape[0])
 
