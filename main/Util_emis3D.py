@@ -26,25 +26,29 @@ def _exp(dphi: np.ndarray, kappa: float = 0.0) -> np.ndarray:
     return np.exp(-1.0 * kappa * (dphi**2))
 
 
-def scale_exp(A: float, B: float, dphi: np.ndarray) -> np.ndarray:
-    """Gaussian (exponential) scaling. Peak is A at dphi = 0"""
-    return A * _exp(dphi, B)
+def scale_exp(A: np.ndarray, dphi: np.ndarray) -> np.ndarray:
+    """Gaussian (exponential) scaling. Peak is a at dphi = 0"""
+    a = A[0]
+    b = A[1]
+    return a * _exp(dphi, b)
 
 
 def scale_linear(
-    A: float,
-    B: float,
+    A: np.ndarray,
     dphi: np.ndarray,
 ) -> np.ndarray:
     """
     Triangular profile centered at mu.
 
-    Peak = A at dphi = 0. Should not be negative. 
+    Peak = a at dphi = 0. Should not be negative. 
     """
-    return np.abs(A - np.abs(B) * dphi)
+    a = A[0]
+    b = A[1]
+    return np.abs(a - np.abs(b) * dphi)
 
 
-def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
+def scale_constant(A: np.ndarray, dphi: np.ndarray) -> np.ndarray:
+    a = A[0]
     return A * np.ones(dphi.shape[0])
 
 
@@ -66,8 +70,6 @@ def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.
 def scale_wrapper(
     phi: np.ndarray,
     A: np.ndarray | None = None,
-    a: float | None = None,
-    b: float | None = None,
     mu: float = 0.0,
     scale_def: str | None = None,
     emissionName: str | None = None,
@@ -104,11 +106,11 @@ def scale_wrapper(
         return
 
     if scale_def == "exponential":
-        return scale_exp(a, b, dphi)
+        return scale_exp(A, dphi)
     elif scale_def == "linear":
-        return scale_linear(a, b, dphi)
+        return scale_linear(A, dphi)
     elif scale_def == "constant":
-        return scale_constant(a, dphi)
+        return scale_constant(A, dphi)
     elif scale_def == "step":
         return scale_step(A, phi, bolo_phi_locs)
     else:
