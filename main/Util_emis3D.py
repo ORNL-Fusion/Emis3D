@@ -48,10 +48,8 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
     return A * np.ones(dphi.shape[0])
 
 
-def scale_step(A: float, B: float, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.ndarray:
-    A_arr1 = np.array([A, B]) # this is the un-generalized step. Ideally the function would just take
-                              # A as an array input instead of floats
-    A_arr = np.concatenate((A_arr1, A_arr1, A_arr1))
+def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.ndarray:
+    A_arr = np.concatenate((A, A, A))
     bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs+(2*np.pi), bolo_phi_locs-(2*np.pi)))
 
     amplitudes = np.zeros(shape=phi.shape)
@@ -66,9 +64,10 @@ def scale_step(A: float, B: float, phi: np.ndarray, bolo_phi_locs: np.ndarray) -
 
 
 def scale_wrapper(
-    a: float,
-    b: float,
     phi: np.ndarray,
+    A: np.ndarray | None = None,
+    a: float | None = None,
+    b: float | None = None,
     mu: float = 0.0,
     scale_def: str | None = None,
     emissionName: str | None = None,
@@ -110,10 +109,8 @@ def scale_wrapper(
         return scale_linear(a, b, dphi)
     elif scale_def == "constant":
         return scale_constant(a, dphi)
-    # elif scale_def == "step":
-    #     return scale_step(a, b, bolo_phi_locs, phi)
     elif scale_def == "step":
-        return scale_step(a, b, phi, bolo_phi_locs)
+        return scale_step(A, phi, bolo_phi_locs)
     else:
         return np.ones(dphi.shape[0])
 
@@ -325,8 +322,7 @@ def helical_endpoint_penalty(
             # Scale evaluated at the endpoint winding distance (NOT at phi = mu,
             # which would return the dphi = 0 peak).
             scale_end = scale_wrapper(
-                a,
-                b,
+                A=np.array([a,b]),
                 phi=phi_arr,
                 mu=mu,
                 scale_def=scale_def,
@@ -426,8 +422,7 @@ def residual(
 
             # --- Return the scale factor
             scale_ = scale_wrapper(
-                a,
-                b,
+                A=np.array([a,b]),
                 phi=phi,
                 mu=mu,
                 scale_def=scale_def,

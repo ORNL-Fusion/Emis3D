@@ -507,12 +507,13 @@ class Emis3D:
 
                 # --- Large error for zero signal, use definition otherwise
                 if val > 1.0:
-                    err_frac = 0.05
-                    if self.info is not None:
-                        err_frac = Util_emis3D.signal_error(
-                            self.info["error_definition"], val, max_, scale_factor=1.0
-                        )
-                    err_ = val * err_frac
+                    # err_frac = 0.05
+                    # if self.info is not None:
+                    #     err_frac = Util_emis3D.signal_error(
+                    #         self.info["error_definition"], val, max_, scale_factor=1.0
+                    #     )
+                    # err_ = val * err_frac
+                    err_ = max_/10.0
                 else:
                     err_ = np.float64(DEAD_CHANNEL_ERROR)
 
@@ -1036,11 +1037,11 @@ class Emis3D:
             # 'b' controls how fast each falls off away from the injection location.
             a = params[f"a_{inj_loc_tag}"]
             b = params[f"b_{emissionName}_{inj_loc_tag}"]
+            A = np.array([a,b])
 
             scale_ = Util_emis3D.scale_wrapper(
-                a=a,
-                b=b,
                 phi=rD_phi,
+                A=A,
                 dphi=dphi,
                 mu=mu,
                 scale_def=scale_def,
