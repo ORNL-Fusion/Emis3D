@@ -24,5 +24,17 @@ dependencies = [
     "dill",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+]
+
 [tool.setuptools]
 packages = ["main"]
+
+[tool.coverage.run]
+source = ["main"]
+
+[tool.coverage.report]
+show_missing = true
