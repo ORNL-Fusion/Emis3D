@@ -17,7 +17,8 @@ import logging
 import numpy as np
 from cherab.tools.emitters import RadiationFunction
 from raysect.optical import VolumeTransform  # type: ignore
-from raysect.core import SerialEngine
+from raysect.core.workflow import SerialEngine
+from raysect.core.math.random import seed as _raysect_seed
 
 import main.Util_radDist as Util_radDist
 
@@ -38,6 +39,7 @@ from abc import ABC, abstractmethod
 # For NIMROD class
 import json
 from cherab.core.math.interpolators.interpolators3d import Interpolate3DLinear
+
 
 class RadDist(ABC):
     """Parent RadDist class."""
@@ -99,10 +101,28 @@ class RadDist(ABC):
 
         Required values in config file:
         pixelSamples    :: Resolution of the sightline. Higher = better, but takes longer.
+
+        Optional values:
+        seed            :: Integer RNG seed. When set, observations render in-process
+                           so the result is reproducible (a single deterministic draw).
+
         """
 
         boloCameras = self.tokamak.bolometers
+        # TODO: pixelSamples, numProcessors, and seed are raysect/observe options,
+        # not bolometer properties. Move them into a dedicated config group (e.g.
+        # observe_opts) instead of overloading BOLOMETER_PROPS.
         pixelSamples = self.info["BOLOMETER_PROPS"]["pixelSamples"]
+
+        seed = self.info["BOLOMETER_PROPS"].get("seed")
+        if seed is not None:
+            # Seed once before observing.
+            #
+            # Only when used in combination with a serial rendering engine does this
+            # lead to reproducible observes.
+            #
+            # See: https://github.com/ORNL-Fusion/Emis3D/issues/29
+            _raysect_seed(seed)
 
         for bolo_ in boloCameras:
             # --- Either does the top or bottom loop depending on on if there is an extra bolometerCamera layer
@@ -1334,6 +1354,7 @@ class SquareTube(RadDist):
 
         return [[float(phi)] for _ in range(numChan)]
 
+
 class NIMROD(RadDist):
     """
     Takes emissivity data from a timestep of a NIMROD 3D MHD simulation
@@ -1357,12 +1378,12 @@ class NIMROD(RadDist):
         config={},
     ):
 
-        super(NIMROD, self).__init__(
-            config=config or {}
-        )
+        super(NIMROD, self).__init__(config=config or {})
         self.info["distType"] = "NIMROD"
         self.info["emissionNames"] = ["NIMROD"]
-        self.info["startR"] = int(timestep) # haphazard way of making the savefile have the timestep in it
+        self.info["startR"] = int(
+            timestep
+        )  # haphazard way of making the savefile have the timestep in it
         self.info["startZ"] = int(timestep)
 
         self._build_tokamak(
@@ -1371,7 +1392,6 @@ class NIMROD(RadDist):
             reflections=False,
             eqFileName=self.info["eqFileName"],
         )
-
 
         str_ = f"→ Building NIMROD radDist"
         logger.info("%s", str_)
@@ -1389,7 +1409,9 @@ class NIMROD(RadDist):
         self.rmax = max(self.r_list)
         self.zmin = min(self.z_list)
         self.zmax = max(self.z_list)
-        self.interp_operator = Interpolate3DLinear(self.z_list, self.r_list, self.phi_list, self.emis_values)
+        self.interp_operator = Interpolate3DLinear(
+            self.z_list, self.r_list, self.phi_list, self.emis_values
+        )
 
     def _evaluate(
         self,
@@ -1415,7 +1437,7 @@ class NIMROD(RadDist):
 
         # breakpoint()
         localEmisVec = np.zeros(len(z))
-        #if (z >= self.zmin) and (z <= self.zmax) and (R >= self.rmin) and (R <= self.rmax):
+        # if (z >= self.zmin) and (z <= self.zmax) and (R >= self.rmin) and (R <= self.rmax):
         for indx in range(len(z)):
             zinst = z[indx]
             Rinst = R[indx]
@@ -1423,9 +1445,14 @@ class NIMROD(RadDist):
                 phiinst = phi[indx]
             else:
                 phiinst = phi
-            if phiinst<0:
+            if phiinst < 0:
                 phiinst = phiinst + 2.0 * np.pi
-            if (zinst >= self.zmin) and (zinst <= self.zmax) and (Rinst >= self.rmin) and (Rinst <= self.rmax):
+            if (
+                (zinst >= self.zmin)
+                and (zinst <= self.zmax)
+                and (Rinst >= self.rmin)
+                and (Rinst <= self.rmax)
+            ):
                 localEmisVec[indx] = self.interp_operator(zinst, Rinst, phiinst)
             else:
                 localEmisVec[indx] = 0.0

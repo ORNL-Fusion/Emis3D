@@ -38,3 +38,9 @@ source = ["main"]
 
 [tool.coverage.report]
 show_missing = true
+
+[tool.pytest.ini_options]
+markers = [
+    "cherab: slow tests that build a scene and ray-trace with cherab (deselected by default)",
+]
+addopts = "-m 'not cherab'"
