@@ -51,6 +51,9 @@ class RadDist(ABC):
             self.info["startPhi"] = self.info["injectionLocation"]
             self.info["startPhiRad"] = np.deg2rad(self.info["injectionLocation"])
 
+        # Holds computed results; initialized here so it always exists.
+        self.data = {}
+
     def _build_tokamak(
         self,
         tokamakName="",
@@ -446,9 +449,6 @@ class RadDist(ABC):
 
         # --- Initialize the data storage arrays
         boloCameras = self.tokamak.bolometers
-        if not hasattr(self, "data"):
-            self.data = {}
-
         self.data[units] = {}
         self.data[f"{units}_error"] = {}
         self.data[units]["channelOrder"] = {}
