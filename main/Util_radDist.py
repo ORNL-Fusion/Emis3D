@@ -50,7 +50,7 @@ def radDist_ElongatedRing_parallel(
     logger.info(
         "DONE with elongatedRing radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1]
     )
-    print("DONE with elongatedRing radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1])
+    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}m, z = {rzArray[1]:.2f}m")
 
     if return_result:
         return elongatedRing
@@ -79,7 +79,7 @@ def radDist_Helical_parallel(
     logger.info(
         "DONE with helical radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1]
     )
-    print("DONE with helical radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1])
+    print(f"DONE with helical radDist, R = {rzArray[0]:.2f}m, z = {rzArray[1]:.2f}m")
 
     if return_result:
         return helical

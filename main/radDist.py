@@ -657,6 +657,8 @@ class RadDist(ABC):
             alpha=0.4,
         )
 
+        return cf
+
 
     def plotOverview(self, return_figure: bool = False, plot_etendue: list = []):
         """
@@ -685,10 +687,28 @@ class RadDist(ABC):
             f = plt.figure(figsize=(15, 8))
             plot_count = 0
 
+            def _bolo_group_title(boloGroup: str) -> str:
+                phi = tok.get_ave_bolometer_tor_loc(boloGroupName=boloGroup)
+                if phi is None:
+                    return boloGroup
+                return f"{boloGroup} ({phi:.0f}°)"
+
+            def _share_axis_limits(axes: list) -> None:
+                if not axes:
+                    return
+                xmins, xmaxs = zip(*(ax.get_xlim() for ax in axes))
+                ymins, ymaxs = zip(*(ax.get_ylim() for ax in axes))
+                for ax in axes:
+                    ax.set_xlim(min(xmins), max(xmaxs))
+                    ax.set_ylim(min(ymins), max(ymaxs))
+
+            paa_axes = []
+
             # --- Loop over each bolometer group
             for ii, boloGroup in enumerate(boloGroups):
                 plot_count += 1
                 f_ = f.add_subplot(num_rows, num_columns, plot_count)
+                paa_axes.append(f_)
                 tok._plot_first_wall(f_)
                 tok._plot_bolometers(
                     f_,
@@ -702,6 +722,9 @@ class RadDist(ABC):
                 phi = tok.get_ave_bolometer_tor_loc(boloGroupName=boloGroup)
                 if phi is not None:
                     self.plotCrossSection(phi=np.deg2rad(phi), ax=f_)
+                f_.set_title(_bolo_group_title(boloGroup))
+
+            _share_axis_limits(paa_axes)
 
             # --- Plot the injection location
             plot_count += 1
@@ -709,7 +732,7 @@ class RadDist(ABC):
             f_ = f.add_subplot(num_rows, num_columns, plot_count)
             tok._plot_first_wall(f_)
             self.plotCrossSection(phi=np.deg2rad(phi), ax=f_)
-            f_.set_title(f"Injection Location, phi = {phi} degrees")
+            f_.set_title(f"Injection Location ({phi:.0f}°)")
 
             # --- Plot the observed emissivities
             for ii, boloGroup in enumerate(boloGroups):
@@ -746,7 +769,7 @@ class RadDist(ABC):
                 f_.set_ylim(0, f_.get_ylim()[1])
                 f_.set_ylabel(f"{self.data['units']}")
                 f_.set_xlabel("channel")
-                f_.set_title(boloGroup)
+                f_.set_title(_bolo_group_title(boloGroup))
 
             plt.tight_layout()
 

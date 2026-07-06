@@ -16,19 +16,19 @@ from main.Tokamak import Tokamak
 
 
 t = Tokamak(
-    tokamakName="JET",
+    tokamakName="KSTAR",
     mode="Build",
     reflections=False,
     loadBolometers=True,
 )
 
-plt.ion()
+plt.ioff()
 
-"""
+
 # Plot in 3D to see if it is at the correct toroidal location
 if True:
     t.plot()
-"""
+
 # --- Plot each individual bolometer
 if t.info is not None:
     boloGroups = t.info["Bolometer Groups"]
@@ -47,9 +47,9 @@ if t.info is not None:
             f_,
             boloGroupName=boloGroup,
             plot_chord_info=True,
-            plot_etendue=["SX45F07"],
+            # plot_etendue=["SX45F07"],
             legend=True,
         )
 
     plt.tight_layout()
-    plt.show()
+    plt.show(block=True)

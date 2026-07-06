@@ -17,6 +17,7 @@ under {startPhi}_R_{startR:.2f}_z_{startz:.2f}, instead of just {startPhi}. OR..
 
 import logging
 import os
+import io
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,6 +52,49 @@ from main.Util import (
     compute_etendue_metric,
     get_rectangle_corners,
 )
+
+
+def _normalize_geqdsk_header(text: str) -> str:
+    """Normalize nonstandard GEQDSK headers without changing data rows."""
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        raise ValueError("The g-file is empty.")
+
+    tokens = lines[0].split()
+    if len(tokens) < 3:
+        raise ValueError(f"Could not parse GEQDSK header: {lines[0].strip()}")
+
+    try:
+        nx = int(float(tokens[-2]))
+        ny = int(float(tokens[-1]))
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not parse grid dimensions from header: {lines[0].strip()}"
+        ) from exc
+
+    metadata_tokens = tokens[:-2]
+    shot_index = None
+    for index, token in enumerate(metadata_tokens):
+        try:
+            value = float(token)
+        except ValueError:
+            continue
+        if value.is_integer():
+            shot_index = index
+            break
+
+    if shot_index is None:
+        shot = 0
+        comment = " ".join(metadata_tokens) or "GEQDSK"
+    else:
+        shot = int(float(metadata_tokens[shot_index]))
+        comment_tokens = (
+            metadata_tokens[:shot_index] + metadata_tokens[shot_index + 1 :]
+        )
+        comment = " ".join(comment_tokens) or "GEQDSK"
+
+    lines[0] = f"{comment} {shot} {nx} {ny}\n"
+    return "".join(lines)
 
 
 class Tokamak(object):
@@ -123,7 +167,7 @@ class Tokamak(object):
         # Angle conventions used in each tokamak are different from that used in Cherab.
         # Emis3D uses the Cherab angle convention. This angle is subtracted in the evaluate
         # statements in RadDist to make the angles match.
-        torConventionPhis = {"JET": np.pi / 2.0, "SPARC": 0.0, "DIII-D": 0.0}
+        torConventionPhis = {"JET": np.pi / 2.0, "SPARC": 0.0, "DIII-D": 0.0, "KSTAR": 0.0}
         self.info["torConventionPhi"] = torConventionPhis[tokamakName]
         self.info["tokamakName"] = tokamakName
         self.info["mode"] = mode
@@ -180,7 +224,13 @@ class Tokamak(object):
 
             if os.path.isfile(pathFileName):
                 with open(pathFileName) as f:
-                    self.gfile = geqdsk.read(f)
+                    try:
+                        self.gfile = geqdsk.read(f)
+                    except ValueError:
+                        f.seek(0)
+                        self.gfile = geqdsk.read(
+                            io.StringIO(_normalize_geqdsk_header(f.read()))
+                        )
                 if self.verbose:
                     logger.debug(f"Loaded equilibrium file: {pathFileName}")
             else:

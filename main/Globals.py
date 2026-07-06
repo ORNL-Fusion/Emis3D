@@ -26,7 +26,7 @@ EMIS3D_TOKMAK_DIRECTORY: Path = EMIS3D_PARENT_DIRECTORY / "tokamaks"
 EMIS3D_INPUTS_DIRECTORY: Path = EMIS3D_PARENT_DIRECTORY / "inputs"
 
 
-SUPPORTED_TOKAMAKS: list[str] = ["DIII-D", "SPARC", "JET"]
+SUPPORTED_TOKAMAKS: list[str] = ["DIII-D", "SPARC", "JET", "KSTAR"]
 
 
 # Explicit export list

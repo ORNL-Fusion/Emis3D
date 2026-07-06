@@ -53,17 +53,16 @@ if __name__ == "__main__":
 
     # --- Update these parameters:
     evalTimes = [
-        50.949,
-        # 50.951,
-        #50.953,
-        #50.95,
-        #50.955,
+        # 50.953,
+        # 50.954,
+        # 50.955,
         #50.9556,
         #50.9569,
         #50.9627,
+        2120
     ]
-    tokamakName = "JET"
-    runConfigName = "95709/95709_runConfig.yaml"
+    tokamakName = "DIII-D"
+    runConfigName = "184407/184407_runConfig.yaml"
     verbose = True
 
     # ----- No need to update anything below
