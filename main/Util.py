@@ -192,7 +192,7 @@ def rZ_to_theta(r: float, z: float, r0: float = 0.0, z0: float = 0.0) -> float |
 
     if dr == 0:
         return 90.0 if dz > 0 else 270.0
-    
+
     t_ = np.rad2deg(np.arctan(dz / dr))
 
     if dr < 0:
@@ -426,12 +426,19 @@ def _ensure_path(
     return data
 
 
-def find_max_nested_lists(list_: list[list]) -> float:
+def find_max_nested_lists(list_: list) -> float:
     """
-    Finds the max value within nested lists
+    Finds the max value within arbitrarily nested lists
     """
-    l_ = [item for sublist in list_ for item in sublist]
-    return max(l_)
+
+    def _flatten(obj):
+        for item in obj:
+            if isinstance(item, (list, tuple, np.ndarray)):
+                yield from _flatten(item)
+            else:
+                yield item
+
+    return max(_flatten(list_))
 
 
 def point3d_to_rz(point) -> tuple[float, float]:
@@ -523,7 +530,6 @@ def extract_end_numbers(text):
     for plotting routines"""
     # \d+ matches one or more digits
     # $ ensures they are at the very end of the string
-    match = re.search(r'\d+$', text)
-    
-    return match.group() if match else None
+    match = re.search(r"\d+$", text)
 
+    return match.group() if match else None

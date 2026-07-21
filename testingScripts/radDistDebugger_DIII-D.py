@@ -4,7 +4,6 @@ Manually input x, y, z points for a specific radDist, see what the bolometer obs
 
 """
 
-
 # radDistTester_DIII-D.py
 """
 This program will group similar SXR arrays, then plot out
@@ -26,10 +25,9 @@ import main.radDist as radDist
 from main.Globals import *
 from main.Tokamak import Tokamak
 from main.Util import config_loader, point3d_to_rz
-from raysect.optical import VolumeTransform  # type:ignore
+from raysect.optical import VolumeTransform  # type: ignore
 from cherab.tools.emitters import RadiationFunction
 from raysect.core import Point3D
-
 
 tokamakName = "DIII-D"
 configFileName = "sqaureTube_config.yaml"  # "sqaureTube_config.yaml"  # "elongatedRing_config.yaml"  # "helical_config.yaml"  #
@@ -107,7 +105,7 @@ for val in rD.tokamak.world.children:
 
 if emitter is not None:
     emittting_material = VolumeTransform(
-        RadiationFunction(rD._evalulateCherab), emitter.transform.inverse()
+        RadiationFunction(rD._evaluate_cherab), emitter.transform.inverse()
     )
     emitter.material = emittting_material
 
