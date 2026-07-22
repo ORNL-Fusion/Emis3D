@@ -135,7 +135,7 @@ class RadDist(ABC):
                     bolo_.info, emissionName=emissionName
                 )
             observed_phi_loc[emissionName] = temp
-        self.data["scaleFactor"] = observed_phi_loc
+        self.data["observed_phi_loc"] = observed_phi_loc
 
     @abstractmethod
     def _evaluate(

@@ -43,7 +43,11 @@ def _synthetic_dict(P_pol_cw, P_pol_ccw, with_fit_data=False):
     if with_fit_data:
         for em in NAMES:
             sd[em].update(
-                {"data": [[1.0] * 4], "data_error": [[0.1] * 4], "scaleFactor": [[0.0] * 4]}
+                {
+                    "data": [[[1.0]] * 4],
+                    "data_error": [[[0.1]] * 4],
+                    "observed_phi_loc": [[[0.0]] * 4],
+                }
             )
     return sd
 
@@ -71,12 +75,16 @@ class TestEmissionPairs:
 class TestEndpointPenalty:
     def test_weight_zero_disables(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
-        assert U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 0.0) == []
+        assert (
+            U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 0.0) == []
+        )
 
     def test_missing_P_pol_disables(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
         del sd["clockwise_rev0"]["P_pol"]
-        assert U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 1.0) == []
+        assert (
+            U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 1.0) == []
+        )
 
     def test_symmetric_pair_zero_penalty(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
@@ -90,15 +98,15 @@ class TestEndpointPenalty:
         pen = U.helical_endpoint_penalty(_params(1.0, 1.0, 3.0), sd, "exponential", 1.0)
         assert abs(pen[0]) < 1e-6
 
-    '''
+    """
     def test_gentle_decay_asymmetric_b_active(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
         pen = U.helical_endpoint_penalty(
             _params(1.0, 0.005, 0.02), sd, "exponential", 1.0
         )
         assert abs(pen[0]) > 1e-3
-    '''
-    
+    """
+
     def test_asymmetric_Ppol_active(self):
         idx = int(np.argmin(np.abs(np.array(PHI_ARRAY) - np.deg2rad(MU_DEG))))
         ppol_ccw = [1.0] * 36
