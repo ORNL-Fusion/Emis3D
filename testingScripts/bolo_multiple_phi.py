@@ -6,16 +6,23 @@ and bin them correctly.
 Skip to HERE for the start of the program, the top is just from:
 https://www.cherab.info/demonstrations/bolometry/observing_radiation_function.html#bolometer-observing-radiation
 
+See also:
+https://www.cherab.info/demonstrations/line_emission/custom_emitter.html
 
 """
 
 import matplotlib.pyplot as plt
-
+import numpy as np
 from raysect.core import Node, Point3D, Vector3D, rotate_basis, translate
 from raysect.optical import World
-from raysect.optical.material import AbsorbingSurface, VolumeTransform
+from raysect.optical.material import (
+    AbsorbingSurface,
+    VolumeTransform,
+    InhomogeneousVolumeEmitter,
+    NumericalIntegrator,
+)
 from raysect.primitive import Box, Cylinder, Subtract
-
+from raysect.optical.material.emitter import InhomogeneousVolumeEmitter
 from cherab.core.math import AxisymmetricMapper, sample2d
 from cherab.tools.emitters import RadiationFunction
 from cherab.tools.observers.bolometry import (
@@ -152,11 +159,22 @@ def emission_function_bottom(r, z):
     return 0
 
 
-def emission_function_wl(r, z):
+class ExcitationLines(InhomogeneousVolumeEmitter):
+    def __init__(self, step=0.005):
+        super().__init__(NumericalIntegrator(step=step))
 
-    if (r - MAJOR_RADIUS) ** 2 + (z - CENTRE_Z) ** 2 < MINOR_RADIUS**2:
-        return EMISSIVITY
-    return 0
+    def emission_function(
+        self, point, direction, spectrum, world, ray, primitive, to_local, to_world
+    ):
+
+        x, y, z = point.transform(to_world)
+        r = np.sqrt(x**2 + y**2)
+
+        if (r - MAJOR_RADIUS) ** 2 + (z - CENTRE_Z) ** 2 > MINOR_RADIUS**2:
+            return spectrum
+
+        print(spectrum.wavelengths)
+        return spectrum
 
 
 emitter = Cylinder(
@@ -225,14 +243,13 @@ for foil in bolometer_camera:
 The overall point is to have the values above CENTRE_Z emit at 450 nm
 and the values below CENTRE_Z emit at 350 nm, then combine them for the 
 total power
-"""
+
+emitter.material = ExcitationLines()
 
 spectral_pipeline = SpectralPowerPipeline0D(display_progress=False)
-power_pipeline = PowerPipeline0D(accumulate=False)
 
-
-foil.pipelines = [spectral_pipeline, power_pipeline]
-
+foil.pipelines = [spectral_pipeline]
+"""
 
 ########################################################################
 # Print the results
