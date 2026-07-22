@@ -39,6 +39,17 @@ from cherab.tools.observers.bolometry import (
 )
 from raysect.optical.observer import PowerPipeline0D, SpectralPowerPipeline0D
 
+# Change to SerialEngine to store what points RaySect calls for each defintion
+# This will not be in the Emis3D version
+try:
+    from raysect.core.workflow import SerialEngine
+except ImportError:
+    try:
+        from raysect.core import SerialEngine
+    except ImportError:
+        SerialEngine = None
+        print("WARNING: SerialEngine not importable - probes will stay empty.")
+
 # Convenient constants
 XAXIS = Vector3D(1, 0, 0)
 YAXIS = Vector3D(0, 1, 0)
@@ -153,51 +164,48 @@ EMISSIVITY = 1
 N_REGIONS = 2  # top/bottom here; becomes N toroidal sectors for phi binning
 WL_MIN = 300
 WL_MAX = 500
-STEP_SIZE = 0.01  # Integration step size
+STEP_SIZE = 0.005  # Integration step size
 BOLO_SAMPLES = 10_000
+
+# Probes need their own, much smaller pass. At BOLO_SAMPLES with
+# STEP_SIZE=0.01 each foil would log ~4 million points per case, which is
+# hundreds of MB of Python floats and unusably slow in serial mode. A few
+# hundred rays is plenty to characterise WHERE samples land.
+PROBE_SAMPLES = 200
+PROBE_FOIL_INDEX = 1
 
 
 def _new_probe():
+    """Raw coordinate store, so r and z can be histogrammed afterwards."""
     return {"n": 0, "r": [], "z": []}
-    """
-        "n_top": 0,
-        "z_min": np.inf,
-        "z_max": -np.inf,
-        "r_min": np.inf,
-        "r_max": -np.inf,
-        # Spatial profile of where emitting samples land in z. A fraction
-        # alone cannot distinguish a uniform deficit across the top half
-        # from a missing slab; this can.
-        "hist": np.zeros(HIST_N, dtype=np.int64),
-    }
-    """
 
 
 def _log(store, r, z):
     store["n"] += 1
     store["r"].append(r)
     store["z"].append(z)
-    """
-    if z >= CENTRE_Z:
-        store["n_top"] += 1
-    if z < store["z_min"]:
-        store["z_min"] = z
-    if z > store["z_max"]:
-        store["z_max"] = z
-    if r < store["r_min"]:
-        store["r_min"] = r
-    if r > store["r_max"]:
-        store["r_max"] = r
-    idx = int((z - HIST_LO) / (HIST_HI - HIST_LO) * HIST_N)
-    if 0 <= idx < HIST_N:
-        store["hist"][idx] += 1
-    """
+
+
+def _reset_probes():
+    for store in (probe_full, probe_func, probe_top, probe_bot):
+        store["n"] = 0
+        store["r"].clear()
+        store["z"].clear()
 
 
 probe_full = _new_probe()
 probe_func = _new_probe()
 probe_top = _new_probe()
 probe_bot = _new_probe()
+
+# Named registry so the probe pass and the plotting can iterate cleanly.
+PROBES = {
+    "full": probe_full,
+    "top": probe_top,
+    "bottom": probe_bot,
+    "region": probe_func,
+}
+PROBE_ORDER = ["full", "top", "bottom", "region"]
 
 
 def emission_function_full(x, y, z):
@@ -233,9 +241,6 @@ class RegionEmitter(InhomogeneousVolumeEmitter):
     spectral bin. The observer must be configured with the same number of
     spectral bins over the same (WL_MIN, WL_MAX) range.
 
-    mode="vertical": region 0 is z < CENTRE_Z, region 1 is z >= CENTRE_Z.
-    mode="toroidal": regions are equal phi sectors, region index
-                     int((phi + pi) / (2 pi) * n_regions).
     """
 
     def __init__(self, n_regions=N_REGIONS, probe=False, step=None):
@@ -250,6 +255,8 @@ class RegionEmitter(InhomogeneousVolumeEmitter):
         self.probe = probe
         self.bin_width = (WL_MAX - WL_MIN) / self.n_regions
 
+    # This requires all of these excess values, per:
+    # https://www.cherab.info/demonstrations/line_emission/custom_emitter.html
     def emission_function(
         self, point, direction, spectrum, world, ray, primitive, to_local, to_world
     ):
@@ -302,9 +309,7 @@ emitter.material = VolumeTransform(
 data = {}
 data["SANITY CHECK"] = []
 for foil in bolometer_camera:
-    # Ensure reasonable sampling statistics
     foil.pixel_samples = BOLO_SAMPLES
-    # Measure the incident power
     foil.units = "Power"
     foil.observe()
     data["SANITY CHECK"].append(foil.pipelines[0].value.mean)
@@ -318,12 +323,9 @@ emitter.material = VolumeTransform(
     transform=emitter.transform.inverse(),
 )
 
-
 data["TOP ONLY"] = []
 for foil in bolometer_camera:
-    # Ensure reasonable sampling statistics
     foil.pixel_samples = BOLO_SAMPLES
-    # Measure the incident power
     foil.units = "Power"
     foil.observe()
     data["TOP ONLY"].append(foil.pipelines[0].value.mean)
@@ -336,9 +338,7 @@ emitter.material = VolumeTransform(
 
 data["BOTTOM ONLY"] = []
 for foil in bolometer_camera:
-    # Ensure reasonable sampling statistics
     foil.pixel_samples = BOLO_SAMPLES
-    # Measure the incident power
     foil.units = "Power"
     foil.observe()
     data["BOTTOM ONLY"].append(foil.pipelines[0].value.mean)
@@ -416,6 +416,138 @@ for ii in range(4):
         f"{data['SPECTRAL TOP'][ii]:>10.3e} | {data['TOP ONLY'][ii]:>10.3e} | "
         f"{data['SPECTRAL BOTTOM'][ii]:>10.3e} | {data['BOTTOM ONLY'][ii]:>10.3e}"
     )
+
+
+########################################################################
+# PROBE PASS: where does each emitter actually deposit emission?
+########################################################################
+# Run LAST so it cannot disturb the measurements above. Three requirements,
+# all of which must hold or the probes record nothing:
+#   1. SerialEngine  - otherwise the emission function runs in a worker
+#                      process and its appends are thrown away.
+#   2. probe=True    - RegionEmitter logs nothing by default.
+#   3. small samples - see PROBE_SAMPLES.
+print("\n" + "=" * 70)
+print("PROBE PASS")
+print("=" * 70)
+
+if SerialEngine is None:
+    print("SKIPPED: SerialEngine unavailable.")
+else:
+    probe_foil = list(bolometer_camera)[PROBE_FOIL_INDEX]
+
+    # Save state we are about to trample
+    _saved_samples = probe_foil.pixel_samples
+    try:
+        _saved_engine = probe_foil.render_engine
+    except AttributeError:
+        _saved_engine = None
+
+    _reset_probes()
+
+    probe_configs = [
+        (
+            "full",
+            VolumeTransform(
+                RadiationFunction(emission_function_full, step=STEP_SIZE),
+                transform=emitter.transform.inverse(),
+            ),
+        ),
+        (
+            "top",
+            VolumeTransform(
+                RadiationFunction(emission_function_top, step=STEP_SIZE),
+                transform=emitter.transform.inverse(),
+            ),
+        ),
+        (
+            "bottom",
+            VolumeTransform(
+                RadiationFunction(emission_function_bottom, step=STEP_SIZE),
+                transform=emitter.transform.inverse(),
+            ),
+        ),
+        # probe=True is essential here
+        ("region", RegionEmitter(n_regions=N_REGIONS, step=STEP_SIZE, probe=True)),
+    ]
+
+    for name, material in probe_configs:
+        emitter.material = material
+        probe_foil.units = "Power"  # units setter rebuilds pipelines
+        probe_foil.min_wavelength = WL_MIN
+        probe_foil.max_wavelength = WL_MAX
+        probe_foil.spectral_bins = N_REGIONS
+        probe_foil.pixel_samples = PROBE_SAMPLES
+        probe_foil.render_engine = SerialEngine()
+        probe_foil.observe()
+        print(f"  {name:>8}: logged {len(PROBES[name]['z']):>8} points")
+
+    # Restore
+    probe_foil.pixel_samples = _saved_samples
+    if _saved_engine is not None:
+        probe_foil.render_engine = _saved_engine
+
+
+########################################################################
+# Probe histograms: r and z for each case
+########################################################################
+def _describe(name, store):
+    if store["n"] == 0:
+        print(f"  {name:>8}: EMPTY")
+        return
+    z = np.asarray(store["z"])
+    r = np.asarray(store["r"])
+    print(
+        f"  {name:>8}: n={store['n']:>8}  "
+        f"z[{z.min():+.4f}, {z.max():+.4f}]  "
+        f"r[{r.min():.4f}, {r.max():.4f}]  "
+        f"frac(z>=CENTRE_Z)={np.mean(z >= CENTRE_Z):.4f}"
+    )
+
+
+print("\nProbe summary:")
+for _name in PROBE_ORDER:
+    _describe(_name, PROBES[_name])
+
+_populated = [n for n in PROBE_ORDER if PROBES[n]["n"] > 0]
+if _populated:
+    fig2, axes2 = plt.subplots(
+        2, len(_populated), figsize=(4 * len(_populated), 7), squeeze=False
+    )
+    # Common bins so the four cases are directly comparable
+    z_bins = np.linspace(-1.05, 0.05, 45)
+    r_bins = np.linspace(0.80, 1.05, 45)
+
+    for col, name in enumerate(_populated):
+        z = np.asarray(PROBES[name]["z"])
+        r = np.asarray(PROBES[name]["r"])
+
+        ax = axes2[0][col]
+        ax.hist(z, bins=z_bins, color="tab:blue")
+        ax.axvline(CENTRE_Z, color="k", ls="--", lw=1, label="CENTRE_Z")
+        ax.set_title(f"{name}  (n={len(z)})")
+        ax.set_xlabel("z [m]")
+        if col == 0:
+            ax.set_ylabel("samples per z bin")
+            ax.legend(fontsize=8)
+
+        ax = axes2[1][col]
+        ax.hist(r, bins=r_bins, color="tab:orange")
+        ax.set_xlabel("r [m]")
+        if col == 0:
+            ax.set_ylabel("samples per r bin")
+
+    fig2.suptitle(
+        "Where each emitter deposits: sample distribution in z (top) and r "
+        "(bottom)\n"
+        "Gaps or every-other-bin structure in z means the integration step "
+        "is too coarse"
+    )
+    fig2.tight_layout()
+    fig2.savefig("probe_histograms.png", dpi=130)
+    print("\nSaved probe_histograms.png")
+else:
+    print("\nNo probe recorded any samples - nothing to plot.")
 
 
 ########################################################################
