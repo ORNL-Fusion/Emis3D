@@ -17,13 +17,14 @@ import logging
 import numpy as np
 from cherab.tools.emitters import RadiationFunction
 from raysect.optical import VolumeTransform  # type: ignore
+from raysect.core import SerialEngine
 
 import main.Util_radDist as Util_radDist
 
 logger = logging.getLogger(__name__)
 from main.Globals import EMIS3D_INPUTS_DIRECTORY
 from main.Tokamak import Tokamak
-from main.Util import XY_To_RPhi, convert_arrays_to_list, save_json
+from main.Util import XY_To_RPhi, convert_arrays_to_list, save_json, phase_timer
 import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 from abc import ABC, abstractmethod
@@ -52,6 +53,18 @@ class RadDist(ABC):
         """
         Initializes an instance of the tokamak class
         """
+        # TIMER ADDITION
+        with phase_timer("tokamak build (CAD load + scene graph)"):
+            self.tokamak = Tokamak(
+                tokamakName=tokamakName,
+                mode=mode,
+                reflections=reflections,
+                eqFileName=eqFileName,
+                loadBolometers=loadBolometers,
+            )
+
+        """
+        # OLD CODE:
         self.tokamak = Tokamak(
             tokamakName=tokamakName,
             mode=mode,
@@ -59,6 +72,7 @@ class RadDist(ABC):
             eqFileName=eqFileName,
             loadBolometers=loadBolometers,
         )
+        """
 
     def _evaluate_cherab(self, X, Y, Z) -> np.ndarray:
         """
@@ -84,13 +98,13 @@ class RadDist(ABC):
 
         Required values in config file:
         pixelSamples    :: Resolution of the sightline. Higher = better, but takes longer.
-        numProcessors   :: Hard-wired to 1, observation speed increases use multiple
-                           processors in other locations.
+        #numProcessors   :: Hard-wired to 1, observation speed increases use multiple
+        #                   processors in other locations.
         """
 
         boloCameras = self.tokamak.bolometers
         pixelSamples = self.info["BOLOMETER_PROPS"]["pixelSamples"]
-        numProcessors = 1  # self.info["BOLOMETER_PROPS"]["numProcessors"]
+        # numProcessors = 1  # self.info["BOLOMETER_PROPS"]["numProcessors"]
 
         for bolo_ in boloCameras:
             # --- Either does the top or bottom loop depending on on if there is an extra bolometerCamera layer
@@ -104,7 +118,9 @@ class RadDist(ABC):
                 )
                 foils = []
             for foil in foils:
-                foil.render_engine.processes = numProcessors
+                # foil.render_engine.processes = numProcessors
+                foil.render_engine = SerialEngine()
+
                 foil.pixel_samples = pixelSamples
 
     def _get_observed_phi_loc(self) -> None:
@@ -195,10 +211,16 @@ class RadDist(ABC):
         """
 
         # self.power_per_bin_calc()
-        self.calc_radiated_power()
-        self.bolos_observe()
+        # TIMER ADDITION
+        with phase_timer("build/calc_radiated_power"):
+            self.calc_radiated_power()
+        with phase_timer("build/bolos_observe"):
+            self.bolos_observe()
+        # self.calc_radiated_power()
+        # self.bolos_observe()
         self._get_observed_phi_loc()
-        self.saveRadDist()
+        with phase_timer("build/saveRadDist"):
+            self.saveRadDist()
 
     def _total_radiated_power(
         self,
@@ -450,7 +472,9 @@ class RadDist(ABC):
 
         # --- Calculate etendue's if asking for radiance
         if units in ["Radiance", "Brightness"]:
-            self.tokamak.calc_etendues()
+            # TIMER ADDITION
+            with phase_timer("bolos_observe/calc_etendues"):
+                self.tokamak.calc_etendues()
 
         # --- Populate world with emitter, this cannot be a seperate definition!
         # unless you include the emitter.material changes in that def as well!
@@ -489,6 +513,8 @@ class RadDist(ABC):
             for bolo_ in boloCameras:
                 bolo_._change_parent(value=self.tokamak.world)
                 # print(f"Observing with {bolo_.name}")
+                # TIMER ADDITION
+                _cam_t0 = __import__("time").perf_counter()
                 observeVal = []
                 observeVal_error = []
                 ch_order = []
@@ -590,6 +616,13 @@ class RadDist(ABC):
                 self.data[f"{units}_error"][emissionName][bolo_.name] = observeVal_error
                 if bolo_.name not in self.data[units]["channelOrder"]:
                     self.data[units]["channelOrder"][bolo_.name] = ch_order
+
+                logger.info(
+                    "[timing] observe %s / %s: %.2f s",
+                    emissionName,
+                    bolo_.name,
+                    __import__("time").perf_counter() - _cam_t0,
+                )
 
                 bolo_._change_parent(value=None)
 

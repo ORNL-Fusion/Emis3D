@@ -15,8 +15,33 @@ from raysect.core import Point2D
 from typing import Any, Union
 from pathlib import Path
 from raysect.core import Vector3D
+from contextlib import contextmanager
+import time as _time
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def phase_timer(label: str, echo: bool = True):
+    """
+    Coarse wall-clock timer for profiling radDist creation phases.
+
+    Usage:
+        with phase_timer("bolos_observe"):
+            self.bolos_observe()
+
+    Logs (and by default prints) '[timing] {label}: {dt} s' so the phase
+    breakdown is visible even when logging is not configured in scripts.
+    """
+    t0 = _time.perf_counter()
+    try:
+        yield
+    finally:
+        dt = _time.perf_counter() - t0
+        msg = f"[timing] {label}: {dt:.2f} s"
+        logging.getLogger(__name__).info(msg)
+        if echo:
+            print(msg, flush=True)
 
 
 def config_loader(
