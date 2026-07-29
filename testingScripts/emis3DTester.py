@@ -30,6 +30,7 @@ this should help with the fitting and ensure a continous TPF distribution.
 Another bug: clockwise rev1 is higher than clockwise rev0!!!
 
 """
+
 import os
 import sys
 
@@ -38,13 +39,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import numpy as np
 from main.Emis3D import Emis3D
 
+evalTime = 2120.5  # 50.953  #
 
-evalTime = 50.953  # 2120.5
-
-# tokamakName = "DIII-D"
-tokamakName = "JET"
-# runConfigName = "184407/184407_runConfig.yaml"
-runConfigName = "95709/95709_runConfig.yaml"
+tokamakName = "DIII-D"
+# tokamakName = "JET"
+runConfigName = "184407/184407_runConfig.yaml"
+# runConfigName = "95709/95709_runConfig.yaml"
 verbose = True
 
 t = Emis3D(
@@ -55,10 +55,7 @@ t = Emis3D(
 )
 
 
-t._load_bestFits(path="/Users/plh/Documents/git/Emis3D/inputs/JET/runs/95709/95709_bestFits_50.953.dill")
-
-
-
+# t._load_bestFits(path="/Users/plh/Documents/git/Emis3D/inputs/JET/runs/95709/95709_bestFits_50.953.dill")
 
 
 # t._load_bestFits(

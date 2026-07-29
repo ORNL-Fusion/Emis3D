@@ -607,6 +607,8 @@ class Emis3D:
         in_ = {}
         if radDist_.info is not None:
             in_ = radDist_.info
+        else:
+            raise AttributeError("Self.info should not be none!")
 
         synthetic_dict = {
             "info": in_,

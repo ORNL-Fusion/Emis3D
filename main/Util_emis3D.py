@@ -97,7 +97,7 @@ def scale_wrapper(
     ----------
     a             : Amplitude of the scaling function
     b             : Shape parameter used by most scaling functions
-    phi           : Toroidal locations of the bolometers (radians)
+    phi           : Toroidal location(s) of each channel (radians)
     mu            : Injection location (radians)
     scale_def     : One of 'exponential', 'linear', 'constant'
     emissionName  : Name of the emission distribution (e.g. 'clockwise')
@@ -434,7 +434,7 @@ def residual(
                 a = params[f"{boloNames[ii]}"]
                 b = 0.0
 
-            phi = np.array(synthetic_dict[emissionName]["scaleFactor"][ii])
+            # phi = np.array(synthetic_dict[emissionName]["scaleFactor"][ii])
 
             # --- Per-channel lists of toroidal observation segments. Each
             # channel holds one phi and one synthetic value per segment
@@ -502,10 +502,11 @@ def residual(
 
             # --- Ignore channels with non-positive observed values
             bad_indices = np.where(data_ <= 0)[0]
+            # --- Set the temp_ values equal to the bad data values so the residual is zero
             temp_[ii][bad_indices] = data_[bad_indices]
 
             # LMFIT minimizes the sum of squares, so we return the raw residual
-            numerator = data_ - temp_[ii]
+            numerator = np.abs(data_ - temp_[ii])
             res.extend(convert_arrays_to_list(numerator / data_error))
 
         # --- Soft constraint: tie paired clockwise / counterClock helical

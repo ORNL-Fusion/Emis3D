@@ -1,3 +1,11 @@
+# multiplePhiSolverTester.py
+"""
+This was written to support the change in how radDists are created. Now
+they will have a list of observations for each channel, each with a corresponding
+observed_phi_loc list of the same length. This script just creates the normal radDist
+and splits each observation in half, for testing purposes.
+"""
+
 # solverTester.py
 """
 This program was written to test out the emis3D solver routine. The main point
@@ -15,6 +23,7 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import matplotlib.pyplot as plt
 import numpy as np
 import main.Util_radDist as Util_radDist
@@ -22,8 +31,8 @@ from main.Globals import *
 from main.Tokamak import Tokamak
 from main.Util import config_loader
 from raysect.core import Point2D
-import main.Emis3D as Emis3D
-from main.Util_emis3D import residual, scale_exp
+from main.Emis3D import Emis3D
+from main.Util_emis3D import residual
 
 evalTime = 2120.6
 
@@ -84,13 +93,10 @@ def pellet_initial_parameters(csp=False):
 # Step 1: Create a radDist
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-
 tokamakName = "DIII-D"
 configFileName = "elongatedRing_config.yaml"  # "sqaureTube_config.yaml"  # "elongatedRing_config.yaml"  # "helical_config.yaml"  #
-sigma_z = 2.0
-sigma_R = 0.05
-rotationAngle = 0.0
-rzvalues = [2.055, 0.414]
+
+rzvalues = [2.029, 0.409]
 # --- Group the bolometers
 bolometerNames = [
     ["SX90PF_UP", "SX90PF_DOWN"],
@@ -124,16 +130,18 @@ rzArray = Util_radDist.callRZGridTokamak(
 # --- Update the configuration file
 rD = None
 if rzArray is not None:
-    rzArray[0] = [rzvalues[0], rzvalues[1]]
-    config["sigma_R"] = sigma_R
-    config["sigma_z"] = sigma_z
-    config["rotationAngle"] = rotationAngle
-    config["saveRunsDirectoryName"] = "solverTesting"
-    arg_list = [(val, config) for val in rzArray]
-    arg_list = arg_list[0]
+    # --- Update the configuration file
+    rzArray = np.array([rzvalues[0], rzvalues[1]])
 
-    # --- Decrease the number of sampling points used, to speed up the process
-    arg_list[1]["BOLOMETER_PROPS"] = {"pixelSamples": 100, "numProcessors": 1}
+    if "sigma_R_vals" in config:
+        config["sigma_R"] = config["sigma_R_vals"][0]
+    if "sigma_z_vals" in config:
+        config["sigma_z"] = config["sigma_z_vals"][0]
+    if "rotationAngles" in config:
+        config["rotationAngle"] = config["rotationAngles"][0]
+
+    config["saveRunsDirectoryName"] = "solverTesting"
+    arg_list = (rzArray, config)
 
     # --- Delete old radDist directory if it exists
     radDist_dir = os.path.join(
@@ -147,14 +155,44 @@ if rzArray is not None:
     # --- Create the radDist
     if config["distType"] == "Helical":
         rD = Util_radDist.radDist_Helical_parallel(arg_list, return_result=True)
+    elif config["distType"] == "HelicalRing":
+        rD = Util_radDist.radDist_HelicalRing_parallel(arg_list, return_result=True)
     elif config["distType"] == "ElongatedRing":
         rD = Util_radDist.radDist_ElongatedRing_parallel(arg_list, return_result=True)
     elif config["distType"] == "SquareTube":
         rD = Util_radDist.radDist_SquareTube_parallel(arg_list, return_result=True)
     else:
         raise RuntimeError(
-            "Please have 'elongatedRing', 'helical', or 'SqureTube' in the configFileName"
+            "Please have 'elongatedRing', 'helical', 'HelicalRing', or 'SqureTube' in the configFileName"
         )
+
+    # --- Split the observations in two
+    if rD is not None:
+        for bolo_ in rD.data["Radiance"]["elongatedRing"]:
+            original_list = rD.data["Radiance"]["elongatedRing"][bolo_]
+            halved_pairs = [
+                [sublist[0] / 2, sublist[0] / 2] for sublist in original_list
+            ]
+            rD.data["Radiance"]["elongatedRing"][bolo_] = halved_pairs
+
+        for bolo_ in rD.data["Radiance_error"]["elongatedRing"]:
+            original_list = rD.data["Radiance_error"]["elongatedRing"][bolo_]
+            halved_pairs = [
+                [sublist[0] / 2, sublist[0] / 2] for sublist in original_list
+            ]
+            rD.data["Radiance_error"]["elongatedRing"][bolo_] = halved_pairs
+
+    # --- Split the observed phi location in two
+    if rD is not None:
+        for bolo_ in rD.data["observed_phi_loc"]["elongatedRing"]:
+            original_list = rD.data["observed_phi_loc"]["elongatedRing"][bolo_]
+            pairs_list = [[sublist[0], sublist[0]] for sublist in original_list]
+            rD.data["observed_phi_loc"]["elongatedRing"][bolo_] = pairs_list
+
+    # --- Save the new radDist with a new z location
+    if rD is not None:
+        # rD.info["startZ"] = 0.42 # un-comment to save the split radDist with a different name
+        rD.saveRadDist()
 
 
 # ------------------------------------------------------------------------------
@@ -162,16 +200,17 @@ if rzArray is not None:
 # Step 2: Load the data in emis3D, create synthetic signal based off known parameters
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-t = Emis3D.Emis3D(
-    tokamakName="DIII-D", runConfigName="solverTesting_runConfig.yaml", initialize=True
+t = Emis3D(
+    tokamakName="DIII-D",
+    runConfigName="solverTesting_runConfig.yaml",
+    initialize=True,
 )
+
 if t.info is not None:
     t.info["radDistDirectories"] = ["solverTesting"]
 
-
 # --- Going through t._perform_fits()
 t._prepare_fits(evalTime=evalTime, crossCalib=False)
-
 
 # --- Going through t._minimize_radDists()
 ii = 0
@@ -179,7 +218,6 @@ ii = 0
 data_dict = t.fitData[evalTime]
 synth_dict = t.fits[evalTime][ii]["synthetic_dict"]
 pars = t.fits[evalTime][ii]["parameters"]
-
 
 if t.info is not None:
     scale_def = t.info["scale_def"]
@@ -229,17 +267,15 @@ del t
 # ------------------------------------------------------------------------------
 res_manual = residual(pars, data_dict, synth_dict, scale_def=scale_def)
 
-
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # Step 4: Perform a minimization using the emis3D solver
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-t2 = Emis3D.Emis3D(tokamakName="DIII-D", runConfigName="184407/184407_runConfig.yaml")
+t2 = Emis3D(tokamakName="DIII-D", runConfigName="184407/184407_runConfig.yaml")
 t2._load_radDists()
 t2._load_bolometer_data()
 t2._perform_fits(evalTime=float(evalTime))
-
 
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -253,7 +289,6 @@ if rD is not None and hasattr(rD, "tokamak") and hasattr(rD.tokamak, "bolometers
         bolo_tokamak.append(bolo.name)
 else:
     raise AttributeError("rD or rD.tokamak.bolometers is not properly initialized.")
-
 
 # --- Plot each individual bolometer
 if True:

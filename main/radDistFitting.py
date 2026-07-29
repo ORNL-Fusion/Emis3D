@@ -82,8 +82,8 @@ class RadDistFitting:
             channels = self.data[units]["channelOrder"][bolo_]
 
             for emissionName in self.info["emissionNames"]:
-                scale_ = self.data["scaleFactor"][emissionName][bolo_]
-                map_scale = dict(zip(channels, scale_))
+                # scale_ = self.data["scaleFactor"][emissionName][bolo_]
+                # map_scale = dict(zip(channels, scale_))
 
                 data_ = self.data[units][emissionName][bolo_]
                 phi_ = [self._as_segment_list(v) for v in phi_loc[emissionName][bolo_]]
