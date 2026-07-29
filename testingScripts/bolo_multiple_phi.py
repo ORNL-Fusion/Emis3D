@@ -544,8 +544,6 @@ if _populated:
         "is too coarse"
     )
     fig2.tight_layout()
-    fig2.savefig("probe_histograms.png", dpi=130)
-    print("\nSaved probe_histograms.png")
 else:
     print("\nNo probe recorded any samples - nothing to plot.")
 
