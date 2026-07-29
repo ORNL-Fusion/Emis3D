@@ -101,18 +101,13 @@ from main.radDistFitting import RadDistFitting
 from main.radDist import Helical, ElongatedRing, HelicalRing
 
 # --- Fit weight assigned to dead / zero-signal channels so the minmizer ignores
-# them. 
+# them.
 DEAD_CHANNEL_ERROR = 1.0e8
 
 # --- Plot styling
-PLOT_COLORS = ['green', 'orangered', 'blue', 'cyan', 'magenta']
-PLOT_MARKERS = ['^', 'o', 's', 'D', 'v']
-UNIT_LABELS = {
-    "Power": "[W]",
-    'Radiance': "[W / (m2 sr)]",
-    'Brightness': "[W / m2]"
-}
-
+PLOT_COLORS = ["green", "orangered", "blue", "cyan", "magenta"]
+PLOT_MARKERS = ["^", "o", "s", "D", "v"]
+UNIT_LABELS = {"Power": "[W]", "Radiance": "[W / (m2 sr)]", "Brightness": "[W / m2]"}
 
 
 class Emis3D:
@@ -187,12 +182,16 @@ class Emis3D:
         t_start = time.time()
         self._post_process_fit_arrangement(evalTime=evalTime, crossCalib=crossCalib)
 
-        logger.info(f"→ Done with fit post-processing step 1 out of 2 in {time.time() - t_start:.2f} seconds")
+        logger.info(
+            f"→ Done with fit post-processing step 1 out of 2 in {time.time() - t_start:.2f} seconds"
+        )
         t_start = time.time()
 
         self._post_process_bolo_locations(evalTime=evalTime)
         self._post_process_calculations(evalTime=evalTime)
-        logger.info(f"→ Done with fit post-processing step 2 out of 2 in {time.time() - t_start:.2f} seconds")
+        logger.info(
+            f"→ Done with fit post-processing step 2 out of 2 in {time.time() - t_start:.2f} seconds"
+        )
 
     # ------------------------------------------------------------------
     # Configuration / data loading
@@ -542,7 +541,7 @@ class Emis3D:
             logger.warning(
                 f"Channels: {radD.info['ERROR CHANNELS']}were not found in the radDist, they will be ignored"
             )
-            logger.warning("-" * 31 + '\n')
+            logger.warning("-" * 31 + "\n")
             logger.info("")
 
         logger.debug("→ Preparing synthetic data for fitting")
@@ -567,7 +566,7 @@ class Emis3D:
                         boloNames=boloNames,
                         enable_dphi_scaling=self.info["enable_dphi_scaling"],
                         vary_peak_rad_location=self.info["vary_peak_rad_location"],
-                        scale_def = self.info['scale_def'],
+                        scale_def=self.info["scale_def"],
                     )
                     if "ERROR CHANNELS" in radD.info and print_minor_error:
                         print_error(radD)
@@ -583,7 +582,7 @@ class Emis3D:
                     boloNames=boloNames,
                     enable_dphi_scaling=self.info["enable_dphi_scaling"],
                     vary_peak_rad_location=self.info["vary_peak_rad_location"],
-                    scale_def = self.info['scale_def'],
+                    scale_def=self.info["scale_def"],
                 )
 
                 if "ERROR CHANNELS" in radD.info and print_minor_error:
@@ -608,6 +607,8 @@ class Emis3D:
         in_ = {}
         if radDist_.info is not None:
             in_ = radDist_.info
+        else:
+            raise AttributeError("Self.info should not be none!")
 
         synthetic_dict = {
             "info": in_,
@@ -620,7 +621,9 @@ class Emis3D:
         for emissionName in radDist_.info["emissionNames"]:
             synthetic_dict[emissionName] = {
                 "scaleSynth": radDist_.fitSynthetic[emissionName]["scaleSynth"],
-                "scaleFactor": radDist_.fitSynthetic[emissionName]["scaleFactor"],
+                "observed_phi_loc": radDist_.fitSynthetic[emissionName][
+                    "observed_phi_loc"
+                ],
                 "data": radDist_.fitSynthetic[emissionName]["data"],
                 "data_error": radDist_.fitSynthetic[emissionName]["data_error"],
             }
@@ -758,9 +761,9 @@ class Emis3D:
                             True,  # residual = True
                             helical_endpoint_weight,
                         ),
-                        method = "differential_evolution",
+                        method="differential_evolution",
                     )
-                    '''
+                    """
                     results_global = minimize(
                         Util_emis3D.residual,
                         pars,
@@ -788,8 +791,7 @@ class Emis3D:
                         ),
                         method="least_squares",
                     )
-                    '''
-
+                    """
 
                     self.fits[evalTime]["chiSqVec"][ii] = self.fits[evalTime][ii][
                         "fit"
@@ -805,15 +807,23 @@ class Emis3D:
     # Post-processing
     # ------------------------------------------------------------------
 
-    def _bestFit_radDist_parameters(self, evalTime:float, emissionName: str) -> tuple[np.ndarray, np.ndarray]:
+    def _bestFit_radDist_parameters(
+        self, evalTime: float, emissionName: str
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Finds the starting and ending phi for a given radDist"""
-        phi = self.bestFits[evalTime]['radDist'].data['toroidalRadiatedPower'][emissionName]['phi_array']
-        P_pol = self.bestFits[evalTime]['radDist'].data['toroidalRadiatedPower'][emissionName]['P_pol']
+        phi = self.bestFits[evalTime]["radDist"].data["toroidalRadiatedPower"][
+            emissionName
+        ]["phi_array"]
+        P_pol = self.bestFits[evalTime]["radDist"].data["toroidalRadiatedPower"][
+            emissionName
+        ]["P_pol"]
         return np.array(phi), np.array(P_pol)
 
     def _bestFit_radDist_scaling(self, evalTime: float, emissionName: str) -> float:
         """Returns the pre-fit synthetic / data normalization factor"""
-        norm_factor= self.bestFits[evalTime]['synthetic_dict'][emissionName]['scaleSynth']
+        norm_factor = self.bestFits[evalTime]["synthetic_dict"][emissionName][
+            "scaleSynth"
+        ]
         return norm_factor
 
     def _rebuild_radDist(
@@ -852,7 +862,8 @@ class Emis3D:
         elif info["distType"].lower() == "elongatedring":
             radDist_ = ElongatedRing(config=rad_.info)
         elif info["distType"].lower() == "helicalring":
-            radDist_ = HelicalRing(config=rad_.info, startR=rad_.info["startR"], startZ=rad_.info["startZ"]
+            radDist_ = HelicalRing(
+                config=rad_.info, startR=rad_.info["startR"], startZ=rad_.info["startZ"]
             )
         else:
             logger.info(
@@ -893,7 +904,6 @@ class Emis3D:
         print("\n-----------Best Fit-----------")
         report_fit(self.fits[evalTime][bestFitID]["fit"])
         print("------------------------------\n")
-
 
         # --- Store the best fit
         if not hasattr(self, "bestFits"):
@@ -939,11 +949,10 @@ class Emis3D:
                 )
 
             # --- Loop over the bolometer and channels to build the lists
-            for ii, bolo_ in enumerate(self.channel_order['bolometer_order']):
+            for ii, bolo_ in enumerate(self.channel_order["bolometer_order"]):
                 self.bestFits[evalTime]["synthData"][emissionName][bolo_] = [
-                    temp_dict[ch] for ch in self.channel_order['channel_list'][ii]
+                    temp_dict[ch] for ch in self.channel_order["channel_list"][ii]
                 ]
-
 
         # --- Grab the radDist info and store it
         locdependence = self.fits[evalTime][bestFitID]["info"]["radDists"][
@@ -981,7 +990,7 @@ class Emis3D:
             return
 
         # --- Only run if the radDist has been created
-        if not 'radDist' in self.bestFits[evalTime]:
+        if not "radDist" in self.bestFits[evalTime]:
             logger.info(
                 "Please run self._post_process_fit_arrangement() before "
                 "self._post_process_calculations()"
@@ -990,12 +999,14 @@ class Emis3D:
 
         # --- Extract bolometer phi locations
         bolo_phi = []
-        chan_list = [chan for sublist in self.channel_order['channel_list'] for chan in sublist]
-        for bolo_ in self.bestFits[evalTime]['radDist'].tokamak.bolometers:
+        chan_list = [
+            chan for sublist in self.channel_order["channel_list"] for chan in sublist
+        ]
+        for bolo_ in self.bestFits[evalTime]["radDist"].tokamak.bolometers:
             # First check to see if the name is in the master channel order
-            bolo_name = bolo_.info['NAME']
+            bolo_name = bolo_.info["NAME"]
             if bolo_name in chan_list:
-                bolo_phi.append(bolo_.info['CAMERA_POSITION_R_Z_PHI'][2])
+                bolo_phi.append(bolo_.info["CAMERA_POSITION_R_Z_PHI"][2])
 
         if self.info is None:
             self.info = {}
@@ -1005,7 +1016,7 @@ class Emis3D:
 
         # Convert to radians
         bolo_phi_unique = np.deg2rad(np.array(bolo_phi_unique))
-        self.bestFits[evalTime]['bolometer_phi_locations'] = bolo_phi_unique
+        self.bestFits[evalTime]["bolometer_phi_locations"] = bolo_phi_unique
 
     def _post_process_calculations(self, evalTime: float) -> None:
         """
@@ -1020,7 +1031,6 @@ class Emis3D:
                 "self._post_process_calculations()"
             )
             return
-
 
         if self.info is None:
             raise AttributeError("Self.info should not be none!")
@@ -1039,7 +1049,9 @@ class Emis3D:
             mu = float(params["peak_rad_loc"])
 
         # Value at the end of each tag in params
-        inj_loc_tag = Util_emis3D.loc_tag(self.bestFits[evalTime]["synthetic_dict"]["injectionLocation"])
+        inj_loc_tag = Util_emis3D.loc_tag(
+            self.bestFits[evalTime]["synthetic_dict"]["injectionLocation"]
+        )
         mu_grid = None
 
         for emissionName in emissionNames:
@@ -1050,16 +1062,18 @@ class Emis3D:
             rD_scale = self._bestFit_radDist_scaling(evalTime, emissionName)
 
             # Create total power arrays
-            if 'phi' not in rad_distribution:
-                rad_distribution['phi'] = rD_phi
-                rad_distribution['total_power'] = np.zeros(rD_phi.shape)
+            if "phi" not in rad_distribution:
+                rad_distribution["phi"] = rD_phi
+                rad_distribution["total_power"] = np.zeros(rD_phi.shape)
             else:
                 # Checker to make sure that phi arrays match when doing helical distributions
                 # (or more than one injection location). Use array_equal because
                 # 'rD_phi != stored' is an element-wise array, which is ambiguous
                 # in a boolean context and would raise a ValueError.
-                if not np.array_equal(rD_phi, rad_distribution['phi']):
-                    raise ValueError("Error! PHI arrays do not match in _post_process_calculations")
+                if not np.array_equal(rD_phi, rad_distribution["phi"]):
+                    raise ValueError(
+                        "Error! PHI arrays do not match in _post_process_calculations"
+                    )
 
             # dphi already accounts for _rev1, _rev2, etc. for helical distributions
             # Snap mu to the phi grid, so mu is zero at the injection location
@@ -1080,29 +1094,30 @@ class Emis3D:
                 mu=mu_grid,
                 scale_def=scale_def,
                 emissionName=emissionName,
-                bolo_phi_locs=self.bestFits[evalTime]['bolometer_phi_locations']
+                bolo_phi_locs=self.bestFits[evalTime]["bolometer_phi_locations"],
             )
 
             # --- Now calculate the radiation around the vessel due to the radDist
             rD_power = rD_P_pol * scale_ * rD_scale
-            
+
             rad_distribution[emissionName]["phi"] = np.asarray(rD_phi)
             rad_distribution[emissionName]["multiplication_factor"] = np.asarray(scale_)
             rad_distribution[emissionName]["total_power"] = np.asarray(rD_power)
-            rad_distribution['total_power'] += rD_power
+            rad_distribution["total_power"] += rD_power
 
+        rad_distribution["peak_emission"] = mu
 
-        rad_distribution['peak_emission'] = mu
-        
         # --- Remove the spot at the injection location, since it is double-counted
         if mu_grid is not None:
             loc = np.abs(rad_distribution["phi"] - mu_grid).argmin()
-            rad_distribution['total_power'] = np.delete(rad_distribution['total_power'], loc)
-            rad_distribution['phi'] = np.delete(rad_distribution['phi'], loc)
+            rad_distribution["total_power"] = np.delete(
+                rad_distribution["total_power"], loc
+            )
+            rad_distribution["phi"] = np.delete(rad_distribution["phi"], loc)
 
-        tp = rad_distribution['total_power']
-        tpf = np.max(tp) / (simpson(tp, x = rad_distribution['phi']) / (2.0 * np.pi))
-        rad_distribution['toroidal_peaking_factor'] = tpf
+        tp = rad_distribution["total_power"]
+        tpf = np.max(tp) / (simpson(tp, x=rad_distribution["phi"]) / (2.0 * np.pi))
+        rad_distribution["toroidal_peaking_factor"] = tpf
 
     # ------------------------------------------------------------------
     # Cleanup / persistence
@@ -1209,7 +1224,6 @@ class Emis3D:
         units = self.bestFits[evalTime]["radDist"].info["units"]
         units_label = UNIT_LABELS.get(units, "[arb]")
 
-
         num_columns = len(bolometerGroups) + 1
         f = plt.figure(figsize=(15, 8))
 
@@ -1229,12 +1243,10 @@ class Emis3D:
         self.bestFits[evalTime]["radDist"].plotCrossSection(phi=np.deg2rad(phi), ax=ax)
         ax.set_title(f"Injection location = {phi:.2f} degrees")
 
-
         for bolo_ in bolometerGroups:
             count_ += 1
             ax = f.add_subplot(2, num_columns, count_)
-            self._plot_signal_panel(ax, bolo_, evalTime,units_label,legend=True) 
-
+            self._plot_signal_panel(ax, bolo_, evalTime, units_label, legend=True)
 
         # --- Plot the radiation behavior
         tpf_ax = f.add_subplot(2, num_columns, count_ + 1)
@@ -1285,17 +1297,20 @@ class Emis3D:
 
         ax.set_title(boloGroupName)
 
-    def _plot_signal_panel(self, ax, boloName: str, evalTime: float,units_label: str, legend: bool) -> None:
+    def _plot_signal_panel(
+        self, ax, boloName: str, evalTime: float, units_label: str, legend: bool
+    ) -> None:
         """Plots the observed signals, each fitted emission componenet, and their
         total for one bolometer
-        
+
         Channels with the DEAD_CHANNEL_ERROR fit weight are excluded from the error bars
         and y-limit
         """
-        data = np.asarray(self.fitData[evalTime]['boloData'][boloName], dtype=float)
-        err = np.asarray(self.fitData[evalTime]['boloData_error'][boloName], dtype=float)
+        data = np.asarray(self.fitData[evalTime]["boloData"][boloName], dtype=float)
+        err = np.asarray(
+            self.fitData[evalTime]["boloData_error"][boloName], dtype=float
+        )
         channels = self._channel_numbers(boloName)
-
 
         # --- Mask the dead-channel fit weights for display
         valid = err != DEAD_CHANNEL_ERROR
@@ -1303,55 +1318,63 @@ class Emis3D:
 
         ax.errorbar(
             channels,
-            data, 
-            yerr = plot_err,
-            marker = 's',
-            ms = 5,
-            c = 'black',
-            linestyle = 'none',
-            label = 'data'
+            data,
+            yerr=plot_err,
+            marker="s",
+            ms=5,
+            c="black",
+            linestyle="none",
+            label="data",
         )
 
         # --- Fitted emission components and their total
         tot_emission = np.zeros(data.size)
         for jj, emissionName in enumerate(self.bestFits[evalTime]["synthData"]):
             em_data = np.asarray(
-            self.bestFits[evalTime]["synthData"][emissionName][boloName],
-            dtype=float,
+                self.bestFits[evalTime]["synthData"][emissionName][boloName],
+                dtype=float,
             )
             tot_emission += em_data
             ax.plot(
-            channels,
-            em_data,
-            marker=PLOT_MARKERS[jj % len(PLOT_MARKERS)],
-            color=PLOT_COLORS[jj % len(PLOT_COLORS)],
-            label=f"{emissionName} emission",
+                channels,
+                em_data,
+                marker=PLOT_MARKERS[jj % len(PLOT_MARKERS)],
+                color=PLOT_COLORS[jj % len(PLOT_COLORS)],
+                label=f"{emissionName} emission",
             )
-            
-        ax.plot(channels, tot_emission, color="purple", label="total emission", linewidth = 3.0)
-            
+
+        ax.plot(
+            channels,
+            tot_emission,
+            color="purple",
+            label="total emission",
+            linewidth=3.0,
+        )
+
         # --- y-limit from valid channels and the synthetic total only
         dat_ = np.concatenate((data + np.abs(err), tot_emission))
         ymax = np.nanmax(dat_)
         if np.any(valid):
-            dat_ = np.concatenate((data[valid] + np.abs(err[valid]), tot_emission[valid]))
+            dat_ = np.concatenate(
+                (data[valid] + np.abs(err[valid]), tot_emission[valid])
+            )
             ymax = np.nanmax(dat_)
 
         if np.isfinite(ymax) and ymax > 0:
             ax.set_ylim(0, float(ymax) * 1.02)
-        
+
         ax.set_xlabel("Channel Number")
         ax.set_ylabel(f"Emission {units_label}")
         ax.set_title(boloName)
         if legend:
             ax.legend(fontsize=8)
 
-    def _plot_tpf_panel(self,ax, evalTime:float) -> None:
+    def _plot_tpf_panel(self, ax, evalTime: float) -> None:
         """Plots the toroidal radiation distribution and peaking factor"""
 
         rad_distribution = self.bestFits[evalTime]["radiation_distribution"]
 
-        y_data = rad_distribution['total_power']
+        y_data = rad_distribution["total_power"]
         y_max = np.nanmax(y_data)
         scale = np.floor(np.log10(y_max))
         y_scaled = y_data / 10**scale
@@ -1366,17 +1389,22 @@ class Emis3D:
             np.floor(np.nanmin(y_scaled)),
             np.ceil(np.nanmax(y_scaled)),
         )
-        ax.axvline(np.rad2deg(rad_distribution['peak_emission']),
-                   np.floor(np.nanmin(y_scaled)),
-                   np.ceil(np.nanmax(y_scaled)),
-                   linestyle = 'dashed', color = 'tab:red')
-        ax.text(np.rad2deg(rad_distribution['peak_emission']),
-                np.floor(np.nanmin(y_scaled)) * 1.1,
-                'Peak\nradiation',
-                ha = 'center', va = 'bottom', size = 10
-                )
+        ax.axvline(
+            np.rad2deg(rad_distribution["peak_emission"]),
+            np.floor(np.nanmin(y_scaled)),
+            np.ceil(np.nanmax(y_scaled)),
+            linestyle="dashed",
+            color="tab:red",
+        )
+        ax.text(
+            np.rad2deg(rad_distribution["peak_emission"]),
+            np.floor(np.nanmin(y_scaled)) * 1.1,
+            "Peak\nradiation",
+            ha="center",
+            va="bottom",
+            size=10,
+        )
 
-        
         ax.set_xlabel("phi [degrees]")
         ax.set_ylabel(f"radiation [$10^{{{int(scale)}}}$ arb]")
         ax.set_title(

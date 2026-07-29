@@ -21,6 +21,7 @@ from main.Globals import (
     SUPPORTED_TOKAMAKS,
 )
 from main.radDistFitting import RadDistFitting
+from main.Util import find_max_nested_lists
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -54,11 +55,19 @@ class TestGlobals:
 
 
 def _minimal_raddist_json(
-    tmp_path, units="Power", distType="elongatedRing", n_channels=4, n_bolos=2
+    tmp_path,
+    units="Power",
+    distType="elongatedRing",
+    n_channels=4,
+    n_bolos=2,
+    n_segments=1,
 ):
     """
     Write a minimal radDist JSON file that RadDistFitting can load without
     needing cherab or actual measurement files.
+
+    n_segments controls the number of toroidal observation segments per channel
+    in the new format.
     """
     emission = "elongatedRing"
     channel_tags = [f"CH{i+1:02d}" for i in range(n_channels)]
@@ -67,13 +76,16 @@ def _minimal_raddist_json(
     channel_order = {}
     power_data = {}
     power_error = {}
-    scale_factor = {}
+    phi_loc = {}
 
     for bolo in bolo_names:
         channel_order[bolo] = channel_tags
-        power_data[bolo] = [float(i + 1) for i in range(n_channels)]
-        power_error[bolo] = [0.1 * (i + 1) for i in range(n_channels)]
-        scale_factor[bolo] = [0.5 * (i + 1) for i in range(n_channels)]
+        power_data[bolo] = [[float(i + 1)] * n_segments for i in range(n_channels)]
+        power_error[bolo] = [[0.1 * (i + 1)] * n_segments for i in range(n_channels)]
+        phi_loc[bolo] = [
+            [0.5 * (i + 1) + 0.1 * s for s in range(n_segments)]
+            for i in range(n_channels)
+        ]
 
     data = {
         "info": {
@@ -98,8 +110,8 @@ def _minimal_raddist_json(
             f"{units}_error": {
                 emission: {bolo: power_error[bolo] for bolo in bolo_names},
             },
-            "scaleFactor": {
-                emission: {bolo: scale_factor[bolo] for bolo in bolo_names},
+            "observed_phi_loc": {
+                emission: {bolo: phi_loc[bolo] for bolo in bolo_names},
             },
             "toroidalRadiatedPower": {
                 emission: {
@@ -133,7 +145,7 @@ class TestRadDistFitting:
         path, bolo_names, channel_tags, emission = _minimal_raddist_json(tmp_path)
         rdf = RadDistFitting(radDistPath=path)
         assert emission in rdf.data_maps
-        for key in ("scaleFactor", "data", "data_error"):
+        for key in ("observed_phi_loc", "data", "data_error"):
             assert key in rdf.data_maps[emission], f"Missing key '{key}' in data_maps"
 
     def test_channel_keys_in_data_maps(self, tmp_path):
@@ -169,11 +181,11 @@ class TestRadDistFitting:
         channel_order = [channel_tags]
 
         rdf.prepare_for_fits(channel_order, data_max=None)
-        unscaled_max = max(max(row) for row in rdf.fitSynthetic[emission]["data"])
+        unscaled_max = find_max_nested_lists(rdf.fitSynthetic[emission]["data"])
 
         rdf2 = RadDistFitting(radDistPath=path)
         rdf2.prepare_for_fits(channel_order, data_max=unscaled_max * 10.0)
-        scaled_max = max(max(row) for row in rdf2.fitSynthetic[emission]["data"])
+        scaled_max = find_max_nested_lists(rdf2.fitSynthetic[emission]["data"])
 
         assert scaled_max > unscaled_max
 

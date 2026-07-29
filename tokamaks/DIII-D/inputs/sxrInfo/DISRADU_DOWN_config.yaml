@@ -3,7 +3,6 @@
 NAME: "DISRADU_DOWN"
 GROUP_NAME: "DISRADU"
 NUM_CHANNELS: 15
-TYPE: "planar"
 CHANNEL_TAGS: ['DISRADU01', 'DISRADU02','DISRADU03', 'DISRADU04', 'DISRADU05', 'DISRADU06',
                'DISRADU07', 'DISRADU08', 'DISRADU09', 'DISRADU10', 'DISRADU11', 'DISRADU12',
                'DISRADU13', 'DISRADU14', 'DISRADU15']
@@ -23,11 +22,17 @@ FOIL_POSITIONS: [6.5, 5.5, 4.5, 3.5, 2.5, 1.5, 0.5, -0.5, -1.5,
 # Disrad toroidal location is at 225R+1, switched to 210R+1 in 2010, switched back to 225R+1 in 2018.
 # Location in Emis3D = 360 - 225.0 = 135.0
 CAMERA_POSITION_R_Z_PHI: [2.3, 0.74, 135.0] # R, z position of the camera (slit)
-# NOTE: Phi is in degrees in Emis3D coordinates = 360 - DIII-D coordinates
+# NOTE: Phi is in degrees in Emis3D coordinates (right-handed) = 360 - DIII-D coordinates
 CAMERA_ROTATION: 152.3 # Rotate the camera this amount, in degrees, towards R=0, z=0
 CAMERA_DOWNWARD_FACING: True # True for -z cameras, False for +z cameras (RM on DIII-D)
 
-# Optional stuff below!
+# --- Optional stuff below! ---
+# This angle defines how much the foil and its sightline are toroidally skewed away from directly looking at the inboard wall
+SKEW_ANGLE: 0.0
+# This factor defines how much the foil brightness is decreased due to the angles both of the foil and aperature relative to the vector between them
+FOIL_SLIT_ANGLE_FACTOR: 1.0
+
+
 
 # Chord information, testing/sxr_chords.py uses this to make sure that everything is correct
 r0:   [2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3, 2.3,

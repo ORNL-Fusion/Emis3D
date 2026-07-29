@@ -30,9 +30,7 @@ from abc import ABC, abstractmethod
 
 
 class RadDist(ABC):
-    """
-    Parent RadDist class.
-    """
+    """Parent RadDist class."""
 
     def __init__(self, startR=2.96, startZ=0.0, config=None):
 
@@ -79,9 +77,6 @@ class RadDist(ABC):
         )
         return emission[self.emissionName].item()
 
-    # Backwards-compatible alias — will be removed in a future release
-    _evalulateCherab = _evaluate_cherab
-
     def _update_bolometer_properties(self) -> None:
         """
         Changes Cherab observation parameters. These should be defined within the radDist
@@ -89,12 +84,13 @@ class RadDist(ABC):
 
         Required values in config file:
         pixelSamples    :: Resolution of the sightline. Higher = better, but takes longer.
-        numProcessors   :: The number of processors to use while observing
+        numProcessors   :: Hard-wired to 1, observation speed increases use multiple
+                           processors in other locations.
         """
 
         boloCameras = self.tokamak.bolometers
         pixelSamples = self.info["BOLOMETER_PROPS"]["pixelSamples"]
-        numProcessors = self.info["BOLOMETER_PROPS"]["numProcessors"]
+        numProcessors = 1  # self.info["BOLOMETER_PROPS"]["numProcessors"]
 
         for bolo_ in boloCameras:
             # --- Either does the top or bottom loop depending on on if there is an extra bolometerCamera layer
@@ -111,40 +107,35 @@ class RadDist(ABC):
                 foil.render_engine.processes = numProcessors
                 foil.pixel_samples = pixelSamples
 
-    def _get_scale_factor(self) -> None:
+    def _get_observed_phi_loc(self) -> None:
         """
-        Creates a dict containing a nested list of the scaling factors for each synthetic signal,
-        to be used in the fitting. The list has the same form as the radDist.
-
-        It will first see to see if there is a specific radDist called _scaling_factor, otherwise
-        it will returns 1's.
+        Creates a dict containing the toroidal angle(s) at which each synthetic
+        signal was observed, to be used in the fitting. Each channel holds a
+        list of angles, one per toroidal segment of the observation (a single
+        entry for the standard poloidal-fan case; toroidally-viewing chords will
+        populate multiple segments).
 
         Form:
-        [
-            [                               emissionName1
-                [bolo1_1, bolo1_2, ...]
-                [bolo2_1, bolo2_2, ...],
-                ...
-            ],
-            [                               emissionName2
-                [bolo1_1, bolo1_2, ...]
-                [bolo2_1, bolo2_2, ...],
-                ...
-            ],
-            ...
-        ]
+        {
+            emissionName1: {
+                bolo1: [[ch1_phi1, ch1_phi2, ...], [ch2_phi1, ...], ...],
+                bolo2: [...],
+            },
+            emissionName2: {...},
+             ...
+        }
         """
 
         boloCameras = self.tokamak.bolometers
-        scaleFactor = {}
+        observed_phi_loc = {}
         for emissionName in self.info["emissionNames"]:
             temp = {}
             for bolo_ in boloCameras:
-                temp[bolo_.name] = self._scaling_factor(
+                temp[bolo_.name] = self._observed_phi_loc(
                     bolo_.info, emissionName=emissionName
                 )
-            scaleFactor[emissionName] = temp
-        self.data["scaleFactor"] = scaleFactor
+            observed_phi_loc[emissionName] = temp
+        self.data["observed_phi_loc"] = observed_phi_loc
 
     @abstractmethod
     def _evaluate(
@@ -206,10 +197,9 @@ class RadDist(ABC):
         # self.power_per_bin_calc()
         self.calc_radiated_power()
         self.bolos_observe()
-        self._get_scale_factor()
+        self._get_observed_phi_loc()
         self.saveRadDist()
 
-    # --- Testing out a new powerPerBin calculation, utilizing simposon integration instead of a monte carlo method
     def _total_radiated_power(
         self,
         n_phi: int = 100,
@@ -585,9 +575,14 @@ class RadDist(ABC):
                         # print(
                         #    f"Single layer cameras currently not supported, add functionality within bolos_observe!"
                         # )
-                    
-                    observeVal.append(ans)
-                    observeVal_error.append(ans_error)
+
+                    # --- Each channel stores a list of observation segments,
+                    # one per toroidal angle in data["observed_phi_loc"]. For
+                    # poloidal-fan cameras this is a single-element list; a
+                    # toroidally-viewing chord will populate one entry per
+                    # toroidal segment of the observation.
+                    observeVal.append([ans])
+                    observeVal_error.append([ans_error])
                     ch_order.append(foil.name)
 
                 # --- Store the data
@@ -656,7 +651,6 @@ class RadDist(ABC):
             linewidths=0.4,
             alpha=0.4,
         )
-
 
     def plotOverview(self, return_figure: bool = False, plot_etendue: list = []):
         """
@@ -789,12 +783,14 @@ class RadDist(ABC):
         logger.info("%s", str_)
 
     @abstractmethod
-    def _scaling_factor(
+    def _observed_phi_loc(
         self, bolo_info: dict = {}, emissionName: str | None = None
     ) -> list:
         """
-        Abstract method to be implemented by subclasses to return the
-        scaling factor for the bolometer.
+        Abstract method to be implemented by subclasses to return, for each
+        channel of the bolometer, the list of toroidal angles (radians) at
+        which the observation took place. One angle per observation segment;
+        single-element lists for poloidal-fan cameras.
         """
 
 
@@ -859,7 +855,7 @@ class Helical(RadDist):
         num_lines = self.info["numFieldLines"]
 
         # sigma_target must come from config; fall back to a small offset only
-        # if not provided so the intent is explicit rather than a magic number.
+        # if not provided
         sigma_target = self.info.get("sigma_R", sigma_kernel + 0.01)
         self.info["sigma_target"] = sigma_target
 
@@ -931,11 +927,13 @@ class Helical(RadDist):
 
         return {emissionName: tot}
 
-    def _scaling_factor(
+    def _observed_phi_loc(
         self, bolo_info: dict = {}, emissionName: str | None = None
     ) -> list:
         """
-        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
+        Return, per channel, the list of toroidal angles (radians) at which the
+        observation took place. Poloidal-fan cameras view a single toroidal
+        plane, so each channel holds a single-element list at the camera phi.
 
         Parameters
         ----------
@@ -950,7 +948,7 @@ class Helical(RadDist):
         if emissionName is not None and "rev" in emissionName:
             rev_number = int(emissionName.split("rev")[-1])
 
-        return [phi + rev_number * 2.0 * np.pi] * num_channels
+        return [[phi + rev_number * 2.0 * np.pi] for _ in range(num_channels)]
 
 
 class HelicalRing(RadDist):
@@ -1079,12 +1077,7 @@ class HelicalRing(RadDist):
             emis = (
                 (
                     1.0
-                    / (
-                        2.0
-                        * np.pi
-                        * self.info["sigma_R"]
-                        * (self.info["sigma_z"] ** 2)
-                    )
+                    / (2.0 * np.pi * self.info["sigma_R"] * (self.info["sigma_z"] ** 2))
                 )
                 * np.exp(
                     -0.5
@@ -1098,11 +1091,13 @@ class HelicalRing(RadDist):
 
         return localEmis
 
-    def _scaling_factor(
+    def _observed_phi_loc(
         self, bolo_info: dict = {}, emissionName: str | None = None
     ) -> list:
         """
-        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
+        Return, per channel, the list of toroidal angles (radians) at which the
+        observation took place. Poloidal-fan cameras view a single toroidal
+        plane, so each channel holds a single-element list at the camera phi.
 
         Parameters
         ----------
@@ -1117,7 +1112,7 @@ class HelicalRing(RadDist):
         if emissionName is not None and "rev" in emissionName:
             rev_number = int(emissionName.split("rev")[-1])
 
-        return [phi + rev_number * 2.0 * np.pi] * num_channels
+        return [[phi + rev_number * 2.0 * np.pi] for _ in range(num_channels)]
 
 
 class ElongatedRing(RadDist):
@@ -1190,15 +1185,17 @@ class ElongatedRing(RadDist):
             z0=self.info["startZ"],
             sigma_R=self.info["sigma_R"],
             sigma_z=self.info["sigma_z"],
-            theta=self.info['rotationAngle']
+            theta=self.info["rotationAngle"],
         )
         return localEmis
 
-    def _scaling_factor(
+    def _observed_phi_loc(
         self, bolo_info: dict = {}, emissionName: str | None = None
     ) -> list:
         """
-        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
+        Return, per channel, the list of toroidal angles (radians) at which the
+        observation took place. Poloidal-fan cameras view a single toroidal
+        plane, so each channel holds a single-element list at the camera phi.
 
         Parameters
         ----------
@@ -1209,7 +1206,7 @@ class ElongatedRing(RadDist):
         numChan = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
-        return [float(phi)] * numChan
+        return [[float(phi)] for _ in range(numChan)]
 
 
 class SquareTube(RadDist):
@@ -1290,11 +1287,13 @@ class SquareTube(RadDist):
 
         return localEmis
 
-    def _scaling_factor(
+    def _observed_phi_loc(
         self, bolo_info: dict = {}, emissionName: str | None = None
     ) -> list:
         """
-        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
+        Return, per channel, the list of toroidal angles (radians) at which the
+        observation took place. Poloidal-fan cameras view a single toroidal
+        plane, so each channel holds a single-element list at the camera phi.
 
         Parameters
         ----------
@@ -1305,4 +1304,4 @@ class SquareTube(RadDist):
         numChan = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
-        return [float(phi)] * numChan
+        return [[float(phi)] for _ in range(numChan)]

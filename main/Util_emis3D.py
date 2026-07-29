@@ -21,6 +21,37 @@ from lmfit import minimize
 logger = logging.getLogger(__name__)
 
 
+def _get_observed_phi_loc(emission_dict: dict):
+    """
+    Return the toroidal observation angles from a synthetic_dict emission
+    entry. Newer radDists store these under 'observed_phi_loc'; older saved
+    radDists used the name 'scaleFactor'.
+    """
+    phi_loc = emission_dict.get("observed_phi_loc", emission_dict.get("scaleFactor"))
+    if phi_loc is None:
+        raise KeyError(
+            "synthetic_dict entry contains neither 'observed_phi_loc' nor the "
+            "legacy 'scaleFactor' key"
+        )
+    return phi_loc
+
+
+def _as_channel_segments(rows) -> list:
+    """
+    Normalize a per-bolometer-group list so that every channel entry is a 1D
+    float array of toroidal segments. Scalars (the legacy single-plane format)
+    are promoted to single-element arrays; empty channels become a single zero
+    segment so downstream per-channel reductions stay well-defined.
+    """
+    out = []
+    for chan in rows:
+        arr = np.atleast_1d(np.asarray(chan, dtype=float))
+        if arr.size == 0:
+            arr = np.zeros(1)
+        out.append(arr)
+    return out
+
+
 def _exp(dphi: np.ndarray, kappa: float = 0.0) -> np.ndarray:
     """Exponential function. Peak = 1.0 at dphi = 0."""
     return np.exp(-1.0 * kappa * (dphi**2))
@@ -39,7 +70,7 @@ def scale_linear(
     """
     Triangular profile centered at mu.
 
-    Peak = A at dphi = 0. Should not be negative. 
+    Peak = A at dphi = 0. Should not be negative.
     """
     return np.abs(A - np.abs(B) * dphi)
 
@@ -66,7 +97,7 @@ def scale_wrapper(
     ----------
     a             : Amplitude of the scaling function
     b             : Shape parameter used by most scaling functions
-    phi           : Toroidal locations of the bolometers (radians)
+    phi           : Toroidal location(s) of each channel (radians)
     mu            : Injection location (radians)
     scale_def     : One of 'exponential', 'linear', 'constant'
     emissionName  : Name of the emission distribution (e.g. 'clockwise')
@@ -76,12 +107,16 @@ def scale_wrapper(
     """
 
     if phi is None and dphi is None:
-        raise ValueError("Phi or dphi array must be populated when calling scale_wrapper!")
-    
+        raise ValueError(
+            "Phi or dphi array must be populated when calling scale_wrapper!"
+        )
+
     # --- Find dphi
     if dphi is None and phi is not None:
         dphi = find_dphi(
-            phi, mu, emissionName=str(emissionName), 
+            phi,
+            mu,
+            emissionName=str(emissionName),
         )
 
     if dphi is None:
@@ -121,7 +156,7 @@ def find_dphi(
         dphi = 345 for counterClock Helical
         dphi = 15 for clockwise Helical and non-Helical distributions
 
-        
+
     Parameters
     ----------
     phi           : Toroidal locations of the bolometers (radians)
@@ -137,9 +172,7 @@ def find_dphi(
     """
 
     if emissionName is None:
-        logger.warning(
-            "Emission name in Util_emis3D.find_dphi is None."
-        )
+        logger.warning("Emission name in Util_emis3D.find_dphi is None.")
         return None
 
     phi = np.asarray(phi, dtype=float)
@@ -173,7 +206,7 @@ def find_dphi(
     rev_match = re.search(r"_rev(\d+)", emissionName)
     n_rev = int(rev_match.group(1)) if rev_match else 0
     rev_offset = n_rev * two_pi
-        
+
     if "clockwise" in emissionName:
         return cw + rev_offset
 
@@ -236,7 +269,7 @@ def helical_endpoint_penalty(
         P_end_d = scale_d(dphi_end) * P_pol_d(phi = mu mod 2*pi) * scaleSynth
 
     where ``dphi_end = 2*pi * numTransists`` is the winding distance back to the
-    injection toroidal angle. 
+    injection toroidal angle.
 
     ``(data - model) / error`` residuals that LMFIT already minimizes::
 
@@ -244,7 +277,7 @@ def helical_endpoint_penalty(
 
         P_peak = a * scaleSynth * 0.5*(P_pol_cw(mu) + P_pol_ccw(mu))
 
-    Normalising by the peak keeps it unitless. 
+    Normalising by the peak keeps it unitless.
 
     Returns an empty list (no constraint) when:
       * ``weight == 0``,
@@ -281,7 +314,6 @@ def helical_endpoint_penalty(
     mu = float(synthetic_dict["injectionLocation_rad"])
     if "peak_rad_loc" in params:
         mu = float(params["peak_rad_loc"])
-
 
     eps = 1.0e-30
     penalties = []
@@ -337,7 +369,6 @@ def helical_endpoint_penalty(
     return penalties
 
 
-
 def residual(
     pars,
     data_dict,
@@ -375,19 +406,21 @@ def residual(
     temp_ = {}  # accumulated model signal per bolometer group
     data = {}  # per-emission scaled synthetic (returned when residual=False)
 
-    # --- Find the bolometer locations
+    # --- Find the bolometer phi locations, combine to one large list
     bolo_phis = []
     for emissionName in synthetic_dict["emissionNames"]:
-        sF = synthetic_dict[emissionName]["scaleFactor"]
-        sF_flat = [item for sublist in sF for item in sublist]
-        bolo_phis.extend(sF_flat)
+        phi_loc = _get_observed_phi_loc(synthetic_dict[emissionName])
+        for group in phi_loc:
+            for chan in group:
+                bolo_phis.extend(np.atleast_1d(chan).tolist())
+
     # Remove duplicates
     bolo_phis = np.asarray(list(set(bolo_phis)))
 
     for emissionName in synthetic_dict["emissionNames"]:
 
         data[emissionName] = {}
-        tag = loc_tag(synthetic_dict['injectionLocation'])
+        tag = loc_tag(synthetic_dict["injectionLocation"])
         # --- Get the new scale factor for the normal runs
         if boloNames is None:
             a = params[f"a_{tag}"]
@@ -401,30 +434,61 @@ def residual(
                 a = params[f"{boloNames[ii]}"]
                 b = 0.0
 
-            phi = np.array(synthetic_dict[emissionName]["scaleFactor"][ii])
+            # phi = np.array(synthetic_dict[emissionName]["scaleFactor"][ii])
 
-            # --- Return the scale factor
+            # --- Per-channel lists of toroidal observation segments. Each
+            # channel holds one phi and one synthetic value per segment
+            # (single-element lists for poloidal-fan cameras).
+
+            phi_segs = _as_channel_segments(
+                _get_observed_phi_loc(synthetic_dict[emissionName])[ii]
+            )
+            synth_segs = _as_channel_segments(synthetic_dict[emissionName]["data"][ii])
+
+            # --- Check to make sure lists are equal
+            if len(phi_segs) != len(synth_segs):
+                raise RuntimeError(
+                    f"observed_phi_loc and data have different channel counts "
+                    f"({len(phi_segs)} vs {len(synth_segs)}) for "
+                    f"'{emissionName}', bolometer group {ii}"
+                )
+
+            for jj, (p_, s_) in enumerate(zip(phi_segs, synth_segs)):
+                if len(p_) != len(s_):
+                    raise RuntimeError(
+                        f"Channel {jj} of '{emissionName}', bolometer group "
+                        f"{ii} has {len(p_)} observed_phi_loc segments but "
+                        f"{len(s_)} data segments"
+                    )
+
+            phi_flat = np.concatenate(phi_segs)
+            synth_flat = np.concatenate(synth_segs)
+
+            # --- Return the scale factor for every segment
             scale_ = scale_wrapper(
                 a,
                 b,
-                phi=phi,
+                phi=phi_flat,
                 mu=mu,
                 scale_def=scale_def,
                 emissionName=emissionName,
                 bolo_phi_locs=bolo_phis,
             )
 
-            synth_ = np.array(synthetic_dict[emissionName]["data"][ii])
-            # synth_error = np.array(synthetic_dict[emissionName]["data_error"][ii])
-
             if scale_ is None:
                 raise RuntimeError("Scale_ returned None for some reason!?!")
-                break
-            if ii not in temp_:
-                temp_[ii] = np.zeros(len(scale_))
 
-            temp_[ii] += scale_ * synth_
-            data[emissionName][ii] = scale_ * synth_
+            # --- Sum the scaled segments within each channel so the model is
+            # one value per channel, matching the measured signal
+            seg_counts = [len(p) for p in phi_segs]
+            starts = np.cumsum([0] + seg_counts[:-1])
+            model_ = np.add.reduceat(scale_ * synth_flat, starts)
+
+            if ii not in temp_:
+                temp_[ii] = np.zeros(len(model_))
+
+            temp_[ii] += model_
+            data[emissionName][ii] = model_
 
     if residual and data_dict is not None:
         res = []
@@ -438,10 +502,11 @@ def residual(
 
             # --- Ignore channels with non-positive observed values
             bad_indices = np.where(data_ <= 0)[0]
+            # --- Set the temp_ values equal to the bad data values so the residual is zero
             temp_[ii][bad_indices] = data_[bad_indices]
 
             # LMFIT minimizes the sum of squares, so we return the raw residual
-            numerator = data_ - temp_[ii]
+            numerator = np.abs(data_ - temp_[ii])
             res.extend(convert_arrays_to_list(numerator / data_error))
 
         # --- Soft constraint: tie paired clockwise / counterClock helical
@@ -500,20 +565,20 @@ def signal_error(
         return error_inverse(signal, max_signal, scale_factor)
     elif type_ == "INVERSE SQUARE":
         return error_inv_sqrt(signal, max_signal, scale_factor)
-    elif type_ == 'CONSTANT':
+    elif type_ == "CONSTANT":
         return error_constant(signal, max_signal)
 
 
 def error_constant(
-        signal: np.ndarray,
-        max_signal: float,
-        _floor: float = 1.0e-12,
-        fraction: float =  0.1 # 10%
+    signal: np.ndarray,
+    max_signal: float,
+    _floor: float = 1.0e-12,
+    fraction: float = 0.1,  # 10%
 ) -> np.ndarray:
     """Returns fraction * max_signal for each signal"""
     signal = np.asarray(signal)
     signal = np.clip(signal, _floor, None)
-    
+
     return fraction * max_signal / signal
 
 
