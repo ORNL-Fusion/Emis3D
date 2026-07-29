@@ -537,7 +537,9 @@ class RadDist(ABC):
                         else:
                             foil.units = units
 
+                        # --- Measure the radiation function for each foil
                         foil.observe()
+
                         if units in ["Radiance", "Brightness"]:
                             # sightline = foil.as_sightline()
                             # sightline.observe()
