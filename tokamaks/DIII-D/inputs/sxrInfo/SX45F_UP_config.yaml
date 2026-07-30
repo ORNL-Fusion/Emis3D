@@ -29,3 +29,8 @@ r0:   [2.272, 2.272, 2.272, 2.272, 2.272]
 rf:   [1.01, 1.01, 1.01, 1.01, 1.01]
 z0:   [0.781, 0.781, 0.781, 0.781, 0.781]
 zf:   [0.06, 0.20, 0.37, 0.61, 0.81]
+
+# Adding this will save a lot of time while creating radDists, since the program will use
+# these instead of calculating them 
+ETENDUE: [1.72946411e-07, 1.77231028e-07, 1.72946411e-07, 1.53687279e-07,
+       1.26283003e-07]

@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 
 tokamakName = "DIII-D"
-configFileName = "elongatedRing_config.yaml"  # "sqaureTube_config.yaml"  # "elongatedRing_config.yaml"  # "helical_config.yaml"
+configFileName = "helical_config.yaml"  # "sqaureTube_config.yaml"  # "elongatedRing_config.yaml"  # "helical_config.yaml"
 rzvalues = [2.029, 0.409]
 
 plt.ion()

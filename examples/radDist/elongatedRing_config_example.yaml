@@ -12,7 +12,7 @@ sigma_R_vals:  [0.3] # format: [0.3, 0.4, 0.5]
 sigma_z_vals: [0.25]
 rotationAngles: [30] # Rotate the elongated ring around its axis, doesn't matter for helical distributions 0, 30, 60, 90, 120, 150
 numProcessors: 1 # Number of processors to use while creating radDists (aka, 5 will create 5 at the same time)
-# You'll need to balance this with the numProcessors called under BOLOMETER_PROPS
+
 
 
 GRID:
@@ -24,4 +24,3 @@ GRID:
 
 BOLOMETER_PROPS:
   pixelSamples: 500 # Resolution of the observed chord in Cherab, 5000 is a decent number but it is lowered in this example
-  numProcessors: 1 # Number of processors to use while observing the world in Cherab

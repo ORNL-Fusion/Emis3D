@@ -9,7 +9,6 @@ import h5py
 import numpy as np
 import scipy.constants
 
-
 FILE_PATH = dirname(realpath(__file__))
 PARENT_DIRECTORY = dirname(FILE_PATH)
 
@@ -102,10 +101,9 @@ def _get_calib_info(ShotNumber, ArrayName=None):
                 if read_file:
                     line = line.split()
                     shots.append(int(line[0]))
-
-                    Rc.append(float(line[1 + P].replace("k", "e3")))  # type:ignore
-                    Gain.append(float(line[2 + PA + P]))  # type:ignore
-                    Filt.append(int(line[3 + PA * 2 + P]))  # type:ignore
+                    Rc.append(float(line[1 + P].replace("k", "e3").replace("K", "e3")))  # type: ignore
+                    Gain.append(float(line[2 + PA + P]))  # type: ignore
+                    Filt.append(int(line[3 + PA * 2 + P]))  # type: ignore
 
                 # Start reading the file once you hit the shots
                 if line[:4] == "shot":

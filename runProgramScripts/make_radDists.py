@@ -36,7 +36,6 @@ TODO:
 
 """
 
-
 import os
 import sys
 
@@ -124,50 +123,96 @@ if __name__ == "__main__":
     del config["sigma_R_vals"], config["sigma_z_vals"], config["rotationAngles"]
 
     if rzArray is not None:
+        # --- Build the full task list up front: one (rz, config) task per
+        # radDist, with a config snapshot per parameter combination.
+        arg_list = []
         for rotationAngle in rotationAngles:
             for sigma_R in sigma_R_vals:
                 for sigma_z in sigma_z_vals:
-                    # --- Split the rzArray to conserve memory during the process pool executor,
-                    # try to have it split up evenly between the numbe of processors used
-                    num_split = 1
-                    if rzArray.shape[0] > (numProcessors - 1.0):
-                        num_split = np.floor((rzArray.shape[0] / (numProcessors - 1.0)))
-                    rzArray_split = np.array_split(rzArray, num_split)
-                    for rz in rzArray_split:
-                        # --- Skip rotation angle if the sigma_R and sigma_z are equal (aka a circle)
-                        # only do the case where the rotationAngle = 0
-                        if sigma_z == sigma_R and rotationAngle > 0.0:
-                            pass
-                        # --- Skip where sigma_z is a sigma_R value for rotationAngle 90
-                        if rotationAngle == 90 and sigma_z in sigma_R_vals:
-                            pass
-                        else:
-                            # --- Add stuff to the config, create list of r, z points to solve at
-                            # this sigma_z and sigma_R
-                            config["sigma_R"] = sigma_R
-                            config["sigma_z"] = sigma_z
-                            config["rotationAngle"] = rotationAngle
-                            arg_list = [(val, config) for val in rz]
 
-                            # --- Start computation in parrallel minus 2 of your processors (so you can actually use your computer)
-                            if config["distType"] == "Helical":
-                                with ProcessPoolExecutor(
-                                    max_workers=numProcessors
-                                ) as executor:
-                                    # --- Explicitly consume results so iterator is cleared
-                                    for _ in executor.map(
-                                        Util_radDist.radDist_Helical_parallel, arg_list
-                                    ):
-                                        pass
-                            elif config["distType"] == "ElongatedRing":
-                                with ProcessPoolExecutor(
-                                    max_workers=numProcessors
-                                ) as executor:
-                                    # --- Explicitly consume results so iterator is cleared
-                                    for _ in executor.map(
-                                        Util_radDist.radDist_ElongatedRing_parallel,
-                                        arg_list,
-                                    ):
-                                        pass
+                    # --- Skip rotation angles for circles (sigma_z == sigma_R):
+                    # only the rotationAngle = 0 case is unique
+                    if sigma_z == sigma_R and rotationAngle > 0.0:
+                        continue
+                    # --- Skip duplicates: rotationAngle 90 with sigma_z equal
+                    # to one of the sigma_R values reproduces a 0-degree case
+                    if rotationAngle == 90 and sigma_z in sigma_R_vals:
+                        continue
+
+                    cfg = dict(config)
+                    cfg["sigma_R"] = sigma_R
+                    cfg["sigma_z"] = sigma_z
+                    cfg["rotationAngle"] = rotationAngle
+                    arg_list.extend((val, cfg) for val in rzArray)
+
+        # CHANGE THIS BELOW, let's go back to the older
+        worker_fn = {
+            "Helical": Util_radDist.radDist_Helical_parallel,
+            "ElongatedRing": Util_radDist.radDist_ElongatedRing_parallel,
+            "HelicalRing": Util_radDist.radDist_HelicalRing_parallel,
+            "SquareTube": Util_radDist.radDist_SquareTube_parallel,
+        }.get(config["distType"])
+        if worker_fn is None:
+            print(f"Unknown distType: {config['distType']}")
+            sys.exit()
+
+        print(f"Submitting {len(arg_list)} radDists to {numProcessors} workers")
+
+        with ProcessPoolExecutor(
+            max_workers=numProcessors,
+        ) as executor:
+            # --- Explicitly consume results so the iterator is cleared and
+            # worker exceptions surface
+            for _ in executor.map(worker_fn, arg_list):
+                pass
+
     else:
         print(f"Problem making the rzArray")
+
+"""
+# OLD SCRIPT: which went below for sigma_z in sigma_z_vals:
+
+
+# --- Split the rzArray to conserve memory during the process pool executor,
+# try to have it split up evenly between the numbe of processors used
+num_split = 1
+if rzArray.shape[0] > (numProcessors - 1.0):
+    num_split = np.floor((rzArray.shape[0] / (numProcessors - 1.0)))
+rzArray_split = np.array_split(rzArray, num_split)
+for rz in rzArray_split:
+    # --- Skip rotation angle if the sigma_R and sigma_z are equal (aka a circle)
+    # only do the case where the rotationAngle = 0
+    if sigma_z == sigma_R and rotationAngle > 0.0:
+        pass
+    # --- Skip where sigma_z is a sigma_R value for rotationAngle 90
+    if rotationAngle == 90 and sigma_z in sigma_R_vals:
+        pass
+    else:
+        # --- Add stuff to the config, create list of r, z points to solve at
+        # this sigma_z and sigma_R
+        config["sigma_R"] = sigma_R
+        config["sigma_z"] = sigma_z
+        config["rotationAngle"] = rotationAngle
+        arg_list = [(val, config) for val in rz]
+
+        # --- Start computation in parrallel minus 2 of your processors (so you can actually use your computer)
+        if config["distType"] == "Helical":
+            with ProcessPoolExecutor(
+                max_workers=numProcessors
+            ) as executor:
+                # --- Explicitly consume results so iterator is cleared
+                for _ in executor.map(
+                    Util_radDist.radDist_Helical_parallel, arg_list
+                ):
+                    pass
+        elif config["distType"] == "ElongatedRing":
+            with ProcessPoolExecutor(
+                max_workers=numProcessors
+            ) as executor:
+                # --- Explicitly consume results so iterator is cleared
+                for _ in executor.map(
+                    Util_radDist.radDist_ElongatedRing_parallel,
+                    arg_list,
+                ):
+                    pass
+"""

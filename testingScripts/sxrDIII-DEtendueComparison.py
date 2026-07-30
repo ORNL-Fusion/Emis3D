@@ -1,6 +1,12 @@
 # sxrDIII-DEtendueComparison.py
 """
 Calculates the etendue with Emis3D and compares it to the measured values
+
+NOTE: If you are getting this error:
+'Bolometer' object has no attribute 'etendues_analytic'
+
+It is because you have the ETENDUE field in the bolometer configuration files,
+so the program skips ray-tracing the etendue's.
 """
 
 import os
