@@ -28,7 +28,7 @@ from main.Util import (
     XY_To_RPhi,
     convert_arrays_to_list,
     save_json,
-    phase_timer,
+    # phase_timer,
     fieldline_key,
 )
 import matplotlib.pyplot as plt
@@ -60,17 +60,7 @@ class RadDist(ABC):
         Initializes an instance of the tokamak class
         """
         # TIMER ADDITION
-        with phase_timer("tokamak build (CAD load + scene graph)"):
-            self.tokamak = Tokamak(
-                tokamakName=tokamakName,
-                mode=mode,
-                reflections=reflections,
-                eqFileName=eqFileName,
-                loadBolometers=loadBolometers,
-            )
-
-        """
-        # OLD CODE:
+        # with phase_timer("tokamak build (CAD load + scene graph)"):
         self.tokamak = Tokamak(
             tokamakName=tokamakName,
             mode=mode,
@@ -78,7 +68,6 @@ class RadDist(ABC):
             eqFileName=eqFileName,
             loadBolometers=loadBolometers,
         )
-        """
 
     def _evaluate_cherab(self, X, Y, Z) -> np.ndarray:
         """
@@ -104,13 +93,10 @@ class RadDist(ABC):
 
         Required values in config file:
         pixelSamples    :: Resolution of the sightline. Higher = better, but takes longer.
-        #numProcessors   :: Hard-wired to 1, observation speed increases use multiple
-        #                   processors in other locations.
         """
 
         boloCameras = self.tokamak.bolometers
         pixelSamples = self.info["BOLOMETER_PROPS"]["pixelSamples"]
-        # numProcessors = 1  # self.info["BOLOMETER_PROPS"]["numProcessors"]
 
         for bolo_ in boloCameras:
             # --- Either does the top or bottom loop depending on on if there is an extra bolometerCamera layer
@@ -124,7 +110,7 @@ class RadDist(ABC):
                 )
                 foils = []
             for foil in foils:
-                # foil.render_engine.processes = numProcessors
+                # SerialEngine required since user typically uses make_radDists(), which already uses multiple processors
                 foil.render_engine = SerialEngine()
 
                 foil.pixel_samples = pixelSamples
@@ -218,15 +204,13 @@ class RadDist(ABC):
 
         # self.power_per_bin_calc()
         # TIMER ADDITION
-        with phase_timer("build/calc_radiated_power"):
-            self.calc_radiated_power()
-        with phase_timer("build/bolos_observe"):
-            self.bolos_observe()
-        # self.calc_radiated_power()
-        # self.bolos_observe()
+        # with phase_timer("build/calc_radiated_power"):
+        self.calc_radiated_power()
+        # with phase_timer("build/bolos_observe"):
+        self.bolos_observe()
         self._get_observed_phi_loc()
-        with phase_timer("build/saveRadDist"):
-            self.saveRadDist()
+        # with phase_timer("build/saveRadDist"):
+        self.saveRadDist()
 
     def _total_radiated_power(
         self,
@@ -479,8 +463,8 @@ class RadDist(ABC):
         # --- Calculate etendue's if asking for radiance
         if units in ["Radiance", "Brightness"]:
             # TIMER ADDITION
-            with phase_timer("bolos_observe/calc_etendues"):
-                self.tokamak.calc_etendues()
+            # with phase_timer("bolos_observe/calc_etendues"):
+            self.tokamak.calc_etendues()
 
         # --- Populate world with emitter, this cannot be a seperate definition!
         # unless you include the emitter.material changes in that def as well!
