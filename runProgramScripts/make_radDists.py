@@ -149,6 +149,8 @@ if __name__ == "__main__":
         worker_fn = {
             "Helical": Util_radDist.radDist_Helical_parallel,
             "ElongatedRing": Util_radDist.radDist_ElongatedRing_parallel,
+            "HelicalRing": Util_radDist.radDist_HelicalRing_parallel,
+            "SquareTube": Util_radDist.radDist_SquareTube_parallel,
         }.get(config["distType"])
         if worker_fn is None:
             print(f"Unknown distType: {config['distType']}")
@@ -156,14 +158,8 @@ if __name__ == "__main__":
 
         print(f"Submitting {len(arg_list)} radDists to {numProcessors} workers")
 
-        # --- ONE executor for the whole run. Each worker builds the tokamak
-        # once (initializer) and reuses it for every radDist it processes;
-        # observations inside workers run on a SerialEngine, so this is the
-        # only layer of parallelism.
         with ProcessPoolExecutor(
             max_workers=numProcessors,
-            initializer=Util_radDist.init_worker_tokamak,
-            initargs=(tokamakName, config["eqFileName"]),
         ) as executor:
             # --- Explicitly consume results so the iterator is cleared and
             # worker exceptions surface

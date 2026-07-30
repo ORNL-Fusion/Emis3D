@@ -24,7 +24,13 @@ import main.Util_radDist as Util_radDist
 logger = logging.getLogger(__name__)
 from main.Globals import EMIS3D_INPUTS_DIRECTORY
 from main.Tokamak import Tokamak
-from main.Util import XY_To_RPhi, convert_arrays_to_list, save_json, phase_timer
+from main.Util import (
+    XY_To_RPhi,
+    convert_arrays_to_list,
+    save_json,
+    phase_timer,
+    fieldline_key,
+)
 import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 from abc import ABC, abstractmethod
@@ -907,7 +913,7 @@ class Helical(RadDist):
             numTransists=1.0,
         )
 
-        startPhideg = str(int(np.rad2deg(start_phi)))
+        startPhideg = fieldline_key(start_phi, degrees=False)
 
         if startPhideg not in self.tokamak.fieldLines:
             raise RuntimeError(
@@ -1038,7 +1044,7 @@ class HelicalRing(RadDist):
             startPhi=self.info["startPhiRad"],
             numTransists=numTransists,
         )
-        startPhideg = f'{int(np.rad2deg(self.info["startPhiRad"]))}'
+        startPhideg = fieldline_key(self.info["startPhiRad"], degrees=False)
 
         if startPhideg not in self.tokamak.fieldLines:
             raise RuntimeError(

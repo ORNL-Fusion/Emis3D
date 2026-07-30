@@ -48,9 +48,11 @@ def radDist_ElongatedRing_parallel(
     elongatedRing.build()
 
     logger.info(
-        "DONE with elongatedRing radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1]
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
     )
-    print("DONE with elongatedRing radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1])
+    print(
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
+    )
 
     if return_result:
         return elongatedRing
@@ -77,9 +79,11 @@ def radDist_Helical_parallel(
     helical.build()
 
     logger.info(
-        "DONE with helical radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1]
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
     )
-    print("DONE with helical radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1])
+    print(
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
+    )
 
     if return_result:
         return helical
@@ -106,9 +110,11 @@ def radDist_HelicalRing_parallel(
     helical.build()
 
     logger.info(
-        "DONE with helical radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1]
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
     )
-    print("DONE with helical radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1])
+    print(
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
+    )
 
     if return_result:
         return helical
@@ -134,10 +140,12 @@ def radDist_SquareTube_parallel(
     squareTube.build()
 
     logger.info(
-        "DONE with squareTube radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1]
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
     )
-    print("DONE with squareTube radDist, R = %.2fm, z = %.2fm", rzArray[0], rzArray[1])
-    
+    print(
+        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
+    )
+
     if return_result:
         return squareTube
 

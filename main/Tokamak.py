@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 from main.Util import (
     config_loader,
+    fieldline_key,
     point3d_to_rz,
     draw_radial_lines,
     find_intersection,
@@ -219,7 +220,6 @@ class Tokamak(object):
                 rzarray = np.loadtxt(pathFileName, skiprows=0)
             except ValueError:
                 rzarray = np.loadtxt(pathFileName, delimiter=",", skiprows=0)
-
 
         # --- Store the wall information
         if rzarray is not None:
@@ -872,11 +872,13 @@ class Tokamak(object):
         # --- Plot the given field line
         if hasattr(self, "fieldLines"):
             colors = ["red", "green", "blue", "orange", "purple", "brown"]
-            if str(fieldLineStartPhi) in self.get_fieldLines_startPhis():
+            fieldlineKey = fieldline_key(fieldLineStartPhi)
+
+            if str(fieldlineKey) in self.get_fieldLines_startPhis():
                 for ii, dir_ in enumerate(
-                    self.fieldLines[f"{fieldLineStartPhi}"]["directionNames"]
+                    self.fieldLines[f"{fieldlineKey}"]["directionNames"]
                 ):
-                    line_ = self.fieldLines[f"{fieldLineStartPhi}"][dir_]
+                    line_ = self.fieldLines[f"{fieldlineKey}"][dir_]
                     ax.plot(
                         line_["x"],
                         line_["y"],
@@ -887,9 +889,7 @@ class Tokamak(object):
                     )
 
             else:
-                logger.debug(
-                    f"Input fieldLinePhi of {fieldLineStartPhi}, not availble!"
-                )
+                logger.debug(f"Input fieldLinePhi of {fieldlineKey}, not availble!")
                 logger.debug(
                     f"Possible fieldLinePhi(s): {self.get_fieldLines_startPhis()}"
                 )
@@ -930,9 +930,12 @@ class Tokamak(object):
         """
 
         if numTransists > 1:
-            raise ValueError(f"ERROR! Code currently does not support more than 1 toroidal transit of the field lines!")
+            raise ValueError(
+                f"ERROR! Code currently does not support more than 1 toroidal transit of the field lines!"
+            )
 
-        startPhideg = f"{int(np.rad2deg(startPhi))}"
+        startPhideg = fieldline_key(startPhi, degrees=False)
+
         # --- Initialize the arrays
         if not hasattr(self, "fieldLines"):
             self.fieldLines = {}
@@ -1013,7 +1016,16 @@ class Tokamak(object):
         The sort index is pre-computed in set_fieldlines() and cached, so this
         method only pays the searchsorted cost on each call.
         """
-        fline = self.fieldLines[startPhi][emissionName]
+
+        key = fieldline_key(startPhi)
+        if key not in self.fieldLines:
+            raise KeyError(
+                f"No field lines traced at {startPhi} deg (key '{key}')"
+                f"Available: {self.get_fieldLines_startPhis()}"
+            )
+
+        fline = self.fieldLines[key][emissionName]
+
         sidx_B = fline["phi_sidx"]
         sorted_B = fline["phi_sorted"]
         A = np.array(inputPhis)

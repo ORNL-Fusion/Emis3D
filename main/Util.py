@@ -558,3 +558,14 @@ def extract_end_numbers(text):
     match = re.search(r"\d+$", text)
 
     return match.group() if match else None
+
+
+def fieldline_key(phi, degrees: bool = True) -> str:
+    """Helper used to find/set the key used for a field line
+    starting at the given phi
+    """
+    value = float(phi)
+    if not degrees:
+        value = np.rad2deg(value)
+
+    return str(int(round(value)) % 360)
