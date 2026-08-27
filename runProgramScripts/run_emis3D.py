@@ -44,7 +44,7 @@ def runParallel_with_global(job):
             _global_data_dict,
             synth_dict,
             scale_def,
-            helical_endpoint_weight
+            helical_endpoint_weight,
         )
     )
 
@@ -53,14 +53,14 @@ if __name__ == "__main__":
 
     # --- Update these parameters:
     evalTimes = [
-        50.949,
+        # 50.949,
         # 50.951,
-        #50.953,
-        #50.95,
-        #50.955,
-        #50.9556,
-        #50.9569,
-        #50.9627,
+        # 50.953,
+        # 50.95,
+        # 50.955,
+        # 50.9556,
+        50.9569,
+        # 50.9627,
     ]
     tokamakName = "JET"
     runConfigName = "95709/95709_runConfig.yaml"
@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
         jobs = []
         data_dict = t.fitData[evalTime]
-        scale_def = "linear" # Default value if none are given
+        scale_def = "linear"  # Default value if none are given
         max_workers = 1  # Default value if none are given
         helical_endpoint_weight = 1.0  # Default: endpoint constraint active
         if t.info is not None:
@@ -127,8 +127,9 @@ if __name__ == "__main__":
         start_time = time.time()
         t._cleanup_fits(evalTime=evalTime)  # to save memory
         t._plot_bestFit(evalTime=evalTime, save=True)
-        print(f"→ Program completed for evalTime {evalTime:.4f} in {time.time() - start_time0:.2f} seconds\n")
+        print(
+            f"→ Program completed for evalTime {evalTime:.4f} in {time.time() - start_time0:.2f} seconds\n"
+        )
 
     # --- Save the best fits and the fit data after everything is done
     t._save_bestFits()
-    

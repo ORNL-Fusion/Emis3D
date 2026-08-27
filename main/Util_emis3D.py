@@ -79,6 +79,24 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
     return A * np.ones(dphi.shape[0])
 
 
+def scale_step(
+    A: float, B: float, phi: np.ndarray, mu: float, bolo_phi_locs: np.ndarray
+) -> np.ndarray:
+    """
+    Inputs:
+    A: float, use as the highest amplitude in the step function
+    B: float, use as the lowest amplitude in the step function
+    phi: Input phi locations (in radians) for every channel for every bolometer (more for toroidal bolometers)
+    mu: injection location
+    bolo_phi_locs: list of just the bolometer phi locations (ex, [90, 225] for JET)
+
+
+    """
+    A_arr1 = np.array([A, B])
+
+    return np.zeros(len(phi))
+
+
 def scale_wrapper(
     a: float,
     b: float,
@@ -128,6 +146,14 @@ def scale_wrapper(
         return scale_linear(a, b, dphi)
     elif scale_def == "constant":
         return scale_constant(a, dphi)
+    elif scale_def == "step":
+        if bolo_phi_locs is not None:
+            return scale_step(a, b, phi, mu, bolo_phi_locs)
+        else:
+            print(
+                f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def"
+            )
+            return np.zeros(len(dphi))
     else:
         return np.ones(dphi.shape[0])
 
