@@ -124,7 +124,7 @@ class Tokamak(object):
         # Angle conventions used in each tokamak are different from that used in Cherab.
         # Emis3D uses the Cherab angle convention. This angle is subtracted in the evaluate
         # statements in RadDist to make the angles match.
-        torConventionPhis = {"JET": np.pi / 2.0, "SPARC": 0.0, "DIII-D": 0.0}
+        torConventionPhis = {"JET": np.pi / 2.0, "SPARC": 0.0, "DIII-D": 0.0, "AUG" : 0.0}
         self.info["torConventionPhi"] = torConventionPhis[tokamakName]
         self.info["tokamakName"] = tokamakName
         self.info["mode"] = mode

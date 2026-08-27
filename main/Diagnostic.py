@@ -116,6 +116,8 @@ class Bolometer(object):
                 self._build_from_primitives()
             elif self.info["BUILD_TYPE"] == "KB5V":
                 self.load_kb5_camera(camera_id="KB5V", parent=self.world)
+            elif self.info["BUILD_TYPE"] == "FROM PRIMITIVES LIST":
+                self._build_from_primitives_list()
             else:
                 print(f"Build type of {self.info['BUILD_TYPE']} not yet supported!")
         else:
@@ -336,6 +338,111 @@ class Bolometer(object):
         bolometer_camera.transform = basis_matrix
 
         self.bolometer_camera = bolometer_camera
+
+        
+    def _build_from_primitives_list(self) -> None:
+        """
+        Builds the bolometer camera from a list of slit and foil
+        primitives given directly in the configuration file, 
+        based on cherab/aug bolometers
+ 
+        Expects, in self.info:
+            SLITS: list of dicts, each with
+                ID, CENTRE_POINT [x, y, z], BASIS_X [x, y, z],
+                BASIS_Y [x, y, z], DX, DY, DZ
+            FOILS: list of dicts, each with
+                ID, CENTRE_POINT [x, y, z], BASIS_X [x, y, z],
+                BASIS_Y [x, y, z], DX, DY, SLIT_ID
+    
+        Optional, in self.info:
+            CSG_APERTURE: bool, default True. Passed to every BolometerSlit.
+            FOIL_CORNER_CURVATURE: float, default 0.0. Default curvature
+                radius for every foil; can be overridden per-foil with a
+                CURVATURE_RADIUS key on that foil's dict.
+        """
+ 
+        if self.info is None:
+            print(
+                "Bolometer configuration info is missing; cannot build from primitives list."
+            )
+            return
+ 
+        if "SLITS" not in self.info or "FOILS" not in self.info:
+            print(
+                "Configuration file is missing 'SLITS' and/or 'FOILS'; "
+                "cannot build from primitives list."
+            )
+            return
+ 
+        csg_aperture = self.info.get("CSG_APERTURE", True)
+        default_curvature_radius = self.info.get("FOIL_CORNER_CURVATURE", 0.0)
+ 
+        bolometer_camera = BolometerCamera(
+            name=self.info.get("NAME", "bolometer_camera"), parent=self.world
+        )
+ 
+        # --- Build each slit
+        slit_objects = {}
+        for slit_data in self.info["SLITS"]:
+            slit_id = str(slit_data["ID"])
+            centre_point = Point3D(*slit_data["CENTRE_POINT"])
+            basis_x = Vector3D(*slit_data["BASIS_X"]).normalise()
+            basis_y = Vector3D(*slit_data["BASIS_Y"]).normalise()
+            dx = float(slit_data["DX"])
+            dy = float(slit_data["DY"])
+            dz = float(slit_data["DZ"])
+ 
+            slit_objects[slit_id] = BolometerSlit(
+                slit_id,
+                centre_point,
+                basis_x,
+                dx,
+                basis_y,
+                dy,
+                dz,
+                parent=bolometer_camera,
+                csg_aperture=csg_aperture,
+            )
+ 
+        # --- Build each foil, hooking it up to its slit
+        for foil_data in self.info["FOILS"]:
+            foil_id = str(foil_data["ID"])
+            slit_id = str(foil_data["SLIT_ID"])
+ 
+            if slit_id not in slit_objects:
+                raise ValueError(
+                    f"Foil '{foil_id}' references slit '{slit_id}', which is "
+                    f"not defined in the 'SLITS' section of the configuration "
+                    f"file."
+                )
+ 
+            centre_point = Point3D(*foil_data["CENTRE_POINT"])
+            basis_x = Vector3D(*foil_data["BASIS_X"]).normalise()
+            basis_y = Vector3D(*foil_data["BASIS_Y"]).normalise()
+            dx = float(foil_data["DX"])
+            dy = float(foil_data["DY"])
+            curvature_radius = float(
+                foil_data.get("CURVATURE_RADIUS", default_curvature_radius)
+            )
+ 
+            foil = BolometerFoil(
+                detector_id=foil_id,
+                centre_point=centre_point,
+                basis_x=basis_x,
+                dx=dx,
+                basis_y=basis_y,
+                dy=dy,
+                slit=slit_objects[slit_id],
+                parent=bolometer_camera,
+                accumulate=False,
+                curvature_radius=curvature_radius,
+                units="Radiance",
+            )
+ 
+            bolometer_camera.add_foil_detector(foil)
+ 
+        self.bolometer_camera = bolometer_camera
+
 
     def _calc_etendues(self) -> None:
         """

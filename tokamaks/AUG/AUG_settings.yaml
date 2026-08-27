@@ -1,0 +1,40 @@
+# Config file for the ASDEX Upgrade tokamak
+
+
+# --- Machine parameters
+MACHINE:
+  device: 'AUG'
+  volume:  30 # m3
+  majorRadius: 1.65 # m
+  minorRadius: 0.5 # m
+  wallFileName: 'aug_Limiter_RZ.txt'
+  numInjectors: 1 # number of dismit injectors
+  PFC_STL_PATH: 'AUG_CAD.stl' # stl CAD file of the tokamak
+  STL_UNITS: 'm'
+
+
+# --- SXR/Bolometer parameter filenames
+BOLOMETERS:
+  F01:
+    configFileName: 'F01_config.yaml' # NOTE: 
+  F05:
+    configFileName: 'F05_config.yaml' # NOTE: 
+  F09:
+    configFileName: 'F09_config.yaml' # NOTE: 
+  F15:
+    configFileName: 'F15_config.yaml' # NOTE: 
+  F16:
+    configFileName: 'F16_config.yaml' # NOTE: 
+  FDC:
+    configFileName: 'FDC_config.yaml' # NOTE: 
+  FHC:
+    configFileName: 'FHC_config.yaml' # NOTE: 
+  FHS:
+    configFileName: 'FHS_config.yaml' # NOTE: 
+  FLX:
+    configFileName: 'FLX_config.yaml' # NOTE: 
+  FVC:
+    configFileName: 'FVC_config.yaml' # NOTE: 
+    
+
+

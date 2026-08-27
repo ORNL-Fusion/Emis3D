@@ -1,0 +1,176 @@
+# FLX configuration file
+#
+# Ported from AUG-format CSV files (../tokamaks/AUG/inputs/sxrInfo/detectors/FLX_foils.csv, ../tokamaks/AUG/inputs/sxrInfo/detectors/FLX_slits.csv) with
+# convert_aug_bolometer_to_yaml.py. To be used with the Diagnostic._build_from_primitives_list()
+#
+# CAMERA_POSITION_R_Z_PHI and SLIT_SENSOR_SEPARATION below are NOT used to
+# build the geometry (the SLITS/FOILS lists are exact). They are kept only 
+# because Tokamak._load_bolometers() and Emis3D's toroidal-grouping code 
+# expect every bolometer to have these parameters.
+
+"NAME": "FLX"
+"GROUP_NAME": "FLX"
+"NUM_CHANNELS": !!int "8"
+"TYPE": "aug_multi_slit"
+"CHANNEL_TAGS":
+- "FLX_A_CH1"
+- "FLX_A_CH2"
+- "FLX_A_CH3"
+- "FLX_A_CH4"
+- "FLX_B_CH5"
+- "FLX_B_CH6"
+- "FLX_B_CH7"
+- "FLX_B_CH8"
+"BUILD_TYPE": "FROM PRIMITIVES LIST"
+"CAMERA_POSITION_R_Z_PHI":
+- !!float "1.9396851934203783"
+- !!float "-0.941963888888889"
+- !!float "112.44310326133609"
+"SLIT_SENSOR_SEPARATION": !!float "0.02974507229363193"
+"SLITS":
+- "ID": "SLIT_FLX_1"
+  "CENTRE_POINT":
+  - !!float "-0.730506"
+  - !!float "1.765477"
+  - !!float "-0.935546"
+  "BASIS_X":
+  - !!float "-0.07299670609797"
+  - !!float "0.20299084024501"
+  - !!float "-0.97645593841989"
+  "BASIS_Y":
+  - !!float "0.9390802295729"
+  - !!float "0.34369603006378"
+  - !!float "0.00116676634844"
+  "DX": !!float "0.00400018"
+  "DY": !!float "0.00599949"
+  "DZ": !!float "0.001"
+"FOILS":
+- "ID": "FLX_A_CH1"
+  "CENTRE_POINT":
+  - !!float "-0.742553"
+  - !!float "1.798436"
+  - !!float "-0.924595"
+  "BASIS_X":
+  - !!float "0.93915212517869"
+  - !!float "0.34349915171796"
+  - !!float "-0.00127221908045"
+  "BASIS_Y":
+  - !!float "-0.00133328948361"
+  - !!float "0.0079997369018"
+  - !!float "0.99996711273354"
+  "DX": !!float "0.00393014"
+  "DY": !!float "0.00150005"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_A_CH2"
+  "CENTRE_POINT":
+  - !!float "-0.742546"
+  - !!float "1.798396"
+  - !!float "-0.929675"
+  "BASIS_X":
+  - !!float "0.93907029602815"
+  - !!float "0.34372364398107"
+  - !!float "-0.0010176865847"
+  "BASIS_Y":
+  - !!float "-0.00133328948368"
+  - !!float "0.00799973690195"
+  - !!float "0.99996711273354"
+  "DX": !!float "0.00393048"
+  "DY": !!float "0.00150005"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_A_CH3"
+  "CENTRE_POINT":
+  - !!float "-0.742537"
+  - !!float "1.798357"
+  - !!float "-0.934755"
+  "BASIS_X":
+  - !!float "0.93915239878896"
+  - !!float "0.34349925179227"
+  - !!float "-0.00101777556084"
+  "BASIS_Y":
+  - !!float "-0.00133329629788"
+  - !!float "0.00733312963811"
+  - !!float "0.99997222337958"
+  "DX": !!float "0.00393014"
+  "DY": !!float "0.00150004"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_A_CH4"
+  "CENTRE_POINT":
+  - !!float "-0.742529"
+  - !!float "1.798317"
+  - !!float "-0.939835"
+  "BASIS_X":
+  - !!float "0.93907002248959"
+  - !!float "0.34372354385899"
+  - !!float "-0.0012721078603"
+  "BASIS_Y":
+  - !!float "-0.00133328948361"
+  - !!float "0.0079997369018"
+  - !!float "0.99996711273354"
+  "DX": !!float "0.00393048"
+  "DY": !!float "0.00150005"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_B_CH5"
+  "CENTRE_POINT":
+  - !!float "-0.742041"
+  - !!float "1.796957"
+  - !!float "-0.946381"
+  "BASIS_X":
+  - !!float "0.93907002248961"
+  - !!float "0.34372354385895"
+  - !!float "-0.00127210786033"
+  "BASIS_Y":
+  - !!float "-0.14135768036389"
+  - !!float "0.38940040251195"
+  - !!float "0.9101567627204"
+  "DX": !!float "0.00393048"
+  "DY": !!float "0.00149974"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_B_CH6"
+  "CENTRE_POINT":
+  - !!float "-0.741323"
+  - !!float "1.794981"
+  - !!float "-0.951005"
+  "BASIS_X":
+  - !!float "0.93912236548443"
+  - !!float "0.34358135322599"
+  - !!float "-0.00101801882437"
+  "BASIS_Y":
+  - !!float "-0.14130855940424"
+  - !!float "0.38859853836167"
+  - !!float "0.91050703842544"
+  "DX": !!float "0.0039292"
+  "DY": !!float "0.00150026"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_B_CH7"
+  "CENTRE_POINT":
+  - !!float "-0.740606"
+  - !!float "1.793004"
+  - !!float "-0.955629"
+  "BASIS_X":
+  - !!float "0.93907002248961"
+  - !!float "0.34372354385894"
+  - !!float "-0.00127210786033"
+  "BASIS_Y":
+  - !!float "-0.14127194046969"
+  - !!float "0.3891642133693"
+  - !!float "0.91027108812078"
+  "DX": !!float "0.00393048"
+  "DY": !!float "0.00150065"
+  "SLIT_ID": "SLIT_FLX_1"
+- "ID": "FLX_B_CH8"
+  "CENTRE_POINT":
+  - !!float "-0.739888"
+  - !!float "1.791028"
+  - !!float "-0.960254"
+  "BASIS_X":
+  - !!float "0.93915212517866"
+  - !!float "0.34349915171806"
+  - !!float "-0.00127221908045"
+  "BASIS_Y":
+  - !!float "-0.14074065314591"
+  - !!float "0.38887109376342"
+  - !!float "0.9104786329109"
+  "DX": !!float "0.00393014"
+  "DY": !!float "0.00149921"
+  "SLIT_ID": "SLIT_FLX_1"
+"CAMERA_DOWNWARD_FACING": !!bool "false"

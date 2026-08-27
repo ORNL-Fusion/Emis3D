@@ -743,9 +743,13 @@ class RadDist(ABC):
                     for jj, bolo in enumerate(bolometers):
                         if bolo.info["GROUP_NAME"] == boloGroup:
                             ch_tags = bolo.info["CHANNEL_TAGS"]
+                            print(ch_tags)
                             c_ = []
-                            for ch in ch_tags:  # type: ignore
-                                c_.append(int(ch[-2:]))
+                            for ch in ch_tags:
+                                i = len(ch) - 1
+                                while i >= 0 and ch[i].isdigit():
+                                    i -= 1
+                                c_.append(int(ch[i+1:]))
 
                             data_ += self.data[self.info["units"]][emissionName][
                                 bolo.info["NAME"]

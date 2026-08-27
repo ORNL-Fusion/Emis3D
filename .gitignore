@@ -216,8 +216,35 @@ tokamaks/*
 !tokamaks/DIII-D/
 !tokamaks/DIII-D/**
 
+# Keep the AUG folder
+!tokamaks/AUG/
+!tokamaks/AUG/**
+
 # Ignore all input files
 inputs/*
 
 *.pyc
 .DS_Store
+
+#Ignore random stuff
+tokamaks/AUG/inputs/sxrInfo/detectors/F01_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F01_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F05_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F05_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F09_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F09_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F15_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F15_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F16_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/F16_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FDC_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FDC_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FHC_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FHC_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FHS_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FHS_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FLX_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FLX_slits.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FVC_foils.csv
+tokamaks/AUG/inputs/sxrInfo/detectors/FVC_slits.csv
+tokamaks/AUG/inputs/sxrInfo/yamlify_aug_bolo_csvs.ipynb

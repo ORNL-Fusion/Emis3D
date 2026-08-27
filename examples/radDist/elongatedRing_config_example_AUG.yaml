@@ -1,0 +1,26 @@
+# Elongated ring radDist configuration file for shot 184407
+
+distType: "ElongatedRing"
+tokamakName: "AUG"
+saveRunsDirectoryName: "elongatedRing" # To save the radDists. Program will still create subfolders of each run within this directory
+shotNumber: 40889
+units: "Power" # Options: Power (W), Radiance (W/m2/sr), or Brightness (W/m2)
+injectionLocation: 225 # Toroidal injection location of the disruption mitigation system [degrees] (right-handed coordinate system!)
+numBins: 32 # The number of bins toroidally for the radiation distribution
+eqFileName: "" # Name of the equilibrium file to be used. Only requred for helical distributions
+sigma_R_vals:  [0.3] # format: [0.3, 0.4, 0.5] 
+sigma_z_vals: [0.25]
+rotationAngles: [30] # Rotate the elongated ring around its axis, doesn't matter for helical distributions 0, 30, 60, 90, 120, 150
+numProcessors: 2 # Number of processors to use while creating radDists (aka, 5 will create 5 at the same time)
+
+
+
+GRID:
+  # Add R and z limits here, if none the program will default to using the wall
+  rLimits: [1, 2.25] # in meters, if left empty ([]) the program will use the wall to find the limits
+  zLimits: [-1.2, 1.2]
+  NumRStartGrid: 1 # Number of points in the R grid, 10 is usually sufficient
+  NumZStartGrid: 1 # Number of points in the z grid, 20 is usually sufficient
+
+BOLOMETER_PROPS:
+  pixelSamples: 500 # Resolution of the observed chord in Cherab, 5000 is a decent number but it is lowered in this example

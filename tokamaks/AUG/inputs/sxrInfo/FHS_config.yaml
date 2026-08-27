@@ -1,0 +1,176 @@
+# FHS configuration file
+#
+# Ported from AUG-format CSV files (../tokamaks/AUG/inputs/sxrInfo/detectors/FHS_foils.csv, ../tokamaks/AUG/inputs/sxrInfo/detectors/FHS_slits.csv) with
+# convert_aug_bolometer_to_yaml.py. To be used with the Diagnostic._build_from_primitives_list()
+#
+# CAMERA_POSITION_R_Z_PHI and SLIT_SENSOR_SEPARATION below are NOT used to
+# build the geometry (the SLITS/FOILS lists are exact). They are kept only 
+# because Tokamak._load_bolometers() and Emis3D's toroidal-grouping code 
+# expect every bolometer to have these parameters.
+
+"NAME": "FHS"
+"GROUP_NAME": "FHS"
+"NUM_CHANNELS": !!int "8"
+"TYPE": "aug_multi_slit"
+"CHANNEL_TAGS":
+- "FHS_A_CH1"
+- "FHS_A_CH2"
+- "FHS_A_CH3"
+- "FHS_A_CH4"
+- "FHS_B_CH5"
+- "FHS_B_CH6"
+- "FHS_B_CH7"
+- "FHS_B_CH8"
+"BUILD_TYPE": "FROM PRIMITIVES LIST"
+"CAMERA_POSITION_R_Z_PHI":
+- !!float "1.092134642899681"
+- !!float "0.7719435555555555"
+- !!float "90.42132724239738"
+"SLIT_SENSOR_SEPARATION": !!float "0.06668903797263157"
+"SLITS":
+- "ID": "SLIT_FHS_1"
+  "CENTRE_POINT":
+  - !!float "-0.002225"
+  - !!float "1.109247"
+  - !!float "0.707488"
+  "BASIS_X":
+  - !!float "0.0049994570329"
+  - !!float "0.96622839589204"
+  - !!float "0.2576386857622"
+  "BASIS_Y":
+  - !!float "0.99990233539341"
+  - !!float "-0.00136362715074"
+  - !!float "-0.01390899693746"
+  "DX": !!float "0.00300033"
+  "DY": !!float "0.01100007"
+  "DZ": !!float "0.001"
+"FOILS":
+- "ID": "FHS_A_CH1"
+  "CENTRE_POINT":
+  - !!float "-0.008848"
+  - !!float "1.07226"
+  - !!float "0.774133"
+  "BASIS_X":
+  - !!float "0.00666805228372"
+  - !!float "0.91819079946792"
+  - !!float "0.39608230565275"
+  "BASIS_Y":
+  - !!float "0.99990092052768"
+  - !!float "-0.00152656629087"
+  - !!float "-0.01399352433312"
+  "DX": !!float "0.00149969"
+  "DY": !!float "0.00393039"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_A_CH2"
+  "CENTRE_POINT":
+  - !!float "-0.008814"
+  - !!float "1.076925"
+  - !!float "0.776143"
+  "BASIS_X":
+  - !!float "0.00733226778784"
+  - !!float "0.91853318287654"
+  - !!float "0.39527589074441"
+  "BASIS_Y":
+  - !!float "0.99990127652663"
+  - !!float "-0.00127213902867"
+  - !!float "-0.01399352931529"
+  "DX": !!float "0.00150022"
+  "DY": !!float "0.00393039"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_A_CH3"
+  "CENTRE_POINT":
+  - !!float "-0.008779"
+  - !!float "1.081589"
+  - !!float "0.778154"
+  "BASIS_X":
+  - !!float "0.00666572908671"
+  - !!float "0.91853746814913"
+  - !!float "0.39527773484213"
+  "BASIS_Y":
+  - !!float "0.99990122627395"
+  - !!float "-0.0012724627466"
+  - !!float "-0.01399709021252"
+  "DX": !!float "0.00150021"
+  "DY": !!float "0.00392939"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_A_CH4"
+  "CENTRE_POINT":
+  - !!float "-0.008745"
+  - !!float "1.086254"
+  - !!float "0.780165"
+  "BASIS_X":
+  - !!float "0.00666397200502"
+  - !!float "0.91829534229197"
+  - !!float "0.3958399370983"
+  "BASIS_Y":
+  - !!float "0.99990480417321"
+  - !!float "-0.00127214351677"
+  - !!float "-0.01373914998101"
+  "DX": !!float "0.00150061"
+  "DY": !!float "0.00393037"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_B_CH5"
+  "CENTRE_POINT":
+  - !!float "-0.00871"
+  - !!float "1.093093"
+  - !!float "0.781987"
+  "BASIS_X":
+  - !!float "0.00266548404643"
+  - !!float "0.99355917830749"
+  - !!float "0.11328307197344"
+  "BASIS_Y":
+  - !!float "0.99990122627395"
+  - !!float "-0.00127246274655"
+  - !!float "-0.01399709021252"
+  "DX": !!float "0.00150067"
+  "DY": !!float "0.00392939"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_B_CH6"
+  "CENTRE_POINT":
+  - !!float "-0.008695"
+  - !!float "1.09814"
+  - !!float "0.782564"
+  "BASIS_X":
+  - !!float "0.00266724996911"
+  - !!float "0.9935506134927"
+  - !!float "0.11335812368716"
+  "BASIS_Y":
+  - !!float "0.9999008700938"
+  - !!float "-0.00152695475192"
+  - !!float "-0.01399708522654"
+  "DX": !!float "0.00149967"
+  "DY": !!float "0.00392939"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_B_CH7"
+  "CENTRE_POINT":
+  - !!float "-0.00868"
+  - !!float "1.103187"
+  - !!float "0.783141"
+  "BASIS_X":
+  - !!float "0.00266724996911"
+  - !!float "0.9935506134927"
+  - !!float "0.11335812368716"
+  "BASIS_Y":
+  - !!float "0.9999008700938"
+  - !!float "-0.00152695475192"
+  - !!float "-0.01399708522654"
+  "DX": !!float "0.00149967"
+  "DY": !!float "0.00392939"
+  "SLIT_ID": "SLIT_FHS_1"
+- "ID": "FHS_B_CH8"
+  "CENTRE_POINT":
+  - !!float "-0.008666"
+  - !!float "1.108234"
+  - !!float "0.783717"
+  "BASIS_X":
+  - !!float "0.00333405579036"
+  - !!float "0.99354862552805"
+  - !!float "0.11335789687233"
+  "BASIS_Y":
+  - !!float "0.99990092052768"
+  - !!float "-0.00152656629081"
+  - !!float "-0.01399352433309"
+  "DX": !!float "0.00149967"
+  "DY": !!float "0.00393039"
+  "SLIT_ID": "SLIT_FHS_1"
+"CAMERA_DOWNWARD_FACING": !!bool "false"
