@@ -35,6 +35,9 @@ import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 from abc import ABC, abstractmethod
 
+# For NIMROD class
+import json
+from cherab.core.math.interpolators.interpolators3d import Interpolate3DLinear
 
 class RadDist(ABC):
     """Parent RadDist class."""
@@ -1330,3 +1333,120 @@ class SquareTube(RadDist):
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
         return [[float(phi)] for _ in range(numChan)]
+
+class NIMROD(RadDist):
+    """
+    Takes emissivity data from a timestep of a NIMROD 3D MHD simulation
+    and interprets it as a radiation structure
+
+    Note: This class is very un-optimized. If we ever end up building a
+    lot of these we should linearize the evaluate function and stuff
+    like that.
+
+    Also, previous Emis3D implementation included a rotation angle in
+    case the NIMROD simulation used different angle convention from
+    Emis3D. Could be implemented if necessary
+    """
+
+    def __init__(
+        self,
+        # startR=None,
+        # startZ=None,
+        nimrodFile,
+        timestep,
+        config={},
+    ):
+
+        super(NIMROD, self).__init__(
+            config=config or {}
+        )
+        self.info["distType"] = "NIMROD"
+        self.info["emissionNames"] = ["NIMROD"]
+        self.info["startR"] = int(timestep) # haphazard way of making the savefile have the timestep in it
+        self.info["startZ"] = int(timestep)
+
+        self._build_tokamak(
+            tokamakName=self.info["tokamakName"],
+            mode="Build",
+            reflections=False,
+            eqFileName=self.info["eqFileName"],
+        )
+
+
+        str_ = f"→ Building NIMROD radDist"
+        logger.info("%s", str_)
+
+        with open(nimrodFile) as file:
+            properties = json.load(file)
+            # if "phiRotation" in properties.keys():
+            #     self.phiRotation = properties["phiRotation"]
+
+        self.emis_values = properties["pradArray"]
+        self.r_list = properties["r_list"]
+        self.z_list = properties["z_list"]
+        self.phi_list = properties["phi_list"]
+        self.rmin = min(self.r_list)
+        self.rmax = max(self.r_list)
+        self.zmin = min(self.z_list)
+        self.zmax = max(self.z_list)
+        self.interp_operator = Interpolate3DLinear(self.z_list, self.r_list, self.phi_list, self.emis_values)
+
+    def _evaluate(
+        self,
+        R: np.ndarray,
+        z: np.ndarray,
+        phi: np.ndarray,
+        emissionName: str | None = None,
+    ) -> dict:
+        """
+        Return the emissivity (W/m^3/rad) at the point (R,z,ph).
+
+        Parameters
+        ----------
+        R, z, phi    : array-like — evaluation coordinates.
+        emissionName : str, optional — defaults to self.emissionName if not given.
+        """
+
+        # --- Set emissionName if called with self._evaluate_cherab()
+        if emissionName is None:
+            emissionName = self.emissionName
+
+        localEmis = {}
+
+        # breakpoint()
+        localEmisVec = np.zeros(len(z))
+        #if (z >= self.zmin) and (z <= self.zmax) and (R >= self.rmin) and (R <= self.rmax):
+        for indx in range(len(z)):
+            zinst = z[indx]
+            Rinst = R[indx]
+            if phi.size > 1:
+                phiinst = phi[indx]
+            else:
+                phiinst = phi
+            if phiinst<0:
+                phiinst = phiinst + 2.0 * np.pi
+            if (zinst >= self.zmin) and (zinst <= self.zmax) and (Rinst >= self.rmin) and (Rinst <= self.rmax):
+                localEmisVec[indx] = self.interp_operator(zinst, Rinst, phiinst)
+            else:
+                localEmisVec[indx] = 0.0
+
+        localEmis[emissionName] = localEmisVec
+
+        return localEmis
+
+    def _scaling_factor(
+        self, bolo_info: dict = {}, emissionName: str | None = None
+    ) -> list:
+        """
+        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
+
+        Parameters
+        ----------
+        bolo_info    : dict — bolometer configuration.
+        emissionName : str  — used to extract the revolution number from the name.
+        """
+
+        numChan = bolo_info["NUM_CHANNELS"]
+        phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
+
+        return [float(phi)] * numChan
