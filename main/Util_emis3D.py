@@ -80,8 +80,7 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
 
 
 def scale_step(
-    A: float, B: float, phi: np.ndarray, mu: float, bolo_phi_locs: np.ndarray
-) -> np.ndarray:
+    A: float, B: float, phi: np.ndarray, bolo_phi_locs: np.ndarray, mu: float=None) -> np.ndarray:
     """
     Inputs:
     A: float, use as the highest amplitude in the step function
@@ -92,10 +91,21 @@ def scale_step(
 
 
     """
-    A_arr1 = np.array([A, B])
 
-    return np.zeros(len(phi))
+    A_arr1 = np.array([A, B]) # this is the un-generalized step. Ideally the function would just take
+                                  # A as an array input instead of floats
+    A_arr = np.concatenate((A_arr1, A_arr1, A_arr1))
+    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs+(2*np.pi), bolo_phi_locs-(2*np.pi)))
 
+    amplitudes = np.zeros(shape=phi.shape)
+    bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
+    phi_arr = np.tile(phi, (len(bolo_phis), 1)).transpose()
+    dists = np.abs(bolo_phis_arr-phi_arr)
+    dists_diffs = dists - np.min(dists, 1)[:, np.newaxis]
+    nearest_bolo_phi_indxs = np.argwhere(dists_diffs <1e-9)[:,1]
+    amplitudes = A_arr[nearest_bolo_phi_indxs]
+
+    return amplitudes
 
 def scale_wrapper(
     a: float,
@@ -148,7 +158,7 @@ def scale_wrapper(
         return scale_constant(a, dphi)
     elif scale_def == "step":
         if bolo_phi_locs is not None:
-            return scale_step(a, b, phi, mu, bolo_phi_locs)
+            return scale_step(A=a, B=b, phi=phi, bolo_phi_locs=bolo_phi_locs, mu=mu)
         else:
             print(
                 f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def"
