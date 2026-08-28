@@ -79,13 +79,11 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
     return A * np.ones(dphi.shape[0])
 
 
-def scale_step(
-    A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray, mu: float=None) -> np.ndarray:
+def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.ndarray:
     """
     Inputs:
     A: ndarray, use as the amplitudes in the step function
     phi: Input phi locations (in radians) for every channel for every bolometer (more for toroidal bolometers)
-    mu: injection location
     bolo_phi_locs: list of just the bolometer phi locations (ex, [90, 225] for JET)
 
     Amplitude at toroidal location phi is set to be equal to the amplitude A[i] at the
@@ -93,16 +91,17 @@ def scale_step(
     the bolometer locations.
     """
     A_arr = np.concatenate((A, A, A))
-    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs+(2*np.pi), bolo_phi_locs-(2*np.pi)))
+    bolo_phis = np.concatenate(
+        (bolo_phi_locs, bolo_phi_locs + (2 * np.pi), bolo_phi_locs - (2 * np.pi))
+    )
 
     amplitudes = np.zeros(shape=phi.shape)
     bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
     phi_arr = np.tile(phi, (len(bolo_phis), 1)).transpose()
-    dists = np.abs(bolo_phis_arr-phi_arr)
+    dists = np.abs(bolo_phis_arr - phi_arr)
     dists_diffs = dists - np.min(dists, 1)[:, np.newaxis]
-    nearest_bolo_phi_indxs = np.argwhere(dists_diffs <1e-9)[:,1]
+    nearest_bolo_phi_indxs = np.argwhere(dists_diffs < 1e-9)[:, 1]
     amplitudes = A_arr[nearest_bolo_phi_indxs]
-    
 
     return amplitudes
 
@@ -158,7 +157,7 @@ def scale_wrapper(
         return scale_constant(a, dphi)
     elif scale_def == "step":
         if bolo_phi_locs is not None:
-            return scale_step(A=np.array([a,b]), phi=phi, bolo_phi_locs=bolo_phi_locs, mu=mu)
+            return scale_step(A=np.array([a, b]), phi=phi, bolo_phi_locs=bolo_phi_locs)
         else:
             print(
                 f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def"
