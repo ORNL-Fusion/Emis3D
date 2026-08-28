@@ -1087,7 +1087,8 @@ class Emis3D:
             b = params[f"b_{emissionName}_{inj_loc_tag}"]
 
             scale_ = Util_emis3D.scale_wrapper(
-                a=np.array([a,b]),
+                a=a,
+                b=b,
                 phi=rD_phi,
                 dphi=dphi,
                 mu=mu_grid,

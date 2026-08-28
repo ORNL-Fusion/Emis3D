@@ -80,35 +80,6 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
 
 
 def scale_step(
-    A: float, B: float, phi: np.ndarray, bolo_phi_locs: np.ndarray, mu: float=None) -> np.ndarray:
-    """
-    Inputs:
-    A: float, use as the first amplitude in the step function
-    B: float, use as the second amplitude in the step function
-    phi: Input phi locations (in radians) for every channel for every bolometer (more for toroidal bolometers)
-    mu: injection location
-    bolo_phi_locs: list of just the bolometer phi locations (ex, [90, 225] for JET)
-
-
-    """
-
-    A_arr1 = np.array([A, B]) # this is the un-generalized step. Ideally the function would just take
-                                  # A as an array input instead of floats
-    A_arr = np.concatenate((A_arr1, A_arr1, A_arr1))
-    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs+(2*np.pi), bolo_phi_locs-(2*np.pi)))
-
-    amplitudes = np.zeros(shape=phi.shape)
-    bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
-    phi_arr = np.tile(phi, (len(bolo_phis), 1)).transpose()
-    dists = np.abs(bolo_phis_arr-phi_arr)
-    dists_diffs = dists - np.min(dists, 1)[:, np.newaxis]
-    nearest_bolo_phi_indxs = np.argwhere(dists_diffs <1e-9)[:,1]
-    amplitudes = A_arr[nearest_bolo_phi_indxs]
-
-    return amplitudes
-
-
-def scale_step_array(
     A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray, mu: float=None) -> np.ndarray:
     """
     Inputs:
@@ -117,7 +88,9 @@ def scale_step_array(
     mu: injection location
     bolo_phi_locs: list of just the bolometer phi locations (ex, [90, 225] for JET)
 
-
+    Amplitude at toroidal location phi is set to be equal to the amplitude A[i] at the
+    nearest bolo location bolo_phi_locs[i]. Width of the steps is fully determined by
+    the bolometer locations.
     """
     A_arr = np.concatenate((A, A, A))
     bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs+(2*np.pi), bolo_phi_locs-(2*np.pi)))
@@ -135,8 +108,8 @@ def scale_step_array(
 
 
 def scale_wrapper(
-    a: np.ndarray,
-    #b: float,
+    a: float,
+    b: float,
     phi: np.ndarray,
     mu: float = 0.0,
     scale_def: str | None = None,
@@ -150,7 +123,7 @@ def scale_wrapper(
 
     Parameters
     ----------
-    a             : Amplitudes and shape parameters of the scaling function
+    a             : Amplitude of the scaling function
     b             : Shape parameter used by most scaling functions
     phi           : Toroidal location(s) of each channel (radians)
     mu            : Injection location (radians)
@@ -178,14 +151,14 @@ def scale_wrapper(
         return
 
     if scale_def == "exponential":
-        return scale_exp(a[0], a[1], dphi)
+        return scale_exp(a, b, dphi)
     elif scale_def == "linear":
-        return scale_linear(a[0], a[1], dphi)
+        return scale_linear(a, b, dphi)
     elif scale_def == "constant":
-        return scale_constant(a[0], dphi)
+        return scale_constant(a, dphi)
     elif scale_def == "step":
         if bolo_phi_locs is not None:
-            return scale_step_array(A=a, phi=phi, bolo_phi_locs=bolo_phi_locs, mu=mu)
+            return scale_step(A=np.array([a,b]), phi=phi, bolo_phi_locs=bolo_phi_locs, mu=mu)
         else:
             print(
                 f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def"
@@ -399,7 +372,8 @@ def helical_endpoint_penalty(
             # Scale evaluated at the endpoint winding distance (NOT at phi = mu,
             # which would return the dphi = 0 peak).
             scale_end = scale_wrapper(
-                a=np.array([a,b]),
+                a=a,
+                b=b,
                 phi=phi_arr,
                 mu=mu,
                 scale_def=scale_def,
@@ -528,7 +502,8 @@ def residual(
 
             # --- Return the scale factor for every segment
             scale_ = scale_wrapper(
-                a=np.array([a,b]),
+                a=a,
+                b=b,
                 phi=phi_flat,
                 mu=mu,
                 scale_def=scale_def,
