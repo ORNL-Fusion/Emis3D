@@ -470,6 +470,25 @@ def point3d_to_rz(point) -> tuple[float, float]:
     return Point2D(np.hypot(point.x, point.y), point.z)
 
 
+def point3d_to_phi(point) -> float:
+    """
+    Toroidal angle of a 3D point, in DEGREES, wrapped to (-180, 180].
+    """
+    return float(np.rad2deg(np.arctan2(point.y, point.x)))
+
+
+def wrapped_phi_difference(phi_start: float, phi_end: float) -> float:
+    """
+    Smallest signed difference between two toroidal angles, in DEGREES,
+    wrapped to [-180, 180). An exactly antipodal pair returns -180.
+
+    Wrapping matters because arctan2 returns angles in (-180, 180], so a chord
+    crossing that branch cut (e.g. 179.9 -> -179.9) is 0.2 degrees wide, not
+    359.8.
+    """
+    return (float(phi_end) - float(phi_start) + 180.0) % 360.0 - 180.0
+
+
 def chord_rz_projection(
     r0: float,
     z0: float,

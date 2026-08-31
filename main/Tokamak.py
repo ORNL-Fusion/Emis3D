@@ -41,13 +41,21 @@ from main.Globals import (
 
 logger = logging.getLogger(__name__)
 
+# --- A sightline whose two ends are within this many degrees of each other is
+# --- treated as lying in a single poloidal plane and drawn as a straight line.
+PHI_PROJECTION_TOLERANCE_DEG = 1.0e-6
+# --- Samples used along a toroidally inclined sightline when projecting it
+PHI_PROJECTION_NUM_POINTS = 64
+
 
 from main.Util import (
     chord_rz_projection,
     config_loader,
     fieldline_key,
     fit_line_to_rz,
+    point3d_to_phi,
     point3d_to_rz,
+    wrapped_phi_difference,
     draw_radial_lines,
     find_intersection,
     rz_to_xyz,
@@ -790,9 +798,41 @@ class Tokamak(object):
                         origin_rz = point3d_to_rz(origin)
                         hit_rz = point3d_to_rz(hit)
 
+                        # --- A ray that starts and ends at different toroidal
+                        # --- angles does not lie in one poloidal plane, so its
+                        # --- projection R = sqrt(x**2 + y**2) is a curve. Sample
+                        # --- it the same way the config-file chords are handled.
+                        # --- When the two ends share a phi the projection is
+                        # --- already straight, so two points are enough.
+                        origin_phi = point3d_to_phi(origin)
+                        hit_phi = point3d_to_phi(hit)
+                        dphi = wrapped_phi_difference(origin_phi, hit_phi)
+
+                        num_points = 2
+                        if np.abs(dphi) > PHI_PROJECTION_TOLERANCE_DEG:
+                            num_points = PHI_PROJECTION_NUM_POINTS
+
+                        R_ray, z_ray = chord_rz_projection(
+                            r0=origin_rz[0],
+                            z0=origin_rz[1],
+                            phi0=origin_phi,
+                            rf=hit_rz[0],
+                            zf=hit_rz[1],
+                            phif=hit_phi,
+                            num_points=num_points,
+                        )
+
+                        if num_points > 2:
+                            _, _, residual = fit_line_to_rz(R_ray, z_ray)
+                            logger.debug(
+                                f"{foil.name}: sightline spans {dphi:.2f} degrees "
+                                f"toroidally, its projection bends {residual*100.0:.2f} cm "
+                                "away from a straight chord."
+                            )
+
                         ax.plot(
-                            [origin_rz[0], hit_rz[0]],
-                            [origin_rz[1], hit_rz[1]],
+                            R_ray,
+                            z_ray,
                             color="tab:blue",
                             linewidth=1.0,
                             label=label,
@@ -883,7 +923,7 @@ class Tokamak(object):
 
         return np.mean(np.array(phi))
 
-    def plot(self, fieldLineStartPhi=None) -> None:
+    def plot(self, fieldLineStartPhi=None, return_fig: bool = False):
         """
         Plot the tokamak configuration in 3D
 
@@ -898,7 +938,7 @@ class Tokamak(object):
             logger.error("No tokamak information loaded, cannot continue!")
             return
 
-        fig = plt.figure()
+        fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(1, 1, 1, projection="3d")
         self._plot_labels(ax)
 
@@ -988,7 +1028,12 @@ class Tokamak(object):
         ax.set_ylim(float(-2.5), float(2.5))
         ax.set_zlim(float(-2.5), float(2.5))  # type: ignore
 
-        plt.show()
+        plt.tight_layout()
+
+        if return_fig:
+            return ax
+        else:
+            plt.show()
 
     def set_fieldlines(
         self, startR=[], startZ=[], startPhi=0.0, numTransists=1.0
