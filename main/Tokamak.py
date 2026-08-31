@@ -666,7 +666,6 @@ class Tokamak(object):
         plot_chord_info=False,
         plot_etendue=[],
         legend=False,
-        plot_chord_projection=True,
     ) -> None:
         """
         Plots the chords for a specific bolometer group
@@ -674,10 +673,6 @@ class Tokamak(object):
         boloGroupName :: The GROUP_NAME in each bolometer file
         plot_chord_info :: Plot r0, rf, etc. in each bolometer file, typically used for initial
                         debugging of new bolometers since it compares Cherab to known chord positions
-        plot_chord_projection :: Also draw the true projected path of each config-file chord as a
-                        dotted line. Only differs from the fitted chord when the chord is
-                        toroidally inclined, i.e. when phi0 != phif.
-
         """
 
         # --- Change the inner wall to an absorbing surface, so the chords have something intersect with
@@ -758,32 +753,19 @@ class Tokamak(object):
                                     f"phif = {phif_vals[ii]})."
                                 )
 
-                            """
+                            projection_label = "Projected chord path from config"
+                            _, labels = ax.get_legend_handles_labels()
+                            if projection_label in labels:
+                                projection_label = "__no_legend__"
+
                             ax.plot(
-                                [start[0], end[0]],
-                                [start[1], end[1]],
+                                R_proj,
+                                z_proj,
+                                linestyle="solid",
                                 linewidth=2.0,
-                                color="green",
-                                label=label_,
+                                color="darkgreen",
+                                label=projection_label,
                             )
-                            """
-
-                            # --- Optionally show how far the real projected path
-                            # --- departs from that straight fit
-                            if plot_chord_projection:
-                                projection_label = "Projected chord path from config"
-                                _, labels = ax.get_legend_handles_labels()
-                                if projection_label in labels:
-                                    projection_label = "__no_legend__"
-
-                                ax.plot(
-                                    R_proj,
-                                    z_proj,
-                                    linestyle=":",
-                                    linewidth=1.0,
-                                    color="darkgreen",
-                                    label=projection_label,
-                                )
 
                 for foil in bolo.bolometer_camera.foil_detectors:
 

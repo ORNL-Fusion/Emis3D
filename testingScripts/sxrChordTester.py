@@ -10,8 +10,7 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
-import numpy as np
-
+from itertools import batched
 from main.Tokamak import Tokamak
 
 t = Tokamak(
@@ -30,25 +29,29 @@ if True:
 """
 # --- Plot each individual bolometer
 if t.info is not None:
-    boloGroups = t.info["Bolometer Groups"]
+    MAX_PER_PLOT = 4
+    boloGroups = [
+        list(batch) for batch in batched(t.info["Bolometer Groups"], MAX_PER_PLOT)
+    ]
+    NUM_PLOTS = len(boloGroups)
+
     bolometers = t.bolometers
 
-    num_figs = len(boloGroups)
-    num_rows = int(np.ceil(num_figs / 4))  # no more than 4 across
-    f = plt.figure(figsize=(15, 8))
-    initilized = False
+    for boloGroup in boloGroups:
+        f = plt.figure(figsize=(15, 8))
+        initilized = False
 
-    # --- Loop over each bolometer group
-    for ii, boloGroup in enumerate(boloGroups):
-        f_ = f.add_subplot(num_rows, int(num_figs / num_rows), ii + 1)
-        t._plot_first_wall(f_)
-        t._plot_bolometers(
-            f_,
-            boloGroupName=boloGroup,
-            plot_chord_info=True,
-            plot_etendue=["SX45F07"],
-            legend=True,
-        )
+        # --- Loop over each bolometer group
+        for ii, boloGroupName in enumerate(boloGroup):
+            f_ = f.add_subplot(1, 4, ii + 1)
+            t._plot_first_wall(f_)
+            t._plot_bolometers(
+                f_,
+                boloGroupName=boloGroupName,
+                plot_chord_info=True,
+                plot_etendue=[],
+                legend=True,
+            )
 
-    plt.tight_layout()
+        plt.tight_layout()
     plt.show()
