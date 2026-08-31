@@ -14,9 +14,8 @@ import numpy as np
 
 from main.Tokamak import Tokamak
 
-
 t = Tokamak(
-    tokamakName="JET",
+    tokamakName="SPARC_FDR",
     mode="Build",
     reflections=False,
     loadBolometers=True,

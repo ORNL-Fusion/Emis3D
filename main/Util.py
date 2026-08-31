@@ -470,6 +470,87 @@ def point3d_to_rz(point) -> tuple[float, float]:
     return Point2D(np.hypot(point.x, point.y), point.z)
 
 
+def chord_rz_projection(
+    r0: float,
+    z0: float,
+    phi0: float,
+    rf: float,
+    zf: float,
+    phif: float,
+    num_points: int = 64,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Project a straight 3D sightline onto the (R, z) plane.
+
+    The chord runs in a straight line through the vessel from (r0, z0, phi0) to
+    (rf, zf, phif). When phi0 != phif that line does not lie in a single
+    poloidal plane, so its projection R = sqrt(x**2 + y**2) is a curve rather
+    than a straight segment. This samples that curve.
+
+    Inputs:
+        r0, z0, phi0 :: start of the chord. phi in DEGREES.
+        rf, zf, phif :: end of the chord. phi in DEGREES.
+        num_points   :: samples along the chord
+
+    Returns:
+        (R, z) arrays of length num_points.
+    """
+
+    if num_points < 2:
+        raise ValueError(f"num_points must be at least 2, got {num_points}")
+
+    t = np.linspace(0.0, 1.0, num_points)
+
+    x0, y0 = RPhi_To_XY(r0, np.deg2rad(phi0))
+    xf, yf = RPhi_To_XY(rf, np.deg2rad(phif))
+
+    x = x0 + (xf - x0) * t
+    y = y0 + (yf - y0) * t
+    z = z0 + (zf - z0) * t
+
+    return np.hypot(x, y), z
+
+
+def fit_line_to_rz(
+    R: np.ndarray, z: np.ndarray
+) -> tuple[tuple[float, float], tuple[float, float], float]:
+    """
+    Fit a straight line to a set of (R, z) points and return the segment
+    spanning them.
+
+    Uses a total-least-squares (SVD) fit rather than a polynomial one, so a
+    vertical chord is handled the same as any other.
+
+    Returns:
+        ((R_start, z_start), (R_end, z_end), max_residual)
+        where max_residual is the largest perpendicular distance from a point to
+        the fitted line, i.e. how much the projected chord bends away from a
+        straight segment.
+    """
+
+    points = np.column_stack((np.asarray(R, dtype=float), np.asarray(z, dtype=float)))
+
+    if len(points) < 2:
+        raise ValueError("Need at least two points to fit a line")
+
+    mean = points.mean(axis=0)
+    centered = points - mean
+
+    # --- Principal direction of the point cloud
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    direction = vt[0]
+
+    # --- Distance of each point along and perpendicular to that direction
+    along = centered @ direction
+    normal = np.array([-direction[1], direction[0]])
+    residuals = np.abs(centered @ normal)
+
+    start = mean + along.min() * direction
+    end = mean + along.max() * direction
+
+    return (start[0], start[1]), (end[0], end[1]), float(residuals.max())
+
+
 def split_revolutions(x, y, z, phi, R, L) -> list:
     """
     Split field line coordinates into revolutions around the torus,

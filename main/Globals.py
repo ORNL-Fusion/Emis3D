@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -26,8 +27,16 @@ EMIS3D_TOKMAK_DIRECTORY: Path = EMIS3D_PARENT_DIRECTORY / "tokamaks"
 EMIS3D_INPUTS_DIRECTORY: Path = EMIS3D_PARENT_DIRECTORY / "inputs"
 
 
-SUPPORTED_TOKAMAKS: list[str] = ["DIII-D", "SPARC", "JET"]
-
+SUPPORTED_TOKAMAKS: list[str] = ["DIII-D", "SPARC", "SPARC_FDR", "JET"]
+# Angle conventions used in each tokamak are different from that used in Cherab.
+# Emis3D uses the Cherab angle convention. This angle is subtracted in the evaluate
+# statements in RadDist to make the angles match.
+TOR_CONVENTION_PHIS = {
+    "JET": np.pi / 2.0,
+    "SPARC": 0.0,
+    "SPARC_FDR": 0.0,
+    "DIII-D": 0.0,
+}
 
 # Explicit export list
 __all__ = [

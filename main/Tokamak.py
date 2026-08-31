@@ -36,14 +36,17 @@ from main.Globals import (
     EMIS3D_TOKMAK_DIRECTORY,
     EMIS3D_INPUTS_DIRECTORY,
     SUPPORTED_TOKAMAKS,
+    TOR_CONVENTION_PHIS,
 )
 
 logger = logging.getLogger(__name__)
 
 
 from main.Util import (
+    chord_rz_projection,
     config_loader,
     fieldline_key,
+    fit_line_to_rz,
     point3d_to_rz,
     draw_radial_lines,
     find_intersection,
@@ -121,11 +124,14 @@ class Tokamak(object):
         if self.info is None:
             self.info = {}
 
-        # Angle conventions used in each tokamak are different from that used in Cherab.
-        # Emis3D uses the Cherab angle convention. This angle is subtracted in the evaluate
-        # statements in RadDist to make the angles match.
-        torConventionPhis = {"JET": np.pi / 2.0, "SPARC": 0.0, "DIII-D": 0.0}
-        self.info["torConventionPhi"] = torConventionPhis[tokamakName]
+        try:
+            torConvention = TOR_CONVENTION_PHIS.get(tokamakName)
+        except Exception:
+            raise RuntimeError(
+                f"!!! Error, put in '{tokamakName}' in TOR_CONVENTION_PHIS in the globals.py file!"
+            )
+
+        self.info["torConventionPhi"] = torConvention
         self.info["tokamakName"] = tokamakName
         self.info["mode"] = mode
         self.info["reflections"] = reflections
@@ -623,6 +629,36 @@ class Tokamak(object):
 
                 plt.plot([r1, r2], [z1, z2], linewidth=2, color="tab:red")
 
+    @staticmethod
+    def _chord_phi_values(
+        value, default: float, num_chords: int, boloName: str, key: str
+    ):
+        """
+        Normalise an optional per-chord toroidal angle entry into a list of
+        num_chords floats, in degrees.
+
+        value :: what was found in bolo.info, one of
+                 None                -> every chord sits at `default`
+                 a scalar            -> every chord uses that angle
+                 a list of num_chords-> used as-is
+        default :: fallback angle, normally the camera's own phi
+        """
+
+        if value is None:
+            return [float(default)] * num_chords
+
+        if isinstance(value, (list, tuple, np.ndarray)):
+            if len(value) != num_chords:
+                logger.error(
+                    f"{boloName}: '{key}' has {len(value)} entries but there are "
+                    f"{num_chords} chords. Falling back to the camera phi of {default}."
+                )
+                return [float(default)] * num_chords
+            return [float(v) for v in value]
+
+        # --- A single angle shared by every chord
+        return [float(value)] * num_chords
+
     def _plot_bolometers(
         self,
         ax,
@@ -630,6 +666,7 @@ class Tokamak(object):
         plot_chord_info=False,
         plot_etendue=[],
         legend=False,
+        plot_chord_projection=True,
     ) -> None:
         """
         Plots the chords for a specific bolometer group
@@ -637,6 +674,10 @@ class Tokamak(object):
         boloGroupName :: The GROUP_NAME in each bolometer file
         plot_chord_info :: Plot r0, rf, etc. in each bolometer file, typically used for initial
                         debugging of new bolometers since it compares Cherab to known chord positions
+        plot_chord_projection :: Also draw the true projected path of each config-file chord as a
+                        dotted line. Only differs from the fitted chord when the chord is
+                        toroidally inclined, i.e. when phi0 != phif.
+
         """
 
         # --- Change the inner wall to an absorbing surface, so the chords have something intersect with
@@ -668,19 +709,81 @@ class Tokamak(object):
                     if "r0" in bolo.info:
                         label_ = "Chords from config file"
 
-                        for ii in range(len(bolo.info["r0"])):
+                        num_chords = len(bolo.info["r0"])
+
+                        # --- phi0 and phif are optional. Without them the chord
+                        # --- is assumed to lie in the camera's own poloidal plane.
+                        camera_phi = float(bolo.info["CAMERA_POSITION_R_Z_PHI"][2])
+                        phi0_vals = self._chord_phi_values(
+                            bolo.info.get("phi0"),
+                            default=camera_phi,
+                            num_chords=num_chords,
+                            boloName=bolo.info["NAME"],
+                            key="phi0",
+                        )
+                        phif_vals = self._chord_phi_values(
+                            bolo.info.get("phif"),
+                            default=camera_phi,
+                            num_chords=num_chords,
+                            boloName=bolo.info["NAME"],
+                            key="phif",
+                        )
+
+                        for ii in range(num_chords):
                             # --- Check to see if the currnt plot already has the correct label
                             _, labels = ax.get_legend_handles_labels()
                             if "Chords from config file" in labels:
                                 label_ = "__no_legend__"
 
+                            # --- Project the 3D chord into the plane of the
+                            # --- bolometer, then fit a straight line to it. For an
+                            # --- in-plane chord (phi0 == phif) the projection is
+                            # --- already straight and the fit returns the original
+                            # --- end points.
+                            R_proj, z_proj = chord_rz_projection(
+                                r0=bolo.info["r0"][ii],
+                                z0=bolo.info["z0"][ii],
+                                phi0=phi0_vals[ii],
+                                rf=bolo.info["rf"][ii],
+                                zf=bolo.info["zf"][ii],
+                                phif=phif_vals[ii],
+                            )
+                            start, end, residual = fit_line_to_rz(R_proj, z_proj)
+
+                            if residual > 1.0e-3:
+                                logger.debug(
+                                    f"{bolo.info['NAME']} chord {ii}: projected path "
+                                    f"bends {residual*100.0:.2f} cm away from the fitted "
+                                    f"straight chord (phi0 = {phi0_vals[ii]}, "
+                                    f"phif = {phif_vals[ii]})."
+                                )
+
+                            """
                             ax.plot(
-                                [bolo.info["r0"][ii], bolo.info["rf"][ii]],
-                                [bolo.info["z0"][ii], bolo.info["zf"][ii]],
+                                [start[0], end[0]],
+                                [start[1], end[1]],
                                 linewidth=2.0,
                                 color="green",
                                 label=label_,
                             )
+                            """
+
+                            # --- Optionally show how far the real projected path
+                            # --- departs from that straight fit
+                            if plot_chord_projection:
+                                projection_label = "Projected chord path from config"
+                                _, labels = ax.get_legend_handles_labels()
+                                if projection_label in labels:
+                                    projection_label = "__no_legend__"
+
+                                ax.plot(
+                                    R_proj,
+                                    z_proj,
+                                    linestyle=":",
+                                    linewidth=1.0,
+                                    color="darkgreen",
+                                    label=projection_label,
+                                )
 
                 for foil in bolo.bolometer_camera.foil_detectors:
 

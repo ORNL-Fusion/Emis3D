@@ -700,109 +700,165 @@ class RadDist(ABC):
             alpha=0.4,
         )
 
-    def plotOverview(self, return_figure: bool = False, plot_etendue: list = []):
+    def _plotOverview_crossSection(
+        self, ax, boloGroup: str, plot_etendue: list = []
+    ) -> None:
         """
-        Plots the bolometer chords with a contour overplot of the radDist in the top row
-        Plots the observed emissivities in the bottom row
-
-        return_figure :: True = returns the figure object
-
+        Draws one top-row panel: the first wall, the chords of a single bolometer
+        group, and a cross-section of the radDist at that group's toroidal location.
         """
+
+        tok = self.tokamak
+
+        tok._plot_first_wall(ax)
+        tok._plot_bolometers(
+            ax,
+            boloGroupName=boloGroup,
+            plot_chord_info=False,
+            plot_etendue=plot_etendue,
+            legend=False,
+        )
+
+        # --- Plot a cross-section of the radDist
+        phi = tok.get_ave_bolometer_tor_loc(boloGroupName=boloGroup)
+        if phi is not None:
+            self.plotCrossSection(phi=np.deg2rad(phi), ax=ax)
+
+    def _plotOverview_signals(self, ax, boloGroup: str, colors: list) -> None:
+        """
+        Draws one bottom-row panel: the observed emissivities of a single
+        bolometer group, one line per emission name, sorted by channel number.
+        """
+
+        bolometers = self.tokamak.bolometers
+
+        for qq, emissionName in enumerate(self.info["emissionNames"]):
+            # --- Group the data
+            data_ = []
+            chan_ = []
+
+            for bolo in bolometers:
+                if bolo.info["GROUP_NAME"] == boloGroup:
+                    ch_tags = bolo.info["CHANNEL_TAGS"]
+                    c_ = []
+                    for ch in ch_tags:  # type: ignore
+                        c_.append(int(ch[-2:]))
+
+                    data_ += self.data[self.info["units"]][emissionName][
+                        bolo.info["NAME"]
+                    ]
+                    chan_ += c_
+
+            # --- Sort the channel list in ascending order
+            inds = np.array(chan_).argsort()
+            ax.plot(
+                np.array(chan_)[inds],
+                np.array(data_)[inds],
+                color=colors[qq % len(colors)],
+                label=emissionName,
+            )
+
+        ax.legend()
+        ax.set_ylim(0, ax.get_ylim()[1])
+        ax.set_ylabel(f"{self.data['units']}")
+        ax.set_xlabel("channel")
+        ax.set_title(boloGroup)
+
+    def plotOverview(
+        self,
+        return_figure: bool = False,
+        plot_etendue: list = [],
+        groups_per_figure: int = 3,
+    ):
+        """
+        Plots the bolometer chords with a contour overplot of the radDist in the
+        top row, and the observed emissivities in the bottom row.
+
+        The bolometer groups are split across as many figures as needed so that
+        no figure holds more than groups_per_figure of them, which keeps the
+        panels readable on machines with many groups. The injection location
+        cross-section is drawn as the last column of the top row on every
+        figure, so each one can be read on its own.
+
+        return_figure     :: True = returns a list of the figure objects, one per
+                             chunk of bolometer groups. Returns None if the
+                             tokamak has no info loaded.
+        plot_etendue      :: passed through to Tokamak._plot_bolometers
+        groups_per_figure :: maximum bolometer groups per figure
+
+        Within each figure the axes are created in this order:
+            [cross-section per group..., injection location, signals per group...]
+        """
+
+        if groups_per_figure < 1:
+            raise ValueError(
+                f"groups_per_figure must be at least 1, got {groups_per_figure}"
+            )
 
         tok = self.tokamak
 
         # --- Make the emission surface transparent for accurate ray tracing
         tok._make_raysect_surface_transparent(surfaceName="Emission Surface")
 
-        # --- Plot everything ---
-        # Top row: every bolometer with radDist contour overplot + injection location radDist on the right
-
         colors = ["black", "purple", "blue", "green", "orange", "red"]
-        if tok.info is not None:
-            boloGroups = tok.info["Bolometer Groups"]
-            bolometers = tok.bolometers
 
-            num_columns = len(boloGroups) + 1
+        if tok.info is None:
+            logger.warning("Tokamak info is not loaded, nothing to plot.")
+            return None
+
+        boloGroups = list(tok.info["Bolometer Groups"])
+
+        # --- Split the groups into one chunk per figure
+        chunks = [
+            boloGroups[ii : ii + groups_per_figure]
+            for ii in range(0, len(boloGroups), groups_per_figure)
+        ]
+
+        figures = []
+
+        for chunkNumber, chunk in enumerate(chunks):
+            # --- One column per group in this chunk, plus one for the injection
+            # --- location. The last chunk may be narrower than the others.
+            num_columns = len(chunk) + 1
             num_rows = 2
-            f = plt.figure(figsize=(15, 8))
-            plot_count = 0
 
-            # --- Loop over each bolometer group
-            for ii, boloGroup in enumerate(boloGroups):
-                plot_count += 1
-                f_ = f.add_subplot(num_rows, num_columns, plot_count)
-                tok._plot_first_wall(f_)
-                tok._plot_bolometers(
-                    f_,
-                    boloGroupName=boloGroup,
-                    plot_chord_info=False,
-                    plot_etendue=plot_etendue,
-                    legend=False,
+            f = plt.figure(figsize=(3.75 * num_columns, 8))
+
+            # --- Top row: every bolometer with radDist contour overplot
+            for ii, boloGroup in enumerate(chunk):
+                f_ = f.add_subplot(num_rows, num_columns, ii + 1)
+                self._plotOverview_crossSection(
+                    f_, boloGroup=boloGroup, plot_etendue=plot_etendue
                 )
 
-                # --- Plot a cross-section of the radDist
-                phi = tok.get_ave_bolometer_tor_loc(boloGroupName=boloGroup)
-                if phi is not None:
-                    self.plotCrossSection(phi=np.deg2rad(phi), ax=f_)
-
-            # --- Plot the injection location
-            plot_count += 1
+            # --- Plot the injection location in the last column of the top row
             phi = self.info["injectionLocation"]
-            f_ = f.add_subplot(num_rows, num_columns, plot_count)
+            f_ = f.add_subplot(num_rows, num_columns, num_columns)
             tok._plot_first_wall(f_)
             self.plotCrossSection(phi=np.deg2rad(phi), ax=f_)
             f_.set_title(f"Injection Location, phi = {phi} degrees")
 
-            # --- Plot the observed emissivities
-            for ii, boloGroup in enumerate(boloGroups):
-                plot_count += 1
-                f_ = f.add_subplot(num_rows, num_columns, plot_count)
+            # --- Bottom row: the observed emissivities. The last column of this
+            # --- row is left empty, mirroring the injection panel above it.
+            for ii, boloGroup in enumerate(chunk):
+                f_ = f.add_subplot(num_rows, num_columns, num_columns + ii + 1)
+                self._plotOverview_signals(f_, boloGroup=boloGroup, colors=colors)
 
-                for qq, emissionName in enumerate(self.info["emissionNames"]):
-                    # --- Group the data
-                    data_ = []
-                    chan_ = []
+            if len(chunks) > 1:
+                first = chunkNumber * groups_per_figure + 1
+                f.suptitle(
+                    f"Bolometer groups {first}-{first + len(chunk) - 1} "
+                    f"of {len(boloGroups)}  (figure {chunkNumber + 1} of {len(chunks)})"
+                )
 
-                    for jj, bolo in enumerate(bolometers):
-                        if bolo.info["GROUP_NAME"] == boloGroup:
-                            ch_tags = bolo.info["CHANNEL_TAGS"]
-                            c_ = []
-                            for ch in ch_tags:  # type: ignore
-                                c_.append(int(ch[-2:]))
+            f.tight_layout()
+            figures.append(f)
 
-                            data_ += self.data[self.info["units"]][emissionName][
-                                bolo.info["NAME"]
-                            ]
-                            chan_ += c_
+        if return_figure:
+            return figures
 
-                    # --- Sort the channel list in ascending order
-                    inds = np.array(chan_).argsort()
-                    f_.plot(
-                        np.array(chan_)[inds],
-                        np.array(data_)[inds],
-                        color=colors[qq],
-                        label=emissionName,
-                    )
-
-                f_.legend()
-                f_.set_ylim(0, f_.get_ylim()[1])
-                f_.set_ylabel(f"{self.data['units']}")
-                f_.set_xlabel("channel")
-                f_.set_title(boloGroup)
-
-            plt.tight_layout()
-
-            if return_figure:
-                return f
-            else:
-                plt.show()
-
-    def _folder_suffix(self) -> str:
-        """
-        Return the unique suffix appended to this distribution's save folder name.
-        Subclasses that need a different suffix (e.g. Helical) should override this.
-        """
-        return f"_rotation{self.info['rotationAngle']}"
+        plt.show()
+        return None
 
     def saveRadDist(self) -> None:
         """Save the radDist info and data to a JSON file."""
@@ -812,7 +868,7 @@ class RadDist(ABC):
         }
         folderName = (
             f"{self.info['distType']}_sigma_R_{self.info['sigma_R']}_sigma_z_{self.info['sigma_z']}"
-            f"{self._folder_suffix()}"
+            # f"{self._folder_suffix()}"
         )
         saveFileName = f"R_{self.info['startR']:.2f}_z_{self.info['startZ']:.2f}.json"
         pathFileName = (
@@ -1477,3 +1533,14 @@ class NIMROD(RadDist):
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
         return [float(phi)] * numChan
+
+    def _observed_phi_loc(
+        self, bolo_info: dict = {}, emissionName: str | None = None
+    ) -> list:
+        """
+        Not yet implimented!
+        """
+
+        # print("In _observed_phi_loc")
+
+        return []

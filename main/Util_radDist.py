@@ -150,9 +150,7 @@ def radDist_SquareTube_parallel(
         return squareTube
 
 
-def radDist_NIMROD_parallel(
-    args: tuple, return_result: bool = False
-):  # -> None | radDist.SquareTube:
+def radDist_NIMROD_parallel(args: tuple, return_result: bool = False):
     """
     Worker function for parallel computation of NIMROD radial distribution.
 
@@ -166,14 +164,12 @@ def radDist_NIMROD_parallel(
         config   : configuration object passed to radDist.SquareTube.
     """
     nimrodFile, timestep, config = args
-    nimrod = radDist.NIMROD(nimrodFile=nimrodFile, timestep = timestep, config=config)
+    nimrod = radDist.NIMROD(nimrodFile=nimrodFile, timestep=timestep, config=config)
     nimrod.build()
 
-    logger.info(
-        "DONE with NIMROD radDist"
-    )
+    logger.info("DONE with NIMROD radDist")
     print("DONE with NIMROD radDist")
-    
+
     if return_result:
         return nimrod
 
