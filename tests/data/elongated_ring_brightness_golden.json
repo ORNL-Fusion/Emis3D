@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "startR": 2.055,
+    "startZ": 0.414,
+    "boloGroup": "SX90PF_UP",
+    "pixelSamples": 5000,
+    "config": {
+      "distType": "ElongatedRing",
+      "tokamakName": "DIII-D",
+      "units": "Brightness",
+      "injectionLocation": 225,
+      "eqFileName": "",
+      "sigma_R": 0.3,
+      "sigma_z": 0.25,
+      "rotationAngle": 30,
+      "BOLOMETER_PROPS": {
+        "pixelSamples": 5000,
+        "numProcessors": 1
+      }
+    },
+    "rtol": 0.15,
+    "atol_frac_of_peak": 0.02
+  },
+  "brightness": [
+    0.24861492416626935,
+    0.22304879371331784,
+    0.2086108717916934,
+    0.18395053619677024,
+    0.16101669369208083,
+    0.14217516847197487,
+    0.12430600659151045,
+    0.10285668672831912,
+    0.08617015984456505,
+    0.07391068441033424,
+    0.0622402408161878,
+    0.0524955454704465,
+    0.04630435067543818,
+    0.04231165170504759,
+    0.03832813543922018,
+    0.0
+  ]
+}
