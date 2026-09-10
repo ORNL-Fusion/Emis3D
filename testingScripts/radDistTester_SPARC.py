@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from os.path import join
 
 tokamakName = "SPARC_FDR"
-configFileName = "NIMROD_config.yaml"
+configFileName = "M3DC1_config.yaml" #"NIMROD_config.yaml"
 
 
 # --- Create the radDist using only one point, we don't need to loop over everything
@@ -34,15 +34,25 @@ if config is None:
 # for time in np.arange(60, 2880, 60):
 
 if True:
-    time = 60
-    timestep = f"{time:05d}"  # f"{60:05d}"
-    nimrodFile = join(
+    # time = 60
+    # timestep = f"{time:05d}"  # f"{60:05d}"
+    # nimrodFile = join(
+    #     EMIS3D_INPUTS_DIRECTORY,
+    #     tokamakName,
+    #     "radDists",
+    #     "NIMROD_data",
+    #     "Nonresonant",
+    #     f"nimrod_Nonresonant_{timestep}.txt",
+    # )
+
+    time = 7
+    timestep = f"{time:03d}"  # f"{60:05d}"
+    m3dc1File = join(
         EMIS3D_INPUTS_DIRECTORY,
         tokamakName,
         "radDists",
-        "NIMROD_data",
-        "Nonresonant",
-        f"nimrod_Nonresonant_{timestep}.txt",
+        "M3DC1_data",
+        f"two_injector_to_thermal_{timestep}.txt",
     )
 
     # --- Update the configuration file
@@ -55,7 +65,8 @@ if True:
     if "rotationAngles" in config:
         config["rotationAngle"] = 0  # config["rotationAngles"][0]
     # arg_list = (rzArray, config)
-    arg_list = (nimrodFile, timestep, config)
+    #arg_list = (nimrodFile, timestep, config)
+    arg_list = (m3dc1File, timestep, config)
 
     print("Setup complete")
     # --- Create the radDist
@@ -69,9 +80,11 @@ if True:
         rD = Util_radDist.radDist_SquareTube_parallel(arg_list, return_result=True)
     elif config["distType"] == "NIMROD":
         rD = Util_radDist.radDist_NIMROD_parallel(arg_list, return_result=True)
+    elif config["distType"] == "M3DC1":
+            rD = Util_radDist.radDist_M3DC1_parallel(arg_list, return_result=True)
     else:
         raise RuntimeError(
-            "Please have 'elongatedRing', 'helical', 'HelicalRing', 'NIMROD', or 'SquareTube' in the configFileName"
+            "Please have 'elongatedRing', 'helical', 'HelicalRing', 'NIMROD', 'M3DC1', or 'SquareTube' in the configFileName"
         )
     print(f"RadDist {timestep} built")
 

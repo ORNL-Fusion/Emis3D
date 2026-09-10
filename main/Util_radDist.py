@@ -174,6 +174,30 @@ def radDist_NIMROD_parallel(args: tuple, return_result: bool = False):
         return nimrod
 
 
+def radDist_M3DC1_parallel(args: tuple, return_result: bool = False):
+    """
+    Worker function for parallel computation of M3DC1 radial distribution.
+
+    Designed to be called via multiprocessing.Pool.map, which requires a single
+    argument. The args tuple is unpacked internally.
+
+    Parameters
+    ----------
+    args : tuple of (m3dc1File, timestep, config)
+        rz_array : array-like of length 2 — (R, z) start coordinates in metres.
+        config   : configuration object passed to radDist.SquareTube.
+    """
+    m3dc1File, timestep, config = args
+    m3dc1 = radDist.M3DC1(m3dc1File=m3dc1File, timestep=timestep, config=config)
+    m3dc1.build()
+
+    logger.info("DONE with M3DC1 radDist")
+    print("DONE with M3DC1 radDist")
+
+    if return_result:
+        return m3dc1
+
+
 def callRZGridTokamak(
     tokamak: Tokamak | None = None,
     num_r: int = 30,
