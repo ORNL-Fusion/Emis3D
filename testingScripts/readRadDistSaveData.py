@@ -21,7 +21,7 @@ tokamakName = "SPARC_FDR"
 # --- Stores to home/username/Documents
 SAVE_DIR = Path.home() / "Documents"
 
-FILENAME = "SPARC_FDR_NIMROD.h5"
+FILENAME = "SPARC_FDR_NIMROD.json"
 
 startTimestep = 60
 stopTimestep = 2820

@@ -1545,6 +1545,7 @@ class NIMROD(RadDist):
 
         return []
 
+
 class M3DC1(RadDist):
     """
     Takes emissivity data from a timestep of an M3DC1 3D MHD simulation
