@@ -25,8 +25,15 @@ tokamakName = "SPARC_FDR"
 startTimestep = 60
 stopTimestep = 2820
 interval = 60
-radDist_dir_path = join(EMIS3D_INPUTS_DIRECTORY, tokamakName, "radDists", "Test", "NIMROD", "Nonresonant")
-times = np.arange(startTimestep, stopTimestep+interval, interval)
+radDist_dir_path = join(
+    EMIS3D_INPUTS_DIRECTORY,
+    tokamakName,
+    "radDists",
+    "Test",
+    "NIMROD",
+    "NIMROD_sigma_R_0.1_sigma_z_0.001",
+)
+times = np.arange(startTimestep, stopTimestep + interval, interval)
 
 
 ptots = []
@@ -43,12 +50,14 @@ for time in times:
     ptots.append(prad_tot)
 
     brightnesses_tstep = radDist_properties["data"]["Brightness"]["NIMROD"]
-    brightnesses_tstep_vec = [brightnesses_tstep[key] for key in brightnesses_tstep.keys()]
+    brightnesses_tstep_vec = [
+        brightnesses_tstep[key] for key in brightnesses_tstep.keys()
+    ]
     brightnesses.append(brightnesses_tstep_vec)
 ptots = np.array(ptots)
 
 # make weights based on a given timestep
-ref_timestep = 2760#1260#2520#2580#2640#2700#2760 #2820
+ref_timestep = 2760  # 1260#2520#2580#2640#2700#2760 #2820
 ref_timestep_indx = np.argwhere(times == ref_timestep).squeeze()
 ref_brightnesses = np.array(brightnesses[ref_timestep_indx]).squeeze()
 ref_Prad = ptots[ref_timestep_indx]
@@ -67,33 +76,37 @@ for timeIndx in range(len(times)):
     brightnesses_tstep = np.array(brightnesses[timeIndx]).squeeze()
     weightedPrad = np.sum(brightnesses_tstep * weights)
     weighted_prads.append(weightedPrad)
-    #breakpoint()
+    # breakpoint()
 weighted_prads = np.array(weighted_prads)
 
-fontsize=14
-ticksize=12
+fontsize = 14
+ticksize = 12
 fig, axs = plt.subplots(nrows=1, ncols=1, figsize=[6.0, 3.0])
 
 fieldnames = ["NIMROD", "Weighted"]
 varnames = ["NIMROD", "Weighted"]
 labels = ["NIMROD", "Weighted"]
-linestyles = ['-', '--', '-.', ':']
+linestyles = ["-", "--", "-.", ":"]
 linewidths = [3, 3, 3, 3]
 colors = colormaps["tab10"]
-plotdata = [ptots*1e-9, weighted_prads*1e-9]
+plotdata = [ptots * 1e-9, weighted_prads * 1e-9]
 
 for indx in range(len(fieldnames)):
-    axs.plot(times * 1e-3, plotdata[indx],\
-        linestyle=linestyles[indx], linewidth=linewidths[indx],\
-        color = colors(indx),\
-        label=labels[indx])
+    axs.plot(
+        times * 1e-3,
+        plotdata[indx],
+        linestyle=linestyles[indx],
+        linewidth=linewidths[indx],
+        color=colors(indx),
+        label=labels[indx],
+    )
 
 axs.set_ylabel("Prad (GW)", fontsize=fontsize)
-axs.set_xlabel('Time (ms)', fontsize=fontsize)
-axs.tick_params(axis='x', labelsize=ticksize)
-axs.tick_params(axis='y', labelsize=ticksize) 
+axs.set_xlabel("Time (ms)", fontsize=fontsize)
+axs.tick_params(axis="x", labelsize=ticksize)
+axs.tick_params(axis="y", labelsize=ticksize)
 axs.set_title(f"Reference Time (ms): {ref_timestep*1e-3:.2f}")
 axs.legend(loc="upper left", fontsize=fontsize)
 plt.tight_layout()
-#plt.savefig(f'IP_{shotnumber}.png', bbox_inches='tight', pad_inches=0.05, dpi=600)
+# plt.savefig(f'IP_{shotnumber}.png', bbox_inches='tight', pad_inches=0.05, dpi=600)
 plt.show()
