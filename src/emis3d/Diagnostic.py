@@ -56,14 +56,27 @@ class Bolometer(object):
         self._load_config_file(tokamakName=tokamakName)
         self._build()
 
+    def _config_path(self, tokamakName, fileName, required=True):
+        """
+        A camera configuration file: an absolute or ~ path is used as given;
+        a bare name is looked up in <machine>/inputs/sxrInfo/ on the workspace
+        machine search path.
+        """
+        given = os.path.expanduser(str(fileName))
+        if os.path.isabs(given):
+            if os.path.isfile(given):
+                return given
+            if required:
+                raise FileNotFoundError(f"Camera configuration file not found: {given}")
+            return None
+        return self.ws.machine_file(tokamakName, "inputs", "sxrInfo", given, required=required)
+
     def _load_config_file(self, tokamakName) -> None:
         """
         Loads the configuration file for the given diagnostic
         """
 
-        pathFileName = self.ws.machine_file(
-            tokamakName, "inputs", "sxrInfo", f"{self.configFileName}", required=False
-        )
+        pathFileName = self._config_path(tokamakName, self.configFileName, required=False)
 
         # --- Load the configuration file, if it exists
         if pathFileName is not None and os.path.isfile(pathFileName):
@@ -96,9 +109,7 @@ class Bolometer(object):
         if self.info is not None and "SUBARRAY_NAMES" in self.info:
             if len(self.info["SUBARRAY_NAMES"]) > 0:
                 for ii, fileName in enumerate(self.info["SUBARRAY_CONFIG_NAMES"]):
-                    pathFileName = self.ws.machine_file(
-                        tokamakName, "inputs", "sxrInfo", f"{fileName}"
-                    )
+                    pathFileName = self._config_path(tokamakName, fileName)
 
                     if "SUBARRAYS" not in self.info:
                         self.info["SUBARRAYS"] = {}

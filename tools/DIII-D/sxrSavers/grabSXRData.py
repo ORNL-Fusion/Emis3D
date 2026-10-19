@@ -2,15 +2,14 @@
 #
 # This program will grab the SXR data, correct for offset, and filter the data.
 # It ment to be run several times to zero out and correct bad channels prior to
-# saving the data in inputs/DIII-D/sxrData/
+# saving the data in the workspace's measurements location, <measurements>/{shot}/
+# (see `emis3d paths`)
 #
 # Written by Jeffrey Herfindal, Feb. 26, 2024
 #
 # TODO: Add ability to increase half of the array since each bolometer is two arrays
 # Check to see why the badChannels thing is not working
 
-import os
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np

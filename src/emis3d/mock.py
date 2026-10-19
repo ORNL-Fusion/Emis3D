@@ -239,6 +239,8 @@ def selftest(workdir: str | Path | None = None, pixel_samples: int = 50, verbose
     ws_dir = Path(workdir)
     for d in ("raddists/MOCK/ring", "measurements/MOCK/1", "runs/selftest"):
         (ws_dir / d).mkdir(parents=True, exist_ok=True)
+    if not (ws_dir / "emis3d.yaml").exists():   # a real workspace: run configs inside it find it
+        (ws_dir / "emis3d.yaml").write_text("# Workspace created by emis3d.mock.selftest\nversion: 1\n")
     ws = Workspace.resolve(workspace=ws_dir, env={}, user_config=ws_dir / "_none.yaml")
     set_workspace(ws)
 

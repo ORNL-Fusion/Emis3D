@@ -28,11 +28,10 @@ NOTE: You will need pre-generated elongated ring radDists for this to work.
 
 
 import os
-import sys
 import numpy as np
 
 
-import emis3d.Emis3D as Emis3D
+from emis3d.Emis3D import Emis3D
 from emis3d.Globals import *
 from lmfit import report_fit
 
@@ -50,7 +49,7 @@ scale = None
 scaleArray = None
 emis = None
 for ii in range(10):
-    emis = Emis3D.Emis3D(
+    emis = Emis3D(
         tokamakName="DIII-D",
         runConfigName=None,
         initialize=False,

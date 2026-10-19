@@ -48,7 +48,7 @@ src/emis3d/          the package (import emis3d)
   cli.py             the `emis3d` command
 scripts/             make_radDists.py, run_emis3D.py
 tools/DIII-D/        DIII-D data-preparation scripts (sxrSavers)
-examples/  tests/  testingScripts/
+examples/  tests/
 ```
 
 Real machines (DIII-D, JET, SPARC, ...) are not part of the package. Each user

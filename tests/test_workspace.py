@@ -178,6 +178,30 @@ def test_tokamak_uses_user_camera_override(tmp_path, no_user):
     assert tok.wall is not None
 
 
+def test_camera_config_can_live_anywhere(tmp_path, no_user, monkeypatch):
+    """configFileName may be an absolute or ~ path instead of a name in sxrInfo/."""
+    from emis3d.Tokamak import Tokamak
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    cams = tmp_path / "home" / "cams"
+    cams.mkdir(parents=True)
+    builtin = BUILTIN_MACHINES / "MOCK"
+    (cams / "POL_A.yaml").write_text(
+        (builtin / "inputs/sxrInfo/POL_A_config.yaml").read_text().replace("[2.3, 0.8, 45.0]", "[2.3, 0.8, 55.0]"))
+    (cams / "POL_C.yaml").write_text(
+        (builtin / "inputs/sxrInfo/POL_C_config.yaml").read_text().replace("[2.3, 0.8, 285.0]", "[2.3, 0.8, 290.0]"))
+    wsdir = make_ws(tmp_path)
+    settings = wsdir / "machines/MOCK/MOCK_settings.yaml"
+    settings.parent.mkdir(parents=True)
+    settings.write_text((builtin / "MOCK_settings.yaml").read_text()
+                        .replace("configFileName: POL_A_config.yaml", "configFileName: ~/cams/POL_A.yaml")
+                        .replace("configFileName: POL_C_config.yaml", f"configFileName: {cams / 'POL_C.yaml'}"))
+    ws = Workspace.resolve(workspace=wsdir, user_config=no_user)
+    tok = Tokamak(tokamakName="MOCK", mode="Analysis", loadBolometers=True, workspace=ws)
+    phis = {b.name: b.info["CAMERA_POSITION_R_Z_PHI"][2] for b in tok.bolometers}
+    assert phis["POL_A"] == 55.0 and phis["POL_C"] == 290.0 and phis["POL_B"] == 165.0
+
+
 def test_unknown_machine_lists_what_exists(no_user):
     from emis3d.Tokamak import Tokamak
 

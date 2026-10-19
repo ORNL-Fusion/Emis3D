@@ -213,6 +213,8 @@ __marimo__/
 # creating one inside the checkout by accident.
 /emis3d.yaml
 /runs/
+# Workspaces created by the example notebooks
+examples/**/example_workspace/
 
 *.pyc
 .DS_Store

@@ -136,7 +136,7 @@ class Tokamak(object):
             torConvention = TOR_CONVENTION_PHIS.get(tokamakName)
         except Exception:
             raise RuntimeError(
-                f"!!! Error, put in '{tokamakName}' in TOR_CONVENTION_PHIS in the globals.py file!"
+                f"!!! Error, put in '{tokamakName}' in TOR_CONVENTION_PHIS in src/emis3d/Globals.py!"
             )
 
         self.info["torConventionPhi"] = torConvention

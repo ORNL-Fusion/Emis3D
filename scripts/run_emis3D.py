@@ -8,8 +8,6 @@ python run_emis3D.py
 Written by JLH Sept. 2025
 """
 
-import os
-import sys
 
 
 # from concurrent.futures import ProcessPoolExecutor # ProcessPoolExecutor raises a lot of errors on a mac

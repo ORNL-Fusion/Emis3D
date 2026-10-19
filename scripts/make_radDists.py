@@ -51,7 +51,6 @@ from emis3d.Globals import *
 from emis3d.Tokamak import Tokamak
 from emis3d.Util import config_loader
 from emis3d.workspace import Workspace, set_workspace
-import numpy as np
 
 if __name__ == "__main__":
 

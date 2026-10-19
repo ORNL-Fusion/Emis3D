@@ -1,9 +1,11 @@
-# Elongated ring radDist configuration file for shot 184407
+# Elongated ring radDist configuration file, for the built-in MOCK machine.
+# For a real machine, change tokamakName (and the grid) and put the machine in
+# your workspace's machines/ folder.
 
 distType: "ElongatedRing"
-tokamakName: "DIII-D"
+tokamakName: "MOCK"
 saveRunsDirectoryName: "elongatedRing" # To save the radDists. Program will still create subfolders of each run within this directory
-shotNumber: 184407
+shotNumber: 1
 units: "Brightness" # Options: Power (W), Radiance (W/m2/sr), or Brightness (W/m2)
 injectionLocation: 225 # Toroidal injection location of the disruption mitigation system [degrees] (right-handed coordinate system!)
 numBins: 18 # The number of bins toroidally for the radiation distribution
@@ -17,8 +19,8 @@ numProcessors: 1 # Number of processors to use while creating radDists (aka, 5 w
 
 GRID:
   # Add R and z limits here, if none the program will default to using the wall
-  rLimits: [2.05, 2.06] # in meters, if left empty ([]) the program will use the wall to find the limits
-  zLimits: [0.35, 0.36]
+  rLimits: [1.85, 1.86] # in meters, if left empty ([]) the program will use the wall to find the limits
+  zLimits: [0.20, 0.21]
   NumRStartGrid: 1 # Number of points in the R grid, 10 is usually sufficient
   NumZStartGrid: 1 # Number of points in the z grid, 20 is usually sufficient
 

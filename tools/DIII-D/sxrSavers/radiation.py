@@ -3,7 +3,6 @@
 # from the general signal class in class_generic.py
 
 import os
-import sys
 
 
 import h5py
