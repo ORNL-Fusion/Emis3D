@@ -9,7 +9,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from numpy import deg2rad
 
-from main.Tokamak import Tokamak
+from emis3d.Tokamak import Tokamak
 
 t = Tokamak(
     tokamakName="DIII-D",

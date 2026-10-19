@@ -16,7 +16,7 @@ dt: 0.3 # Averaging window
 enable_dphi_scaling: True # False = the program will not vary the constant by the scale factor
 scale_def: "linear" # Options: "linear", "exponential", "constant"
 
-# Path for each data file relative to inputs/{tokamakName}/sxrData/
+# Path for each data file relative to the workspace 'measurements' location (see `emis3d paths`)
 BOLOMETERS:
   SX90PF:
     dataFileName: '184407/184407_SX90PF_PROCESSED.h5'

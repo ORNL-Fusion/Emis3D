@@ -12,11 +12,11 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(_REPO_ROOT))
 
 import numpy as np
-import main.Util_radDist as Util_radDist
-from main.Globals import EMIS3D_INPUTS_DIRECTORY
-from main.Util import config_loader
+import emis3d.Util_radDist as Util_radDist
+from emis3d.workspace import get_workspace
+from emis3d.Util import config_loader
 import matplotlib.pyplot as plt
-from main.Emis3D import Emis3D
+from emis3d.Emis3D import Emis3D
 
 def pellet_scatter(ax):
     """Gives SPI trajectory range, for plotting"""
@@ -54,7 +54,7 @@ t._prepare_fits(evalTime=evalTime, crossCalib=False)
 
 
 # --- Create the radDist using only one point, we don't need to loop over everything
-pathFileName = EMIS3D_INPUTS_DIRECTORY / tokamakName / "radDists" / configFileName
+pathFileName = get_workspace().path("raddists", tokamak=tokamakName) / configFileName
 config = config_loader(pathFileName)
 print(pathFileName)
 if config is None:

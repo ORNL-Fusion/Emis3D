@@ -20,11 +20,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 import numpy as np
 
-import main.Util_radDist as Util_radDist
-import main.radDist as radDist
-from main.Globals import *
-from main.Tokamak import Tokamak
-from main.Util import config_loader, point3d_to_rz
+import emis3d.Util_radDist as Util_radDist
+import emis3d.radDist as radDist
+from emis3d.Globals import *
+from emis3d.workspace import get_workspace
+from emis3d.Tokamak import Tokamak
+from emis3d.Util import config_loader, point3d_to_rz
 from raysect.optical import VolumeTransform  # type: ignore
 from cherab.tools.emitters import RadiationFunction
 from raysect.core import Point3D
@@ -68,7 +69,7 @@ def sample_bolometer_foil(foil, resolution=20):
 
 # --- Create the radDist using only one point, we don't need to loop over everything
 pathFileName = os.path.join(
-    EMIS3D_INPUTS_DIRECTORY, tokamakName, "radDists", configFileName
+    get_workspace().path("raddists", tokamak=tokamakName), configFileName
 )
 config = config_loader(pathFileName)
 if config is None:

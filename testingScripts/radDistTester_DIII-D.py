@@ -14,9 +14,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(_REPO_ROOT))
 
 import numpy as np
-import main.Util_radDist as Util_radDist
-from main.Globals import EMIS3D_INPUTS_DIRECTORY
-from main.Util import config_loader
+import emis3d.Util_radDist as Util_radDist
+from emis3d.workspace import get_workspace
+from emis3d.Util import config_loader
 import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 
@@ -27,7 +27,7 @@ rzvalues = [2.029, 0.409]
 plt.ion()
 
 # --- Create the radDist using only one point, we don't need to loop over everything
-pathFileName = EMIS3D_INPUTS_DIRECTORY / tokamakName / "radDists" / configFileName
+pathFileName = get_workspace().path("raddists", tokamak=tokamakName) / configFileName
 
 config = config_loader(pathFileName)
 if config is None:

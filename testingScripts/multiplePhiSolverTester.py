@@ -26,13 +26,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import matplotlib.pyplot as plt
 import numpy as np
-import main.Util_radDist as Util_radDist
-from main.Globals import *
-from main.Tokamak import Tokamak
-from main.Util import config_loader
+import emis3d.Util_radDist as Util_radDist
+from emis3d.Globals import *
+from emis3d.workspace import get_workspace
+from emis3d.Tokamak import Tokamak
+from emis3d.Util import config_loader
 from raysect.core import Point2D
-from main.Emis3D import Emis3D
-from main.Util_emis3D import residual
+from emis3d.Emis3D import Emis3D
+from emis3d.Util_emis3D import residual
 
 evalTime = 2120.6
 
@@ -107,7 +108,7 @@ bolometerNames = [
 
 # --- Create the radDist using only one point, we don't need to loop over everything
 pathFileName = os.path.join(
-    EMIS3D_INPUTS_DIRECTORY, tokamakName, "radDists", configFileName
+    get_workspace().path("raddists", tokamak=tokamakName), configFileName
 )
 config = config_loader(pathFileName)
 if config is None:
@@ -145,7 +146,7 @@ if rzArray is not None:
 
     # --- Delete old radDist directory if it exists
     radDist_dir = os.path.join(
-        EMIS3D_INPUTS_DIRECTORY, tokamakName, "radDists", "solverTesting"
+        get_workspace().path("raddists", tokamak=tokamakName), "solverTesting"
     )
     if os.path.exists(radDist_dir):
         import shutil

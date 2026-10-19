@@ -14,9 +14,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(_REPO_ROOT))
 
 import numpy as np
-import main.Util_radDist as Util_radDist
-from main.Globals import EMIS3D_INPUTS_DIRECTORY
-from main.Util import config_loader
+import emis3d.Util_radDist as Util_radDist
+from emis3d.workspace import get_workspace
+from emis3d.Util import config_loader
 import matplotlib.pyplot as plt
 from os.path import join
 
@@ -25,7 +25,7 @@ configFileName = "M3DC1_config.yaml" #"NIMROD_config.yaml"
 
 
 # --- Create the radDist using only one point, we don't need to loop over everything
-pathFileName = EMIS3D_INPUTS_DIRECTORY / tokamakName / "radDists" / configFileName
+pathFileName = get_workspace().path("raddists", tokamak=tokamakName) / configFileName
 config = config_loader(pathFileName)
 print(pathFileName)
 if config is None:
@@ -48,9 +48,7 @@ if True:
     time = 7
     timestep = f"{time:03d}"  # f"{60:05d}"
     m3dc1File = join(
-        EMIS3D_INPUTS_DIRECTORY,
-        tokamakName,
-        "radDists",
+        get_workspace().path("raddists", tokamak=tokamakName),
         "M3DC1_data",
         f"two_injector_to_thermal_{timestep}.txt",
     )

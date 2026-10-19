@@ -11,16 +11,16 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from main.Diagnostic import Bolometer
+from emis3d.Diagnostic import Bolometer
 from cherab.tools.observers import BolometerCamera, BolometerFoil, BolometerSlit
-from main.Tokamak import Tokamak
+from emis3d.Tokamak import Tokamak
 from raysect.core import Point3D, Node, translate, rotate_basis, Point2D
-from main.Util import (
+from emis3d.Util import (
     point3d_to_rz,
     get_rectangle_corners,
     compute_etendue_metric,
 )
-from main.Util_plotting import draw_Cherab_box, get_to_world, extract_csg_bounds
+from emis3d.Util_plotting import draw_Cherab_box, get_to_world, extract_csg_bounds
 from raysect.optical import World
 from raysect.primitive import Box, Subtract
 from raysect.optical import AbsorbingSurface, NullMaterial  # type:ignore

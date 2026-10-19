@@ -1,7 +1,7 @@
 """
 tests/test_util.py
 ==================
-Unit tests for main/Util.py
+Unit tests for src/emis3d/Util.py
 Covers coordinate conversions, wall helpers, JSON/H5 helpers, and utility functions.
 No cherab or raysect objects are required.
 """
@@ -13,7 +13,7 @@ import tempfile
 import numpy as np
 import pytest
 
-from main.Util import (
+from emis3d.Util import (
     XY_To_RPhi,
     RPhi_To_XY,
     rpz_XYZ,

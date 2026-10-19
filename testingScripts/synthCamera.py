@@ -11,8 +11,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from main.Diagnostic import Bolometer
-from main.Tokamak import Tokamak
+from emis3d.Diagnostic import Bolometer
+from emis3d.Tokamak import Tokamak
 import pdb
 
 

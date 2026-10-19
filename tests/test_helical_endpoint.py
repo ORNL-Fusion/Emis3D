@@ -2,7 +2,7 @@
 tests/test_helical_endpoint.py
 ==============================
 Unit tests for the helical endpoint-continuity soft constraint added to
-main/Util_emis3D.py (helical_endpoint_penalty / _emission_pairs) and its
+src/emis3d/Util_emis3D.py (helical_endpoint_penalty / _emission_pairs) and its
 integration into ``residual``.
 
 The constraint ties paired clockwise / counterClock helical distributions
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from lmfit import Parameters, minimize
 
-import main.Util_emis3D as U
+import emis3d.Util_emis3D as U
 
 NAMES = ["counterClock_rev0", "clockwise_rev0"]
 MU_DEG = 90.0

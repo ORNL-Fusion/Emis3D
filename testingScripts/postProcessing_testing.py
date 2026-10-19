@@ -10,8 +10,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
-from main.Emis3D import Emis3D
-import main.Util_emis3D as Util_emis3D
+from emis3d.Emis3D import Emis3D
+import emis3d.Util_emis3D as Util_emis3D
 import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 

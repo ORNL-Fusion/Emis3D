@@ -17,12 +17,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 import numpy as np
 
-import main.Util_radDist as Util_radDist
-from main.Globals import *
-from main.Tokamak import Tokamak
-from main.Util import config_loader
+import emis3d.Util_radDist as Util_radDist
+from emis3d.Globals import *
+from emis3d.workspace import get_workspace
+from emis3d.Tokamak import Tokamak
+from emis3d.Util import config_loader
 import time
-import main.radDist as radDist
+import emis3d.radDist as radDist
 
 tokamakName = "DIII-D"
 configFileName = "helical_config.yaml"
@@ -139,7 +140,7 @@ if False:
     # --- Test the current implementation of a radDist
     # --- Create the radDist using only one point, we don't need to loop over everything
     pathFileName = os.path.join(
-        EMIS3D_INPUTS_DIRECTORY, tokamakName, "radDists", configFileName
+        get_workspace().path("raddists", tokamak=tokamakName), configFileName
     )
     config = config_loader(pathFileName)
     if config is None:

@@ -37,7 +37,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
-from main.Emis3D import Emis3D
+from emis3d.Emis3D import Emis3D
 
 evalTime = 2120.5  # 50.953  #
 

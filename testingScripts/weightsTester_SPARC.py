@@ -12,9 +12,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(_REPO_ROOT))
 
 import numpy as np
-import main.Util_radDist as Util_radDist
-from main.Globals import EMIS3D_INPUTS_DIRECTORY
-from main.Util import config_loader
+import emis3d.Util_radDist as Util_radDist
+from emis3d.workspace import get_workspace
+from emis3d.Util import config_loader
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from os.path import join
@@ -26,9 +26,7 @@ startTimestep = 60
 stopTimestep = 2820
 interval = 60
 radDist_dir_path = join(
-    EMIS3D_INPUTS_DIRECTORY,
-    tokamakName,
-    "radDists",
+    get_workspace().path("raddists", tokamak=tokamakName),
     "Test",
     "NIMROD",
     "NIMROD_sigma_R_0.1_sigma_z_0.001",

@@ -30,11 +30,18 @@ test = [
     "pytest-cov",
 ]
 
-[tool.setuptools]
-packages = ["main"]
+[project.scripts]
+emis3d = "emis3d.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The built-in MOCK machine ships with the package (see emis3d/mock.py)
+[tool.setuptools.package-data]
+emis3d = ["machines/**/*"]
 
 [tool.coverage.run]
-source = ["main"]
+source = ["emis3d"]
 
 [tool.coverage.report]
 show_missing = true
@@ -44,3 +51,4 @@ markers = [
     "cherab: slow tests that build a scene and ray-trace with cherab (deselected by default)",
 ]
 addopts = "-m 'not cherab'"
+pythonpath = ["src"]

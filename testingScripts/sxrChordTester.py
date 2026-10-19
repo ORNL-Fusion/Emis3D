@@ -11,7 +11,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 from itertools import batched
-from main.Tokamak import Tokamak
+from emis3d.Tokamak import Tokamak
 
 t = Tokamak(
     tokamakName="SPARC_FDR",

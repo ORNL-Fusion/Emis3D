@@ -15,7 +15,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 import numpy as np
-from main.Tokamak import Tokamak
+from emis3d.Tokamak import Tokamak
 
 # import tokamaks.DIII_D.sxrSavers.Util_SXR as Util_SXR
 from pathlib import Path

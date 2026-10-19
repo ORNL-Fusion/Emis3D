@@ -207,17 +207,12 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Emis3D specific items, keeping non-shot related information
-
-# Ignore all tokamak input files except for DIII-D injection location files
-tokamaks/*
-
-# Keep the DIII-D folder
-!tokamaks/DIII-D/
-!tokamaks/DIII-D/**
-
-# Ignore all input files
-inputs/*
+# Emis3D specific items
+# Machines (other than the built-in MOCK), data and results belong in a
+# workspace outside this repository (see `emis3d init`). These guard against
+# creating one inside the checkout by accident.
+/emis3d.yaml
+/runs/
 
 *.pyc
 .DS_Store

@@ -1,7 +1,7 @@
 """
 tests/test_util_emis3d.py
 =========================
-Unit tests for main/Util_emis3D.py
+Unit tests for src/emis3d/Util_emis3D.py
 Covers find_dphi, all scale_* functions, error models,
 and the scale_wrapper dispatcher.
 No cherab or raysect required.
@@ -10,7 +10,7 @@ No cherab or raysect required.
 import numpy as np
 import pytest
 
-from main.Util_emis3D import (
+from emis3d.Util_emis3D import (
     find_dphi,
     scale_exp,
     scale_linear,

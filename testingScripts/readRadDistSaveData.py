@@ -11,10 +11,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(_REPO_ROOT))
 
 import numpy as np
-from main.Globals import EMIS3D_INPUTS_DIRECTORY
+from emis3d.workspace import get_workspace
 from os.path import join
 import json
-from main.Util import save_json
+from emis3d.Util import save_json
 
 tokamakName = "SPARC_FDR"
 
@@ -27,9 +27,7 @@ startTimestep = 60
 stopTimestep = 2820
 interval = 60
 radDist_dir_path = join(
-    EMIS3D_INPUTS_DIRECTORY,
-    tokamakName,
-    "radDists",
+    get_workspace().path("raddists", tokamak=tokamakName),
     "Test",
     "NIMROD",
     "NIMROD_sigma_R_0.1_sigma_z_0.001",

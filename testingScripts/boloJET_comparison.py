@@ -15,8 +15,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import matplotlib.pyplot as plt
 import numpy as np
 
-from main.Tokamak import Tokamak
-from main.Util import config_loader
+from emis3d.Tokamak import Tokamak
+from emis3d.Util import config_loader
 import pandas as pd
 
 t = Tokamak(

@@ -1,7 +1,7 @@
 """
 tests/test_util_raddist.py
 ==========================
-Unit tests for main/Util_radDist.py
+Unit tests for src/emis3d/Util_radDist.py
 Covers bivariate_normal, bivariate_normal_elongated, createRZGrid, and
 bivariate_normal_isodensity_points.
 No cherab, raysect, or file I/O required.
@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from scipy.integrate import simpson as simps
 
-from main.Util_radDist import (
+from emis3d.Util_radDist import (
     bivariate_normal,
     bivariate_normal_elongated,
     createRZGrid,
