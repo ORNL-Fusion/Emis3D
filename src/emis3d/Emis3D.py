@@ -241,7 +241,8 @@ class Emis3D:
         try:
             self.config = RunConfig.from_dict(raw)
         except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalide run config {pathFileName}: {e}") from e
+            raise ValueError(f"Invalide run config {config_path}: {e}") from e
+
         self.info = asdict(self.config)
 
         tokamakName = tokamakName or self.info.get("tokamakName")
@@ -249,7 +250,7 @@ class Emis3D:
             raise ValueError("tokamakName must be given, or set in the run config")
 
         # --- Resolve the workspace from the run config's location and 'paths:' block
-        self.run_config_path = Path(pathFileName).resolve()
+        self.run_config_path = config_path.resolve()
         if isinstance(ws_arg, Workspace):
             self.ws = ws_arg
         else:
