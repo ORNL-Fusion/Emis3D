@@ -92,6 +92,7 @@ import emis3d.Util_emis3D as Util_emis3D
 
 logger = logging.getLogger(__name__)
 from dataclasses import asdict
+from typing import Any
 from emis3d.run_config import RunConfig
 from emis3d.workspace import Workspace, set_workspace
 from emis3d.Tokamak import Tokamak
@@ -143,6 +144,7 @@ class Emis3D:
 
         # --- Initialize variables
         self.data = {}
+        self.info: dict[str, Any] = {}  # filled from the run config by _load_config_file
         self.verbose = verbose
         self._workspace_arg = workspace
         self.ws: Workspace | None = workspace if isinstance(workspace, Workspace) else None
@@ -232,16 +234,16 @@ class Emis3D:
         if not config_path.is_file():
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        raw = config_loader(str(pathFileName), verbose=self.verbose)
+        raw = config_loader(str(config_path), verbose=self.verbose)
 
         if raw is None:
-            raise RuntimeError(f"Could not load the configuration file: {pathFileName}")
+            raise RuntimeError(f"Could not load the configuration file: {config_path}")
 
         # --- Validate, and fill in defaults for every configuration option
         try:
             self.config = RunConfig.from_dict(raw)
         except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalide run config {config_path}: {e}") from e
+            raise ValueError(f"Invalid run config {config_path}: {e}") from e
 
         self.info = asdict(self.config)
 
@@ -277,14 +279,14 @@ class Emis3D:
         self.data.update({"synthetic": {"locDependent": {}, "locIndependent": {}}})
         self.files = []
 
-        if self.info is None:
+        if not self.info:
             raise RuntimeError("Load a run config before loading radDists")
         loc_indep = list(self.info.get("radDistDirectories_LocIndependent") or [])
         loc_dep = list(self.info.get("radDistDirectories_LocDependent") or [])
         if not (loc_indep or loc_dep):
             raise RuntimeError("No radDist folders in the run config: set " "radDistDirectories_LocIndependent and/or radDistDirectories_LocDependent")
 
-        base = self.ws.path("raddists", tokamak=self.info["tokamakName"])
+        base = self._workspace().path("raddists", tokamak=self.info["tokamakName"])
 
         # --- Location independent radDists
         count_ = 0
@@ -344,13 +346,13 @@ class Emis3D:
         to it (or absolute).
         """
 
-        if self.info is None or "BOLOMETERS" not in self.info:
+        if not self.info or "BOLOMETERS" not in self.info:
             raise RuntimeError("No BOLOMETERS found in the config file")
 
         self.data["observed"] = {}
         for bolo_ in self.info["BOLOMETERS"]:
             pathFileName = str(
-                self.ws.path(
+                self._workspace().path(
                     "measurements",
                     tokamak=self.info["tokamakName"],
                     shot=self.info.get("shot"),
@@ -380,7 +382,7 @@ class Emis3D:
         [[bolo1_1, bolo1_2, ...], [bolo2_1, bolo2_2, ...], ...]
         """
 
-        if self.info is None or "BOLOMETERS" not in self.info:
+        if not self.info or "BOLOMETERS" not in self.info:
             raise RuntimeError("No BOLOMETERS found in the config file")
 
         self.channel_order = {
@@ -468,7 +470,7 @@ class Emis3D:
 
         time_ = self.data["observed"][arrayName]["TIME"]
 
-        if self.info is None or "dt" not in self.info:
+        if not self.info or self.info["dt"] is None:
             raise ValueError("Set dt (the averaging half-width) in the run config")
 
         dt_ = self.info["dt"]
@@ -979,7 +981,7 @@ class Emis3D:
             if bolo_name in chan_list:
                 bolo_phi.append(bolo_.info["CAMERA_POSITION_R_Z_PHI"][2])
 
-        if self.info is None:
+        if not self.info:
             self.info = {}
 
         # Remove duplications
@@ -1000,7 +1002,7 @@ class Emis3D:
             logger.info("Please run self._post_process_fit_arrangement() before " "self._post_process_calculations()")
             return
 
-        if self.info is None:
+        if not self.info:
             raise AttributeError("Self.info should not be none!")
 
         # --- Create an empty dictionary
@@ -1098,6 +1100,12 @@ class Emis3D:
                 if isinstance(ii, int) and ii != best_id:
                     del self.fits[evalTime][ii]
 
+    def _workspace(self) -> Workspace:
+        """The resolved workspace; set when a run config is loaded."""
+        if self.ws is None:
+            raise RuntimeError("No workspace yet: load a run config first")
+        return self.ws
+
     def _results_dir(self) -> Path:
         """
         Folder for this run's results: a new folder per run
@@ -1106,10 +1114,10 @@ class Emis3D:
         """
         if self._results_path is not None:
             return self._results_path
-        if self.ws is None or self.info is None:
+        if self.ws is None or not self.info:
             raise RuntimeError("Load a run config before saving results")
 
-        fields = {
+        fields: dict[str, Any] = {
             "tokamak": self.info.get("tokamakName"),
             "shot": self.info.get("shot"),
         }
@@ -1135,7 +1143,7 @@ class Emis3D:
             with open(filename, "wb") as f:
                 dill.dump(data, f)
 
-        if self.info is None or "shot" not in self.info or "tokamakName" not in self.info:
+        if not self.info or "shot" not in self.info or "tokamakName" not in self.info:
             return
 
         keys = list(self.bestFits.keys())
@@ -1178,7 +1186,7 @@ class Emis3D:
         """Plots the fit synthetic signal, data, and radDist for the given evalTime."""
         logger.debug(f"→ Plotting the best fit")
 
-        if self.info is None:
+        if not self.info:
             return
 
         # --- Rebuild the bestFit radDist

@@ -31,7 +31,8 @@ class RunConfig:
         if self.scale_def not in SCALE_DEFINITIONS:
             raise ValueError(f"Unknown scale_def: {self.scale_def!r}")
         # Check for valid error definitions
-        if self.error_definition not in ERROR_DEFINITIONS:
+        # (case-insensitive, like Util_emis3D.signal_error)
+        if self.error_definition.lower() not in ERROR_DEFINITIONS:
             raise ValueError(f"Unknown error_definition: {self.error_definition!r}")
         # Check if the radDist directories are listed
         if not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):

@@ -131,9 +131,7 @@ class RadDist(ABC):
             elif hasattr(bolo_, "foil_detectors"):
                 foils = list(bolo_.foil_detectors)
             else:
-                logger.error(
-                    "Could not update bolometer properties in RadDist._update_bolometer_properties()"
-                )
+                logger.error("Could not update bolometer properties in RadDist._update_bolometer_properties()")
                 foils = []
             for foil in foils:
                 # SerialEngine required since user typically uses make_radDists(), which already uses multiple processors
@@ -165,9 +163,7 @@ class RadDist(ABC):
         for emissionName in self.info["emissionNames"]:
             temp = {}
             for bolo_ in boloCameras:
-                temp[bolo_.name] = self._observed_phi_loc(
-                    bolo_.info, emissionName=emissionName
-                )
+                temp[bolo_.name] = self._observed_phi_loc(bolo_.info, emissionName=emissionName)
             observed_phi_loc[emissionName] = temp
         self.data["observed_phi_loc"] = observed_phi_loc
 
@@ -267,9 +263,7 @@ class RadDist(ABC):
         wall = self.tokamak.wall
 
         if wall is None:
-            raise RuntimeError(
-                "Initilize the tokamak prior to calling _total_radiated_power"
-            )
+            raise RuntimeError("Initilize the tokamak prior to calling _total_radiated_power")
 
         # -- Full grid creation
         R_vals = np.linspace(wall["minr"], wall["maxr"], n_poloidal)
@@ -288,9 +282,7 @@ class RadDist(ABC):
             phi_arr = np.full(len(R_flat), phi)
 
             # --- Caclulate the emissivity at that toroidal location
-            result = self.calc_emissivity(
-                R_flat, z_flat, phi_arr, emissionName=emissionName
-            )
+            result = self.calc_emissivity(R_flat, z_flat, phi_arr, emissionName=emissionName)
             emiss = result[emissionName]  # (N_inside,)
 
             # Reshape grid for integration
@@ -317,13 +309,9 @@ class RadDist(ABC):
         self.data = {}
         self.data["toroidalRadiatedPower"] = {}
         for emissionName in self.info["emissionNames"]:
-            self.data["toroidalRadiatedPower"][emissionName] = (
-                self._total_radiated_power(emissionName=emissionName)
-            )
+            self.data["toroidalRadiatedPower"][emissionName] = self._total_radiated_power(emissionName=emissionName)
 
-    def power_per_bin_calc(
-        self, Errfrac: float = 0.01, Pointsupdate: int = int(1e5)
-    ) -> None:
+    def power_per_bin_calc(self, Errfrac: float = 0.01, Pointsupdate: int = int(1e5)) -> None:
         """
         Replaces the power_per_bin_calc with a vectorized version.
         """
@@ -340,13 +328,9 @@ class RadDist(ABC):
 
         # Ensure tokamak and its info are initialized
         if not hasattr(self, "tokamak") or self.tokamak is None:
-            raise RuntimeError(
-                "Tokamak object is not initialized. Call _build_tokamak() before power_per_bin_calc()."
-            )
+            raise RuntimeError("Tokamak object is not initialized. Call _build_tokamak() before power_per_bin_calc().")
         if not hasattr(self.tokamak, "info") or self.tokamak.info is None:
-            raise RuntimeError(
-                "Tokamak.info is not initialized. Ensure _build_tokamak() sets up info correctly."
-            )
+            raise RuntimeError("Tokamak.info is not initialized. Ensure _build_tokamak() sets up info correctly.")
 
         volumeperbin = self.tokamak.info["MACHINE"]["volume"] / float(numBins)
         pointsperbin = 0
@@ -358,9 +342,7 @@ class RadDist(ABC):
             x_, y_, z_, R_, phifirstbin_ = [], [], [], [], []
             while len(x_) < Pointsupdate:
                 if self.tokamak.wall is None:
-                    raise RuntimeError(
-                        "Tokamak wall is not initialized. Ensure that the wall attribute is set before calling power_per_bin_calc()."
-                    )
+                    raise RuntimeError("Tokamak wall is not initialized. Ensure that the wall attribute is set before calling power_per_bin_calc().")
                 # Find random point within the wallcurve
                 x, y, z, R, phi = Util_radDist.random_uniform_point_noVolume(
                     self.tokamak.wall["wallcurve"],
@@ -396,21 +378,15 @@ class RadDist(ABC):
                 # Add the emission to the existing arrays
                 for emissionName in self.info["emissionNames"]:
 
-                    emission = self.calc_emissivity(
-                        R_, z_, phi, emissionName=emissionName
-                    )
+                    emission = self.calc_emissivity(R_, z_, phi, emissionName=emissionName)
 
                     if emissionName not in self.data["emisSqArray"]:
                         self.data["emisSqArray"][emissionName] = np.zeros(numBins)
                         self.data["emisSumArray"][emissionName] = np.zeros(numBins)
                         self.data["powerPerBin"][emissionName] = np.zeros(numBins)
 
-                    self.data["emisSumArray"][emissionName][numbin] += emission[
-                        emissionName
-                    ].sum()
-                    self.data["emisSqArray"][emissionName][numbin] += (
-                        emission[emissionName] ** 2
-                    ).sum()
+                    self.data["emisSumArray"][emissionName][numbin] += emission[emissionName].sum()
+                    self.data["emisSqArray"][emissionName][numbin] += (emission[emissionName] ** 2).sum()
 
             # --- Check to see if the desired precision is reached
             # I believe they are checking to see if the variance between bins is small? -JLH
@@ -424,16 +400,12 @@ class RadDist(ABC):
 
             for key_ in self.data["emisSumArray"]:
                 emismeanarray[key_] = self.data["emisSumArray"][key_] / pointsperbin
-                emisvararray[key_] = (self.data["emisSqArray"][key_] / pointsperbin) - (
-                    emismeanarray[key_] ** 2
-                )
+                emisvararray[key_] = (self.data["emisSqArray"][key_] / pointsperbin) - (emismeanarray[key_] ** 2)
                 integemisarray[key_] = volumeperbin * emismeanarray[key_]
 
                 totintegemis += np.sum(integemisarray[key_])
 
-                integemisvararray[key_] = (
-                    volumeperbin**2 * emisvararray[key_] / pointsperbin
-                )
+                integemisvararray[key_] = volumeperbin**2 * emisvararray[key_] / pointsperbin
                 integemiserrarray[key_] = np.sqrt(integemisvararray[key_])
                 totintegemiserr += np.sum(integemiserrarray[key_])
             toterrfrac = totintegemiserr / totintegemis
@@ -492,9 +464,7 @@ class RadDist(ABC):
         # --- Populate world with emitter, this cannot be a seperate definition!
         # unless you include the emitter.material changes in that def as well!
         if self.tokamak.wall is None:
-            raise RuntimeError(
-                "Tokamak wall is not initialized. Ensure that the wall attribute is set before calling bolos_observe()."
-            )
+            raise RuntimeError("Tokamak wall is not initialized. Ensure that the wall attribute is set before calling bolos_observe().")
 
         emitter = None
         # --- Add the emitter to the Emission Surface
@@ -503,14 +473,10 @@ class RadDist(ABC):
                 emitter = val
 
         if emitter is not None:
-            emittting_material = VolumeTransform(
-                RadiationFunction(self._evaluate_cherab), emitter.transform.inverse()
-            )
+            emittting_material = VolumeTransform(RadiationFunction(self._evaluate_cherab), emitter.transform.inverse())
             emitter.material = emittting_material
         else:
-            raise RuntimeError(
-                "Could not find Tokamak Wall in tokamak.world.children during bolos_observe()."
-            )
+            raise RuntimeError("Could not find Tokamak Wall in tokamak.world.children during bolos_observe().")
 
         # --- Loop over each emission function within the radDist, then each bolometer
         for emissionName in self.info["emissionNames"]:
@@ -562,27 +528,16 @@ class RadDist(ABC):
                             # renormalising for comparison with the sightline
                             try:
                                 # --- Check for divide by zero values
-                                if (
-                                    foil.sensitivity == 0
-                                    or foil.pipelines[0].value.mean == 0
-                                    or bolo_.etendues[jj] == 0
-                                ):
+                                if foil.sensitivity == 0 or foil.pipelines[0].value.mean == 0 or bolo_.etendues[jj] == 0:
                                     ans = 0
                                     ans_error = 0
                                 else:
-                                    fractional_solid_angle = (
-                                        bolo_.etendues[jj] / foil.sensitivity
-                                    )
-                                    radiance = (
-                                        foil.pipelines[0].value.mean
-                                        / fractional_solid_angle
-                                    )
+                                    fractional_solid_angle = bolo_.etendues[jj] / foil.sensitivity
+                                    radiance = foil.pipelines[0].value.mean / fractional_solid_angle
                                     radiance_error = (
                                         np.hypot(
-                                            foil.pipelines[0].value.error()
-                                            / foil.pipelines[0].value.mean,
-                                            bolo_.etendues_error[jj]
-                                            / bolo_.etendues[jj],
+                                            foil.pipelines[0].value.error() / foil.pipelines[0].value.mean,
+                                            bolo_.etendues_error[jj] / bolo_.etendues[jj],
                                         )
                                         * radiance
                                     )
@@ -595,8 +550,7 @@ class RadDist(ABC):
 
                             except Exception as e:
                                 logger.error(
-                                    "Error observing radiance/brightness: %s "
-                                    "(etendue=%.4g, sensitivity=%.4g, mean=%.4g, error=%.4g)",
+                                    "Error observing radiance/brightness: %s " "(etendue=%.4g, sensitivity=%.4g, mean=%.4g, error=%.4g)",
                                     e,
                                     bolo_.etendues[jj],
                                     foil.sensitivity,
@@ -651,20 +605,14 @@ class RadDist(ABC):
         """
 
         if self.tokamak.wall is None:
-            raise RuntimeError(
-                "Tokamak wall is not initialized. Ensure that the wall attribute is set before calling plotCrossSection()."
-            )
+            raise RuntimeError("Tokamak wall is not initialized. Ensure that the wall attribute is set before calling plotCrossSection().")
 
         rLimits = (self.tokamak.wall["minr"], self.tokamak.wall["maxr"])
         zLimits = (self.tokamak.wall["minz"], self.tokamak.wall["maxz"])
 
-        RZarray = Util_radDist.createRZGrid(
-            rLimits, zLimits, num_r=200, num_z=200, wallcurve=None
-        )
+        RZarray = Util_radDist.createRZGrid(rLimits, zLimits, num_r=200, num_z=200, wallcurve=None)
         if RZarray is None:
-            raise RuntimeError(
-                "The RZarray returned with Util_radDist.callRZGridTokamak is None!"
-            )
+            raise RuntimeError("The RZarray returned with Util_radDist.callRZGridTokamak is None!")
 
         R = np.ascontiguousarray(RZarray[:, 0].ravel(), dtype=np.float64)
         z = np.ascontiguousarray(RZarray[:, 1].ravel(), dtype=np.float64)
@@ -672,9 +620,7 @@ class RadDist(ABC):
         emiss = np.zeros(len(RZarray))
 
         for emissionName in self.info["emissionNames"]:
-            ans = self.calc_emissivity(
-                R, z, phi=np.array([phi]), emissionName=emissionName
-            )
+            ans = self.calc_emissivity(R, z, phi=np.array([phi]), emissionName=emissionName)
             emiss += ans[emissionName]
 
         # Create a new figure and axes if ax is None
@@ -687,9 +633,7 @@ class RadDist(ABC):
         z_unique = RZarray[:, 1]
         n_levels = 50
 
-        cf = ax.tricontourf(
-            R_unique, z_unique, emiss, levels=n_levels
-        )  # , cmap="CMRmap_r")
+        cf = ax.tricontourf(R_unique, z_unique, emiss, levels=n_levels)  # , cmap="CMRmap_r")
         ax.tricontour(
             R_unique,
             z_unique,
@@ -700,9 +644,7 @@ class RadDist(ABC):
             alpha=0.4,
         )
 
-    def _plotOverview_crossSection(
-        self, ax, boloGroup: str, plot_etendue: list = []
-    ) -> None:
+    def _plotOverview_crossSection(self, ax, boloGroup: str, plot_etendue: list = []) -> None:
         """
         Draws one top-row panel: the first wall, the chords of a single bolometer
         group, and a cross-section of the radDist at that group's toroidal location.
@@ -744,9 +686,7 @@ class RadDist(ABC):
                     for ch in ch_tags:  # type: ignore
                         c_.append(int(ch[-2:]))
 
-                    data_ += self.data[self.info["units"]][emissionName][
-                        bolo.info["NAME"]
-                    ]
+                    data_ += self.data[self.info["units"]][emissionName][bolo.info["NAME"]]
                     chan_ += c_
 
             # --- Sort the channel list in ascending order
@@ -791,9 +731,7 @@ class RadDist(ABC):
         """
 
         if groups_per_figure < 1:
-            raise ValueError(
-                f"groups_per_figure must be at least 1, got {groups_per_figure}"
-            )
+            raise ValueError(f"groups_per_figure must be at least 1, got {groups_per_figure}")
 
         tok = self.tokamak
 
@@ -809,10 +747,7 @@ class RadDist(ABC):
         boloGroups = list(tok.info["Bolometer Groups"])
 
         # --- Split the groups into one chunk per figure
-        chunks = [
-            boloGroups[ii : ii + groups_per_figure]
-            for ii in range(0, len(boloGroups), groups_per_figure)
-        ]
+        chunks = [boloGroups[ii : ii + groups_per_figure] for ii in range(0, len(boloGroups), groups_per_figure)]
 
         figures = []
 
@@ -827,9 +762,7 @@ class RadDist(ABC):
             # --- Top row: every bolometer with radDist contour overplot
             for ii, boloGroup in enumerate(chunk):
                 f_ = f.add_subplot(num_rows, num_columns, ii + 1)
-                self._plotOverview_crossSection(
-                    f_, boloGroup=boloGroup, plot_etendue=plot_etendue
-                )
+                self._plotOverview_crossSection(f_, boloGroup=boloGroup, plot_etendue=plot_etendue)
 
             # --- Plot the injection location in the last column of the top row
             phi = self.info["injectionLocation"]
@@ -846,10 +779,7 @@ class RadDist(ABC):
 
             if len(chunks) > 1:
                 first = chunkNumber * groups_per_figure + 1
-                f.suptitle(
-                    f"Bolometer groups {first}-{first + len(chunk) - 1} "
-                    f"of {len(boloGroups)}  (figure {chunkNumber + 1} of {len(chunks)})"
-                )
+                f.suptitle(f"Bolometer groups {first}-{first + len(chunk) - 1} " f"of {len(boloGroups)}  (figure {chunkNumber + 1} of {len(chunks)})")
 
             f.tight_layout()
             figures.append(f)
@@ -871,23 +801,13 @@ class RadDist(ABC):
             # f"{self._folder_suffix()}"
         )
         saveFileName = f"R_{self.info['startR']:.2f}_z_{self.info['startZ']:.2f}.json"
-        pathFileName = (
-            get_workspace().path("raddists", tokamak=self.info["tokamakName"])
-            / self.info["saveRunsDirectoryName"]
-            / folderName
-        )
+        pathFileName = get_workspace().path("raddists", tokamak=self.info["tokamakName"]) / self.info["saveRunsDirectoryName"] / folderName
         save_json(toSave, pathFileName, saveFileName)
-        str_ = (
-            f"radDist saved to:\n"
-            f"  folder  : {pathFileName}\n"
-            f"  filename: {saveFileName}"
-        )
+        str_ = f"radDist saved to:\n" f"  folder  : {pathFileName}\n" f"  filename: {saveFileName}"
         logger.info("%s", str_)
 
     @abstractmethod
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Abstract method to be implemented by subclasses to return, for each
         channel of the bolometer, the list of toroidal angles (radians) at
@@ -961,9 +881,7 @@ class Helical(RadDist):
         sigma_target = self.info.get("sigma_R", sigma_kernel + 0.01)
         self.info["sigma_target"] = sigma_target
 
-        points, weights = Util_radDist.bivariate_normal_isodensity_points(
-            R0, z0, sigma_target, sigma_kernel, num_lines, seed=42
-        )
+        points, weights = Util_radDist.bivariate_normal_isodensity_points(R0, z0, sigma_target, sigma_kernel, num_lines, seed=42)
 
         self.info["weights"] = weights
 
@@ -977,15 +895,9 @@ class Helical(RadDist):
         startPhideg = fieldline_key(start_phi, degrees=False)
 
         if startPhideg not in self.tokamak.fieldLines:
-            raise RuntimeError(
-                f"startPhiRad={start_phi:.4f} rad ({startPhideg}°) not found in "
-                f"traced field lines. Available: "
-                f"{self.tokamak.get_fieldLines_startPhis()}"
-            )
+            raise RuntimeError(f"startPhiRad={start_phi:.4f} rad ({startPhideg}°) not found in " f"traced field lines. Available: " f"{self.tokamak.get_fieldLines_startPhis()}")
 
-        self.info["emissionNames"] = self.tokamak.fieldLines[startPhideg][
-            "directionNames"
-        ]
+        self.info["emissionNames"] = self.tokamak.fieldLines[startPhideg]["directionNames"]
         self.info["numTransists"] = 1.0
 
     def _evaluate(
@@ -1008,9 +920,7 @@ class Helical(RadDist):
         if emissionName is None:
             emissionName = self.emissionName
 
-        R0_arr, z0_arr = self.tokamak.find_RZ_Fline(
-            str(self.info["startPhi"]), emissionName, inputPhis=phi
-        )
+        R0_arr, z0_arr = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
 
         # Squeeze out any spurious dimensions, ensure C-contiguous float64
         R = np.ascontiguousarray(R.ravel(), dtype=np.float64)
@@ -1024,14 +934,12 @@ class Helical(RadDist):
             R0_arr,
             z0_arr,
             self.info["weights"].astype(np.float64),
-            float(self.info["sigma_R"]),
+            float(self.info["sigmaKernel"]),
         )
 
         return {emissionName: tot}
 
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1073,9 +981,7 @@ class HelicalRing(RadDist):
         setFieldLine: bool = True,
     ):
 
-        super(HelicalRing, self).__init__(
-            startR=startR, startZ=startZ, config=config or {}
-        )
+        super(HelicalRing, self).__init__(startR=startR, startZ=startZ, config=config or {})
 
         self.info["setFieldLine"] = setFieldLine
         self.info["distType"] = "helicalring"
@@ -1108,13 +1014,8 @@ class HelicalRing(RadDist):
         startPhideg = fieldline_key(self.info["startPhiRad"], degrees=False)
 
         if startPhideg not in self.tokamak.fieldLines:
-            raise RuntimeError(
-                f"Input fieldLinePhi of {startPhideg}, not availble!"
-                f"Possible fieldLinePhi(s): {self.tokamak.get_fieldLines_startPhis()}"
-            )
-        self.info["emissionNames"] = self.tokamak.fieldLines[startPhideg][
-            "directionNames"
-        ]
+            raise RuntimeError(f"Input fieldLinePhi of {startPhideg}, not availble!" f"Possible fieldLinePhi(s): {self.tokamak.get_fieldLines_startPhis()}")
+        self.info["emissionNames"] = self.tokamak.fieldLines[startPhideg]["directionNames"]
         self.info["numTransists"] = numTransists
 
     def _evaluate(
@@ -1138,18 +1039,14 @@ class HelicalRing(RadDist):
             emissionName = self.emissionName
 
         localEmis = {}
-        R0, z0 = self.tokamak.find_RZ_Fline(
-            str(self.info["startPhi"]), emissionName, inputPhis=phi
-        )
+        R0, z0 = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
         R0 = R0.flatten()
         z0 = z0.flatten()
 
         vertExtendParam = 3.0  # for vertical extension of plasma... hardcoded for now
 
         # next we need the R,Z position of our helical structure at this phi
-        flR, flZ = self.tokamak.find_RZ_Fline(
-            str(self.info["startPhi"]), emissionName, inputPhis=phi
-        )
+        flR, flZ = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
 
         # now for bivariate normal distribution in poloidal plane.
         # elongated in approximate poloidal direction of field line
@@ -1161,31 +1058,16 @@ class HelicalRing(RadDist):
         if self.tokamak.info is not None:
             cent0ToCent1Vec = [flR - self.tokamak.info["MACHINE"]["majorRadius"], flZ]
             cent0ToCent1Vec[1] = cent0ToCent1Vec[1] / vertExtendParam
-            cent0ToCent1VecMag = np.sqrt(
-                cent0ToCent1Vec[0] ** 2 + cent0ToCent1Vec[1] ** 2
-            )
+            cent0ToCent1VecMag = np.sqrt(cent0ToCent1Vec[0] ** 2 + cent0ToCent1Vec[1] ** 2)
             cent0ToCent1VecNormed = [x / cent0ToCent1VecMag for x in cent0ToCent1Vec]
             perpVecNormed = [-cent0ToCent1VecNormed[1], cent0ToCent1VecNormed[0]]
             cent1ToPointVec = [R - flR, z - flZ]
-            paralleldist = (
-                cent1ToPointVec[0] * cent0ToCent1VecNormed[0]
-                + cent1ToPointVec[1] * cent0ToCent1VecNormed[1]
-            )
-            perpdist = (
-                cent1ToPointVec[0] * perpVecNormed[0]
-                + cent1ToPointVec[1] * perpVecNormed[1]
-            )
+            paralleldist = cent1ToPointVec[0] * cent0ToCent1VecNormed[0] + cent1ToPointVec[1] * cent0ToCent1VecNormed[1]
+            perpdist = cent1ToPointVec[0] * perpVecNormed[0] + cent1ToPointVec[1] * perpVecNormed[1]
 
             emis = (
-                (
-                    1.0
-                    / (2.0 * np.pi * self.info["sigma_R"] * (self.info["sigma_z"] ** 2))
-                )
-                * np.exp(
-                    -0.5
-                    * (perpdist**2)
-                    / (self.info["sigma_z"] * self.info["sigma_R"]) ** 2
-                )
+                (1.0 / (2.0 * np.pi * self.info["sigma_R"] * (self.info["sigma_z"] ** 2)))
+                * np.exp(-0.5 * (perpdist**2) / (self.info["sigma_z"] * self.info["sigma_R"]) ** 2)
                 * np.exp(-0.5 * (paralleldist**2) / self.info["sigma_z"] ** 2)
             )
 
@@ -1193,9 +1075,7 @@ class HelicalRing(RadDist):
 
         return localEmis
 
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1239,9 +1119,7 @@ class ElongatedRing(RadDist):
         if startZ is None:
             startZ = float(config.get("startZ"))
 
-        super(ElongatedRing, self).__init__(
-            startR=startR, startZ=startZ, config=config or {}
-        )
+        super(ElongatedRing, self).__init__(startR=startR, startZ=startZ, config=config or {})
         self.info["distType"] = "elongatedRing"
         self.info["emissionNames"] = ["elongatedRing"]
 
@@ -1291,9 +1169,7 @@ class ElongatedRing(RadDist):
         )
         return localEmis
 
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1333,13 +1209,9 @@ class SquareTube(RadDist):
         dR = config.get("dR")
         dz = config.get("dz")
         if dR is None or dz is None:
-            raise ValueError(
-                "dR and dz must be provided in the config for SquareTube radDist."
-            )
+            raise ValueError("dR and dz must be provided in the config for SquareTube radDist.")
 
-        super(SquareTube, self).__init__(
-            startR=startR, startZ=startZ, config=config or {}
-        )
+        super(SquareTube, self).__init__(startR=startR, startZ=startZ, config=config or {})
         self.info["distType"] = "squareTube"
         self.info["emissionNames"] = ["squareTube"]
 
@@ -1375,12 +1247,8 @@ class SquareTube(RadDist):
 
         localEmis = {}
         # --- Return 1 if within the square tube, 0 if outside
-        R_in = (R >= self.info["startR"] - self.info["dR"]) & (
-            R <= self.info["startR"] + self.info["dR"]
-        )
-        z_in = (z >= self.info["startZ"] - self.info["dz"]) & (
-            z <= self.info["startZ"] + self.info["dz"]
-        )
+        R_in = (R >= self.info["startR"] - self.info["dR"]) & (R <= self.info["startR"] + self.info["dR"])
+        z_in = (z >= self.info["startZ"] - self.info["dz"]) & (z <= self.info["startZ"] + self.info["dz"])
         loc_ = np.where(R_in & z_in)
         emission = np.zeros(len(R))
         emission[loc_] = 1.0
@@ -1389,9 +1257,7 @@ class SquareTube(RadDist):
 
         return localEmis
 
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1435,9 +1301,7 @@ class NIMROD(RadDist):
         super(NIMROD, self).__init__(config=config or {})
         self.info["distType"] = "NIMROD"
         self.info["emissionNames"] = ["NIMROD"]
-        self.info["startR"] = int(
-            timestep
-        )  # haphazard way of making the savefile have the timestep in it
+        self.info["startR"] = int(timestep)  # haphazard way of making the savefile have the timestep in it
         self.info["startZ"] = int(timestep)
 
         self._build_tokamak(
@@ -1463,9 +1327,7 @@ class NIMROD(RadDist):
         self.rmax = max(self.r_list)
         self.zmin = min(self.z_list)
         self.zmax = max(self.z_list)
-        self.interp_operator = Interpolate3DLinear(
-            self.z_list, self.r_list, self.phi_list, self.emis_values
-        )
+        self.interp_operator = Interpolate3DLinear(self.z_list, self.r_list, self.phi_list, self.emis_values)
 
     def _evaluate(
         self,
@@ -1501,12 +1363,7 @@ class NIMROD(RadDist):
                 phiinst = phi
             if phiinst < 0:
                 phiinst = phiinst + 2.0 * np.pi
-            if (
-                (zinst >= self.zmin)
-                and (zinst <= self.zmax)
-                and (Rinst >= self.rmin)
-                and (Rinst <= self.rmax)
-            ):
+            if (zinst >= self.zmin) and (zinst <= self.zmax) and (Rinst >= self.rmin) and (Rinst <= self.rmax):
                 localEmisVec[indx] = self.interp_operator(zinst, Rinst, phiinst)
             else:
                 localEmisVec[indx] = 0.0
@@ -1515,9 +1372,7 @@ class NIMROD(RadDist):
 
         return localEmis
 
-    def _scaling_factor(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _scaling_factor(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Compute the toroidal scaling factor (phi offset) for a bolometer channel.
 
@@ -1532,9 +1387,7 @@ class NIMROD(RadDist):
 
         return [float(phi)] * numChan
 
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Not yet implimented!
         """
@@ -1570,9 +1423,7 @@ class M3DC1(RadDist):
         super(M3DC1, self).__init__(config=config or {})
         self.info["distType"] = "M3DC1"
         self.info["emissionNames"] = ["M3DC1"]
-        self.info["startR"] = int(
-            timestep
-        )  # haphazard way of making the savefile have the timestep in it
+        self.info["startR"] = int(timestep)  # haphazard way of making the savefile have the timestep in it
         self.info["startZ"] = int(timestep)
 
         self._build_tokamak(
@@ -1598,9 +1449,7 @@ class M3DC1(RadDist):
         self.rmax = max(self.r_list)
         self.zmin = min(self.z_list)
         self.zmax = max(self.z_list)
-        self.interp_operator = Interpolate3DLinear(
-            self.phi_list, self.r_list, self.z_list, self.emis_values
-        )
+        self.interp_operator = Interpolate3DLinear(self.phi_list, self.r_list, self.z_list, self.emis_values)
 
     def _evaluate(
         self,
@@ -1636,12 +1485,7 @@ class M3DC1(RadDist):
                 phiinst = phi
             if phiinst < 0:
                 phiinst = phiinst + 2.0 * np.pi
-            if (
-                (zinst >= self.zmin)
-                and (zinst <= self.zmax)
-                and (Rinst >= self.rmin)
-                and (Rinst <= self.rmax)
-            ):
+            if (zinst >= self.zmin) and (zinst <= self.zmax) and (Rinst >= self.rmin) and (Rinst <= self.rmax):
                 localEmisVec[indx] = self.interp_operator(phiinst, Rinst, zinst)
             else:
                 localEmisVec[indx] = 0.0
@@ -1650,9 +1494,7 @@ class M3DC1(RadDist):
 
         return localEmis
 
-    def _scaling_factor(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _scaling_factor(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Compute the toroidal scaling factor (phi offset) for a bolometer channel.
 
@@ -1667,9 +1509,7 @@ class M3DC1(RadDist):
 
         return [float(phi)] * numChan
 
-    def _observed_phi_loc(
-        self, bolo_info: dict = {}, emissionName: str | None = None
-    ) -> list:
+    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
         Not yet implimented!
         """
