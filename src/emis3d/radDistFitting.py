@@ -23,6 +23,7 @@ class RadDistFitting:
         self.info = {}
         self.info["radDistPath"] = radDistPath
         self._load_ok = False
+        self.load_error: str | None = None
 
         if radDistPath is not None:
             self._load_radDist()
@@ -40,7 +41,8 @@ class RadDistFitting:
             self._load_ok = True
 
         except Exception as e:
-            print(f"Could not load '{self.info['radDistPath']}': {e}")
+            # The caller decides whether this is fatal (see Emis3D._load_radDists)
+            self.load_error = f"{type(e).__name__}: {e}"
 
     @staticmethod
     def _as_segment_list(value) -> list:
