@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 
-
 # Machines with a known toroidal-angle convention. Any machine whose settings
 # file is found on the workspace machine path can be loaded; see emis3d.workspace.
 SUPPORTED_TOKAMAKS: list[str] = ["MOCK", "DIII-D", "SPARC", "SPARC_FDR", "JET"]
@@ -26,8 +25,13 @@ TOR_CONVENTION_PHIS = {
     "DIII-D": 0.0,
 }
 
+# Availble toroidal scaling functions
+SCALE_DEFINITIONS: list[str] = ["linear", "exponential", "constant", "step"]
+
+
 # Explicit export list
 __all__ = [
     "SUPPORTED_TOKAMAKS",
     "TOR_CONVENTION_PHIS",
+    "SCALE_DEFINITIONS",
 ]
