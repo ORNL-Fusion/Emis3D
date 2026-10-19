@@ -1,4 +1,5 @@
 # Config file for a basic Emis3D run
+shot: 184407
 
 # List of folder(s) containing radDists that are independent of injection location
 radDistDirectories_LocIndependent: ['elongatedRing']

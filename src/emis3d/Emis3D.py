@@ -91,6 +91,8 @@ from scipy.integrate import simpson
 import emis3d.Util_emis3D as Util_emis3D
 
 logger = logging.getLogger(__name__)
+from dataclasses import asdict
+from emis3d.run_config import RunConfig
 from emis3d.workspace import Workspace, set_workspace
 from emis3d.Tokamak import Tokamak
 from emis3d.Util import (
@@ -141,7 +143,6 @@ class Emis3D:
 
         # --- Initialize variables
         self.data = {}
-        self.info = None
         self.verbose = verbose
         self._workspace_arg = workspace
         self.ws: Workspace | None = workspace if isinstance(workspace, Workspace) else None
@@ -206,7 +207,7 @@ class Emis3D:
         self,
         tokamakName: str | None = None,
         runConfigName: str | None = None,
-        pathFileName: str | None = None,
+        pathFileName: str | os.PathLike | None = None,
     ) -> None:
         """
         Loads the YAML configuration file for the given tokamak
@@ -217,23 +218,31 @@ class Emis3D:
         """
 
         ws_arg = self._workspace_arg
-        if pathFileName is None:
-            if runConfigName is None:
-                raise ValueError("runConfigName or pathFileName is required to load a config file")
-            if Path(str(runConfigName)).expanduser().is_file():
-                pathFileName = Path(str(runConfigName)).expanduser()
-            else:
-                # --- A name inside the workspace's runs location
-                pre = ws_arg if isinstance(ws_arg, Workspace) else Workspace.resolve(workspace=ws_arg)
-                pathFileName = pre.path("runs", tokamak=tokamakName) / runConfigName
+        if pathFileName is not None:
+            config_path = Path(pathFileName).expanduser()
+        elif runConfigName is None:
+            raise ValueError("runConfigName or pathFileName is required to load a config file")
+        elif Path(str(runConfigName)).expanduser().is_file():
+            config_path = Path(str(runConfigName)).expanduser()
+        else:
+            # --- A name inside the workspace's runs location
+            pre = ws_arg if isinstance(ws_arg, Workspace) else Workspace.resolve(workspace=ws_arg)
+            config_path = pre.path("runs", tokamak=tokamakName) / runConfigName
 
-        if not os.path.isfile(str(pathFileName)):
-            raise FileNotFoundError(f"Config file not found: {pathFileName}")
+        if not config_path.is_file():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        self.info = config_loader(str(pathFileName), verbose=self.verbose)
+        raw = config_loader(str(pathFileName), verbose=self.verbose)
 
-        if self.info is None:
+        if raw is None:
             raise RuntimeError(f"Could not load the configuration file: {pathFileName}")
+
+        # --- Validate, and fill in defaults for every configuration option
+        try:
+            self.config = RunConfig.from_dict(raw)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalide run config {pathFileName}: {e}") from e
+        self.info = asdict(self.config)
 
         tokamakName = tokamakName or self.info.get("tokamakName")
         if tokamakName is None:
@@ -459,7 +468,7 @@ class Emis3D:
         time_ = self.data["observed"][arrayName]["TIME"]
 
         if self.info is None or "dt" not in self.info:
-            return [1] * self.data["observed"][arrayName]["NUM_CHANNELS"]
+            raise ValueError("Set dt (the averaging half-width) in the run config")
 
         dt_ = self.info["dt"]
         start = np.abs(time_ - (evalTime - dt_)).argmin()
@@ -572,7 +581,7 @@ class Emis3D:
         # --- Scale the synthetic data to observed for better fitting
         max_data_val = find_max_nested_lists(self.fitData[evalTime]["observed"])
 
-        if self.info is not None and "enable_dphi_scaling" in self.info:
+        if self.info is not None:
 
             boloNames = self.channel_order["bolometer_order"] if crossCalib else None
 
@@ -729,15 +738,12 @@ class Emis3D:
         """
 
         try:
-            if self.info is None or "scale_def" not in self.info:
-                return
-
             # --- Data used for fitting
             data_dict = self.fitData[evalTime]
 
             # --- Soft-constraint weight tying helical endpoints together.
             # Active (1.0) by default; set to 0.0 in the run config to disable.
-            helical_endpoint_weight = self.info.get("helical_endpoint_weight", 1.0)
+            helical_endpoint_weight = self.info["helical_endpoint_weight"]
 
             for ii in self.fits[evalTime]:
 
@@ -899,10 +905,6 @@ class Emis3D:
 
         self.bestFits[evalTime] = self.fits[evalTime][bestFitID]
         self.bestFits[evalTime]["bestFitID"] = bestFitID
-
-        if self.info is None or "scale_def" not in self.info:
-            logger.info("No scale_def found in the config file")
-            return
 
         boloNames = None
         if crossCalib and (self.channel_order is not None and "bolometer_order" in self.channel_order):
@@ -1213,7 +1215,7 @@ class Emis3D:
         count_ += 1
         ax = f.add_subplot(2, num_columns, count_)
         tok._plot_first_wall(ax)
-        phi = float(self.info.get("injectionLocation", 0))
+        phi = float(self.info["injectionLocation"])
         self.bestFits[evalTime]["radDist"].plotCrossSection(phi=np.deg2rad(phi), ax=ax)
         ax.set_title(f"Injection location = {phi:.2f} degrees")
 

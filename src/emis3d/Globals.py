@@ -28,10 +28,8 @@ TOR_CONVENTION_PHIS = {
 # Availble toroidal scaling functions
 SCALE_DEFINITIONS: list[str] = ["linear", "exponential", "constant", "step"]
 
+# Availble error definitions for the data
+ERROR_DEFINITIONS: list[str] = ["exponential", "inverse", "inverse square", "constant"]
 
 # Explicit export list
-__all__ = [
-    "SUPPORTED_TOKAMAKS",
-    "TOR_CONVENTION_PHIS",
-    "SCALE_DEFINITIONS",
-]
+__all__ = ["SUPPORTED_TOKAMAKS", "TOR_CONVENTION_PHIS", "SCALE_DEFINITIONS", "ERROR_DEFINITIONS"]
