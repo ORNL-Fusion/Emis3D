@@ -32,7 +32,6 @@ from raysect.primitive import Cylinder, import_stl, Subtract
 
 from emis3d.Diagnostic import Bolometer
 from emis3d.Fieldline_Tracer import Fieldline_Tracer
-from emis3d.Globals import TOR_CONVENTION_PHIS
 from emis3d.workspace import Workspace, WorkspaceError, get_workspace
 
 logger = logging.getLogger(__name__)
@@ -98,10 +97,7 @@ class Tokamak(object):
 
         if not tokamakName or not self.ws.has_machine(tokamakName):
             roots = "\n  ".join(str(r) for r in self.ws.machine_roots(tokamakName))
-            raise ValueError(
-                f"Machine '{tokamakName}' not found. Available: {self.ws.machines()}. "
-                f"Searched:\n  {roots}"
-            )
+            raise ValueError(f"Machine '{tokamakName}' not found. Available: {self.ws.machines()}. " f"Searched:\n  {roots}")
 
         # --- Load the configuration file
         self._load_config_file(tokamakName, mode, reflections, eqFileName)
@@ -124,22 +120,12 @@ class Tokamak(object):
         if os.path.isfile(pathFileName):
             self.info = config_loader(pathFileName)
         else:
-            logger.warning(
-                f"Could not load the configuration file, file does not exist: {pathFileName}"
-            )
+            logger.warning(f"Could not load the configuration file, file does not exist: {pathFileName}")
 
         # --- Create the self.info dict if the file is not loaded
         if self.info is None:
             self.info = {}
 
-        try:
-            torConvention = TOR_CONVENTION_PHIS.get(tokamakName)
-        except Exception:
-            raise RuntimeError(
-                f"!!! Error, put in '{tokamakName}' in TOR_CONVENTION_PHIS in src/emis3d/Globals.py!"
-            )
-
-        self.info["torConventionPhi"] = torConvention
         self.info["tokamakName"] = tokamakName
         self.info["mode"] = mode
         self.info["reflections"] = reflections
@@ -186,10 +172,7 @@ class Tokamak(object):
             return
 
         try:
-            pathFileName = (
-                self.ws.path("equilibria", tokamak=self.info["tokamakName"])
-                / self.info["eqFileName"]
-            )
+            pathFileName = self.ws.path("equilibria", tokamak=self.info["tokamakName"]) / self.info["eqFileName"]
 
             if os.path.isfile(pathFileName):
                 with open(pathFileName) as f:
@@ -228,9 +211,7 @@ class Tokamak(object):
 
         # --- Fall back to the wall text file if the eqFile had no limiter data
         if rzarray is None and "wallFileName" in self.info["MACHINE"]:
-            pathFileName = self.ws.machine_file(
-                self.info["tokamakName"], "inputs", self.info["MACHINE"]["wallFileName"]
-            )
+            pathFileName = self.ws.machine_file(self.info["tokamakName"], "inputs", self.info["MACHINE"]["wallFileName"])
 
             try:
                 rzarray = np.loadtxt(pathFileName, skiprows=0)
@@ -266,12 +247,8 @@ class Tokamak(object):
             if self.wall is not None:
                 # --- Find the z limits
                 if "Bolometer Z Limits" in self.info:
-                    minz = np.min(
-                        [self.wall["minz"], self.info["Bolometer Z Limits"][0]]
-                    ).astype(float)
-                    maxz = np.max(
-                        [self.wall["maxz"], self.info["Bolometer Z Limits"][1]]
-                    ).astype(float)
+                    minz = np.min([self.wall["minz"], self.info["Bolometer Z Limits"][0]]).astype(float)
+                    maxz = np.max([self.wall["maxz"], self.info["Bolometer Z Limits"][1]]).astype(float)
                 else:
                     minz = self.wall["minz"]
                     maxz = self.wall["maxz"]
@@ -280,12 +257,8 @@ class Tokamak(object):
 
                 # --- Find the R limits
                 if "Bolometer R Limits" in self.info:
-                    minR = np.min(
-                        [self.wall["minr"], self.info["Bolometer R Limits"][0]]
-                    ).astype(float)
-                    maxR = np.max(
-                        [self.wall["maxr"], self.info["Bolometer R Limits"][1]]
-                    ).astype(float)
+                    minR = np.min([self.wall["minr"], self.info["Bolometer R Limits"][0]]).astype(float)
+                    maxR = np.max([self.wall["maxr"], self.info["Bolometer R Limits"][1]]).astype(float)
                 else:
                     minR = self.wall["minr"]
                     maxR = self.wall["maxr"]
@@ -372,9 +345,7 @@ class Tokamak(object):
 
         else:
             logger.error("Building the tokamak failed")
-            logger.warning(
-                f"Could not load the stl file for this tokamak, {PFC_STL_PATH} or the wall"
-            )
+            logger.warning(f"Could not load the stl file for this tokamak, {PFC_STL_PATH} or the wall")
             logger.debug("was not loaded")
 
     def _load_bolometers(self) -> None:
@@ -438,10 +409,7 @@ class Tokamak(object):
         inside : np.ndarray of bool, shape (N,)
         """
         if self.wall is None:
-            raise RuntimeError(
-                "Tokamak wall not initialised — ensure _load_first_wall() "
-                "has been called before using _inside_tokamak()."
-            )
+            raise RuntimeError("Tokamak wall not initialised — ensure _load_first_wall() " "has been called before using _inside_tokamak().")
         return self.wall["wallcurve"].contains_points(points)
 
     def _make_raysect_surface_transparent(self, surfaceName="") -> None:
@@ -463,9 +431,7 @@ class Tokamak(object):
             return
 
         if name not in ["Emission Surface", "Tokamak Wall"]:
-            logger.debug(
-                "Name must be one of these two: Emission Surface, Tokamak Wall"
-            )
+            logger.debug("Name must be one of these two: Emission Surface, Tokamak Wall")
             return
 
         for child in self.world.children:
@@ -558,9 +524,7 @@ class Tokamak(object):
                 lw=2,
             )
 
-    def _plot_channel_with_envelope(
-        self, ax, foil, slit, length=None, debug=False
-    ) -> None:
+    def _plot_channel_with_envelope(self, ax, foil, slit, length=None, debug=False) -> None:
 
         if ax is not None:
 
@@ -576,11 +540,7 @@ class Tokamak(object):
                 foil_center = foil.to_root() * foil.centre_point
                 slit_center = slit.to_root() * slit.centre_point
 
-                separation = np.sqrt(
-                    (foil_center.x - slit_center.x) ** 2
-                    + (foil_center.y - slit_center.y) ** 2
-                    + (foil_center.z - slit_center.z) ** 2
-                )
+                separation = np.sqrt((foil_center.x - slit_center.x) ** 2 + (foil_center.y - slit_center.y) ** 2 + (foil_center.z - slit_center.z) ** 2)
 
                 logger.debug("\n--- FOIL to SLIT SEPARATION ---")
                 logger.debug(f"Center-to-center distance: {separation:.6f} m")
@@ -643,9 +603,7 @@ class Tokamak(object):
                 plt.plot([r1, r2], [z1, z2], linewidth=2, color="tab:red")
 
     @staticmethod
-    def _chord_phi_values(
-        value, default: float, num_chords: int, boloName: str, key: str
-    ):
+    def _chord_phi_values(value, default: float, num_chords: int, boloName: str, key: str):
         """
         Normalise an optional per-chord toroidal angle entry into a list of
         num_chords floats, in degrees.
@@ -662,10 +620,7 @@ class Tokamak(object):
 
         if isinstance(value, (list, tuple, np.ndarray)):
             if len(value) != num_chords:
-                logger.error(
-                    f"{boloName}: '{key}' has {len(value)} entries but there are "
-                    f"{num_chords} chords. Falling back to the camera phi of {default}."
-                )
+                logger.error(f"{boloName}: '{key}' has {len(value)} entries but there are " f"{num_chords} chords. Falling back to the camera phi of {default}.")
                 return [float(default)] * num_chords
             return [float(v) for v in value]
 
@@ -698,9 +653,7 @@ class Tokamak(object):
 
         # --- Check to see if boloGroupName is in self.info['Bolometer Groups']
         if boloGroupName not in self.info["Bolometer Groups"]:
-            logger.debug(
-                f"{boloGroupName} is not found in self.info['Bolometer Groups']"
-            )
+            logger.debug(f"{boloGroupName} is not found in self.info['Bolometer Groups']")
             return
 
         # --- Remove each bolometer from the world
@@ -829,11 +782,7 @@ class Tokamak(object):
 
                         if num_points > 2:
                             _, _, residual = fit_line_to_rz(R_ray, z_ray)
-                            logger.debug(
-                                f"{foil.name}: sightline spans {dphi:.2f} degrees "
-                                f"toroidally, its projection bends {residual*100.0:.2f} cm "
-                                "away from a straight chord."
-                            )
+                            logger.debug(f"{foil.name}: sightline spans {dphi:.2f} degrees " f"toroidally, its projection bends {residual*100.0:.2f} cm " "away from a straight chord.")
 
                         ax.plot(
                             R_ray,
@@ -869,15 +818,11 @@ class Tokamak(object):
                             dz = np.abs(origin_rz[1] - hit_rz[1])
                             length = np.sqrt(dR**2 + dz**2)
 
-                            self._plot_channel_with_envelope(
-                                ax, foil=foil, slit=foil.slit, length=length
-                            )
+                            self._plot_channel_with_envelope(ax, foil=foil, slit=foil.slit, length=length)
 
                     # Debug arrow in ray direction
                     slit_rz = point3d_to_rz(foil.slit.centre_point)
-                    direction = np.array(
-                        [slit_rz[0] - origin_rz[0], slit_rz[1] - origin_rz[1]]
-                    )
+                    direction = np.array([slit_rz[0] - origin_rz[0], slit_rz[1] - origin_rz[1]])
                     norm = np.linalg.norm(direction)
                     if norm > 0:
                         direction = direction / norm
@@ -916,9 +861,7 @@ class Tokamak(object):
 
         # --- Check to see if boloGroupName is in self.info['Bolometer Groups']
         if boloGroupName not in self.info["Bolometer Groups"]:
-            logger.debug(
-                f"{boloGroupName} is not found in self.info['Bolometer Groups']"
-            )
+            logger.debug(f"{boloGroupName} is not found in self.info['Bolometer Groups']")
             return None
 
         # --- Loop over each bolometer, only plot add with the correct group name
@@ -960,9 +903,7 @@ class Tokamak(object):
         if hasattr(self, "bolometers"):
 
             if self.info["mode"] != "Build":
-                logger.debug(
-                    f"→ Building the tokamak! We need this to trace the chords for the bolometers"
-                )
+                logger.debug(f"→ Building the tokamak! We need this to trace the chords for the bolometers")
                 self._build_tokamak()
             try:
                 # --- Remove each bolometer from the world
@@ -995,9 +936,7 @@ class Tokamak(object):
                     bolo._change_parent(value=self.world)
             except Exception as e:
                 logger.error(f"Could not plot the bolometer chords, error: {e}")
-                logger.debug(
-                    f"Ensure that the tokamak is built before plotting the bolometers, currently in mode: {self.info['mode']}"
-                )
+                logger.debug(f"Ensure that the tokamak is built before plotting the bolometers, currently in mode: {self.info['mode']}")
 
         # --- Plot the given field line
         if hasattr(self, "fieldLines"):
@@ -1005,9 +944,7 @@ class Tokamak(object):
             fieldlineKey = fieldline_key(fieldLineStartPhi)
 
             if str(fieldlineKey) in self.get_fieldLines_startPhis():
-                for ii, dir_ in enumerate(
-                    self.fieldLines[f"{fieldlineKey}"]["directionNames"]
-                ):
+                for ii, dir_ in enumerate(self.fieldLines[f"{fieldlineKey}"]["directionNames"]):
                     line_ = self.fieldLines[f"{fieldlineKey}"][dir_]
                     ax.plot(
                         line_["x"],
@@ -1020,9 +957,7 @@ class Tokamak(object):
 
             else:
                 logger.debug(f"Input fieldLinePhi of {fieldlineKey}, not availble!")
-                logger.debug(
-                    f"Possible fieldLinePhi(s): {self.get_fieldLines_startPhis()}"
-                )
+                logger.debug(f"Possible fieldLinePhi(s): {self.get_fieldLines_startPhis()}")
 
             ax.legend()
 
@@ -1040,9 +975,7 @@ class Tokamak(object):
         else:
             plt.show()
 
-    def set_fieldlines(
-        self, startR=[], startZ=[], startPhi=0.0, numTransists=1.0
-    ) -> None:
+    def set_fieldlines(self, startR=[], startZ=[], startPhi=0.0, numTransists=1.0) -> None:
         """
         Calculate the field line progress clockwise and counterclockwise from
         StartPhi. This supports inputs of multiple R and z locations.
@@ -1065,9 +998,7 @@ class Tokamak(object):
         """
 
         if numTransists > 1:
-            raise ValueError(
-                f"ERROR! Code currently does not support more than 1 toroidal transit of the field lines!"
-            )
+            raise ValueError(f"ERROR! Code currently does not support more than 1 toroidal transit of the field lines!")
 
         startPhideg = fieldline_key(startPhi, degrees=False)
 
@@ -1088,9 +1019,7 @@ class Tokamak(object):
             # --- Loop over the R, z coordinates, store the result
             for jj in range(len(startR)):
                 if self.verbose:
-                    logger.debug(
-                        f"Calculating fields in the {direction_prefix} direction from\tR={startR[jj]:.2f}m, z={startZ[jj]:.2f}m"
-                    )
+                    logger.debug(f"Calculating fields in the {direction_prefix} direction from\tR={startR[jj]:.2f}m, z={startZ[jj]:.2f}m")
                 tracer = Fieldline_Tracer(
                     StartR=startR[jj],
                     StartZ=startZ[jj],
@@ -1103,9 +1032,7 @@ class Tokamak(object):
 
                 # --- Find the components for each revolution
                 d_ = tracer.data
-                rev = split_revolutions(
-                    d_["x"], d_["y"], d_["z"], d_["phi"], d_["R"], d_["L"]
-                )
+                rev = split_revolutions(d_["x"], d_["y"], d_["z"], d_["phi"], d_["R"], d_["L"])
 
                 # --- Initialize the arrays
                 for kk in range(int(numTransists)):
@@ -1115,15 +1042,11 @@ class Tokamak(object):
                         self.fieldLines[startPhideg]["directionNames"].append(direction)
                         self.fieldLines[startPhideg][direction] = {}
                         for val in ["R", "L", "x", "y", "z"]:
-                            self.fieldLines[startPhideg][direction][val] = np.zeros(
-                                (len(startR), len(rev[kk]["phi"]))
-                            )
+                            self.fieldLines[startPhideg][direction][val] = np.zeros((len(startR), len(rev[kk]["phi"])))
 
                     # --- Store the data
                     for val in ["R", "L", "x", "y", "z"]:
-                        self.fieldLines[startPhideg][direction][val][jj, :] = rev[kk][
-                            val
-                        ].flatten()
+                        self.fieldLines[startPhideg][direction][val][jj, :] = rev[kk][val].flatten()
                     # --- Phi should be the same for each one of them, so we only need to store it once
                     if jj == 0:
                         phi_arr = rev[kk]["phi"]
@@ -1132,9 +1055,7 @@ class Tokamak(object):
                         # doesn't recompute it on every emissivity evaluation call.
                         sidx = phi_arr.argsort()
                         self.fieldLines[startPhideg][direction]["phi_sidx"] = sidx
-                        self.fieldLines[startPhideg][direction]["phi_sorted"] = phi_arr[
-                            sidx
-                        ]
+                        self.fieldLines[startPhideg][direction]["phi_sorted"] = phi_arr[sidx]
 
     def get_fieldLines_startPhis(self) -> list:
         return list(self.fieldLines.keys())
@@ -1154,10 +1075,7 @@ class Tokamak(object):
 
         key = fieldline_key(startPhi)
         if key not in self.fieldLines:
-            raise KeyError(
-                f"No field lines traced at {startPhi} deg (key '{key}')"
-                f"Available: {self.get_fieldLines_startPhis()}"
-            )
+            raise KeyError(f"No field lines traced at {startPhi} deg (key '{key}')" f"Available: {self.get_fieldLines_startPhis()}")
 
         fline = self.fieldLines[key][emissionName]
 
@@ -1167,9 +1085,7 @@ class Tokamak(object):
         L = sorted_B.size
         sorted_idx = np.searchsorted(sorted_B, A)
         sorted_idx[sorted_idx == L] = L - 1
-        mask = (sorted_idx > 0) & (
-            (np.abs(A - sorted_B[sorted_idx - 1]) < np.abs(A - sorted_B[sorted_idx]))
-        )
+        mask = (sorted_idx > 0) & ((np.abs(A - sorted_B[sorted_idx - 1]) < np.abs(A - sorted_B[sorted_idx])))
         flInd = sidx_B[sorted_idx - mask]
         R = fline["R"][:, flInd]
         z = fline["z"][:, flInd]
@@ -1203,13 +1119,9 @@ class Tokamak(object):
         for angle in np.arange(0, 360, dtheta):
             lines[angle] = draw_radial_lines(r0, z0, R=1.5, angle_deg=float(angle))
 
-            lines_upper[angle] = draw_radial_lines(
-                r0, z0, R=1.5, angle_deg=float(angle), initial_offset=dtheta_camera
-            )
+            lines_upper[angle] = draw_radial_lines(r0, z0, R=1.5, angle_deg=float(angle), initial_offset=dtheta_camera)
             lines_upper[angle]["offset"] = dtheta_camera
-            lines_lower[angle] = draw_radial_lines(
-                r0, z0, R=1.5, angle_deg=float(angle), initial_offset=-dtheta_camera
-            )
+            lines_lower[angle] = draw_radial_lines(r0, z0, R=1.5, angle_deg=float(angle), initial_offset=-dtheta_camera)
             lines_lower[angle]["offset"] = -dtheta_camera
 
         # --- Fit each segement to a higher resolution, depending on the distance between the two segements
@@ -1224,9 +1136,7 @@ class Tokamak(object):
             z_.append(tok_z[ii])
 
             # --- Length of this segment
-            ds = np.sqrt(
-                (tok_r[loc_] - tok_r[ii]) ** 2 + (tok_z[loc_] - tok_z[ii]) ** 2
-            )
+            ds = np.sqrt((tok_r[loc_] - tok_r[ii]) ** 2 + (tok_z[loc_] - tok_z[ii]) ** 2)
 
             if ds > 1.0:
                 npts = 40
@@ -1238,9 +1148,7 @@ class Tokamak(object):
                     nx = [tok_r[loc_]] * npts
                 else:
                     nx = np.linspace(tok_r[loc_], tok_r[ii], npts)
-                ny = np.poly1d(
-                    np.polyfit([tok_r[loc_], tok_r[ii]], [tok_z[loc_], tok_z[ii]], 1)
-                )(nx)
+                ny = np.poly1d(np.polyfit([tok_r[loc_], tok_r[ii]], [tok_z[loc_], tok_z[ii]], 1))(nx)
 
                 for x_ in nx:
                     r_.append(x_)
@@ -1264,19 +1172,13 @@ class Tokamak(object):
             x, y, z = rz_to_xyz(r, z, phi)  # type: ignore
             self.cameras[ii]["p2"] = Point3D(x, y, z)
 
-            self.cameras[ii]["y_vector_full"] = self.cameras[ii]["p1"].vector_to(
-                self.cameras[ii]["p2"]
-            )
+            self.cameras[ii]["y_vector_full"] = self.cameras[ii]["p1"].vector_to(self.cameras[ii]["p2"])
             self.cameras[ii]["y_vector"] = self.cameras[ii]["y_vector_full"].normalise()
             self.cameras[ii]["y_width"] = self.cameras[ii]["y_vector_full"].length
-            self.cameras[ii]["detector_center"] = (
-                self.cameras[ii]["p1"] + self.cameras[ii]["y_vector_full"] * 0.5
-            )
+            self.cameras[ii]["detector_center"] = self.cameras[ii]["p1"] + self.cameras[ii]["y_vector_full"] * 0.5
 
             x, y, z = rz_to_xyz(MACHINE_AXIS_3D[0], MACHINE_AXIS_3D[1], phi)
-            self.cameras[ii]["normal_vector"] = (
-                self.cameras[ii]["detector_center"].vector_to(Point3D(x, y, z))
-            ).normalise()  # inward pointing
+            self.cameras[ii]["normal_vector"] = (self.cameras[ii]["detector_center"].vector_to(Point3D(x, y, z))).normalise()  # inward pointing
 
     def _change_object_parent(self, parent=None):
         """
@@ -1398,9 +1300,7 @@ class Tokamak(object):
                 illumination.parent = self.world
 
         rgb = RGBPipeline2D(name="sRGB", display_progress=False)
-        sampler = RGBAdaptiveSampler2D(
-            rgb, ratio=100, fraction=0.2, min_samples=500, cutoff=0.05
-        )
+        sampler = RGBAdaptiveSampler2D(rgb, ratio=100, fraction=0.2, min_samples=500, cutoff=0.05)
         fov = 140
 
         # Add indicator lights and set casing material
@@ -1415,9 +1315,7 @@ class Tokamak(object):
                     CenterPoint = Sphere(
                         IndLightSize,
                         parent=self.world,
-                        transform=translate(
-                            center_point.x, center_point.y, center_point.z
-                        ),
+                        transform=translate(center_point.x, center_point.y, center_point.z),
                     )
                     CenterPoint.material = UniformSurfaceEmitter(red, 100.0)
             else:
@@ -1425,20 +1323,10 @@ class Tokamak(object):
 
         if CameraType == 0:
             # Camera that looks in the counterclockwise toroidal direction
-            transform = (
-                rotate(0.0, 0.0, TorAngleDeg - 90.0 - (1.0 * ZoomMult))
-                * translate(0.0, major_radius + Radjust, Zadjust)
-                * rotate(0.0, -90.0, 0.0)
-                * rotate(90.0, 0.0, 0.0)
-            )
+            transform = rotate(0.0, 0.0, TorAngleDeg - 90.0 - (1.0 * ZoomMult)) * translate(0.0, major_radius + Radjust, Zadjust) * rotate(0.0, -90.0, 0.0) * rotate(90.0, 0.0, 0.0)
         elif CameraType == 1:
             # Camera for viewing outboard side
-            transform = (
-                rotate(0.0, 0.0, TorAngleDeg - 180.0)
-                * translate(-1.0 * ZoomMult * major_radius, 0.0, Zadjust)
-                * rotate(0.0, -90.0, 0.0)
-                * rotate(90.0, 0.0, 0.0)
-            )
+            transform = rotate(0.0, 0.0, TorAngleDeg - 180.0) * translate(-1.0 * ZoomMult * major_radius, 0.0, Zadjust) * rotate(0.0, -90.0, 0.0) * rotate(90.0, 0.0, 0.0)
         else:
             raise Exception("Camera type does not match an option")
 

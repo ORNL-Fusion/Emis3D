@@ -17,13 +17,7 @@ and the plasma's own contribution to F was ignored. Together with first-order
 (Euler) steps, that made the field-line pitch wrong by a few percent, enough
 that q = 2 field lines did not close after two transits.
 
-The field line is integrated as d(R, Z)/dphi = (R B_R / B_phi, R B_Z / B_phi)
-with an adaptive high-order solver (scipy.integrate.solve_ivp, DOP853), so the
-accuracy no longer depends on NumTor, which only sets the number of output
-points. x and y are computed from R and phi.
-
 Sign convention: B_phi = -F/R, the same sign the old code used (-bcentr).
-Check it per machine (see the coordinate conventions in the code review).
 """
 
 import matplotlib.pyplot as plt
