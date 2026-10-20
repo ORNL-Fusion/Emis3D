@@ -10,6 +10,10 @@ Edited to remove a lot of user specific file value - JLH, Nov. 25th, 2025
 Edited to take a gfile input instead of a eqDesk file, since it is already
 read within the tokamak class - JLH, July 25, 2025
 
+Updated, the old code used: tBphi = self.bcentr * self.Rmagx / tR. The problem is that
+self.bcentr is vacuum toroidal field at rcentr, not Rmagx. This causes a slight offset after
+a few rotations.
+
 TODO:
 1. Why don't the q=2 field lines match up after 2 revolutions? q=1 ones are fine...
 """
@@ -53,9 +57,7 @@ class Fieldline_Tracer:
             raise ValueError("gfile is None. Please provide a valid gfile object.")
         psi = self.gfile["psi"]
         Rgrid = self.gfile.rleft + np.linspace(0.0, self.gfile.rdim, num=self.gfile.nx)
-        zgrid = self.gfile.zmid + np.linspace(
-            -self.gfile.zdim / 2.0, self.gfile.zdim / 2.0, num=self.gfile.ny
-        )
+        zgrid = self.gfile.zmid + np.linspace(-self.gfile.zdim / 2.0, self.gfile.zdim / 2.0, num=self.gfile.ny)
         R, Z = np.meshgrid(Rgrid, zgrid)
         psigrad = np.gradient(psi, Rgrid, zgrid)
 
@@ -96,9 +98,7 @@ class Fieldline_Tracer:
         startPhi = self.startPhi
 
         if startR is None or startZ is None or startPhi is None:
-            raise ValueError(
-                "startR, startZ, and startPhi must all be provided and not None."
-            )
+            raise ValueError("startR, startZ, and startPhi must all be provided and not None.")
         phi = np.linspace(
             float(startPhi),
             float(startPhi) + 2.0 * float(NumTransits) * np.pi,
@@ -151,23 +151,17 @@ class Fieldline_Tracer:
 
         fig = plt.figure(figsize=(8, 8))
         ax = plt.subplot(2, 2, 1)
-        c = ax.contourf(
-            self.R, self.Z, self.brI(self.r, self.z), levels=20, vmin=-5, vmax=5.0
-        )
+        c = ax.contourf(self.R, self.Z, self.brI(self.r, self.z), levels=20, vmin=-5, vmax=5.0)
         fig.colorbar(c, ax=ax)
         ax.set_title("$B_R$ (T)")
 
         ax2 = plt.subplot(2, 2, 2)
-        c2 = ax2.contourf(
-            self.R, self.Z, self.bzI(self.r, self.z), levels=20, vmin=-5, vmax=5.0
-        )
+        c2 = ax2.contourf(self.R, self.Z, self.bzI(self.r, self.z), levels=20, vmin=-5, vmax=5.0)
         fig.colorbar(c2, ax=ax2)
         ax2.set_title("$B_Z$ (T)")
 
         ax3 = plt.subplot(2, 2, 3)
-        c3 = ax3.contourf(
-            self.R, self.Z, self.bcentr * 1.85 / self.R, levels=20, vmin=0, vmax=20.0
-        )
+        c3 = ax3.contourf(self.R, self.Z, self.bcentr * 1.85 / self.R, levels=20, vmin=0, vmax=20.0)
         fig.colorbar(c3, ax=ax3)
         ax3.set_title(r"$B_\phi$ (T)")
 
