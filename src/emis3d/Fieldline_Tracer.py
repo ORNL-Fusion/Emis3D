@@ -10,17 +10,26 @@ Edited to remove a lot of user specific file value - JLH, Nov. 25th, 2025
 Edited to take a gfile input instead of a eqDesk file, since it is already
 read within the tokamak class - JLH, July 25, 2025
 
-Updated, the old code used: tBphi = self.bcentr * self.Rmagx / tR. The problem is that
-self.bcentr is vacuum toroidal field at rcentr, not Rmagx. This causes a slight offset after
-a few rotations.
+Updated to use B_phi = F(psi)/R from the g-file (fpol), with the vacuum value
+F = fpol[-1] outside the last closed flux surface. The old code used
+B_phi = bcentr * rmagx / R, but bcentr is the vacuum field at rcentr, not rmagx,
+and the plasma's own contribution to F was ignored. Together with first-order
+(Euler) steps, that made the field-line pitch wrong by a few percent, enough
+that q = 2 field lines did not close after two transits.
 
-TODO:
-1. Why don't the q=2 field lines match up after 2 revolutions? q=1 ones are fine...
+The field line is integrated as d(R, Z)/dphi = (R B_R / B_phi, R B_Z / B_phi)
+with an adaptive high-order solver (scipy.integrate.solve_ivp, DOP853), so the
+accuracy no longer depends on NumTor, which only sets the number of output
+points. x and y are computed from R and phi.
+
+Sign convention: B_phi = -F/R, the same sign the old code used (-bcentr).
+Check it per machine (see the coordinate conventions in the code review).
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
+from scipy.integrate import solve_ivp
 
 
 class Fieldline_Tracer:
@@ -87,11 +96,25 @@ class Fieldline_Tracer:
         self.Rmagx = self.gfile.rmagx
         self.Zmagx = self.gfile.zmagx
 
-        # now we need to covert to bx, by, bz. these will be huge arrays, so we should
-        # make these functions instead.
-        numTor = self.numTor
-        for val in ["x", "y", "z", "R", "L"]:
-            self.data[val] = np.zeros(numTor)
+        # --- Toroidal field B_phi = -F(psi)/R (sign as in the old code)
+        psiI = scipy.interpolate.RectBivariateSpline(Rgrid, zgrid, np.asarray(psi))
+        fpol = np.asarray(self.gfile.fpol, dtype=float)
+        simagx, sibdry = float(self.gfile.simagx), float(self.gfile.sibdry)
+        psin_grid = np.linspace(0.0, 1.0, fpol.size)
+
+        def F_of_psin(psin: float) -> float:
+            # Clipping gives fpol[0] at the axis and the vacuum value fpol[-1]
+            # outside the last closed flux surface
+            return float(np.interp(min(max(psin, 0.0), 1.0), psin_grid, fpol))
+
+        self.psiI = psiI
+        self.F_of_psin = F_of_psin
+
+        def B_phi(tR: float, tZ: float) -> float:
+            psin = float((psiI.ev(tR, tZ) - simagx) / (sibdry - simagx))
+            return -F_of_psin(psin) / tR
+
+        self.B_phi = B_phi
 
         startR = self.startR
         startZ = self.startZ
@@ -102,46 +125,33 @@ class Fieldline_Tracer:
         phi = np.linspace(
             float(startPhi),
             float(startPhi) + 2.0 * float(NumTransits) * np.pi,
-            num=int(numTor),
+            num=int(self.numTor),
         )
-        dphi = phi[1] - phi[0]
 
-        # initialize this x, this y, this z, and this phi
+        def rhs(tphi, y):
+            tR, tZ = y
+            bphi = B_phi(tR, tZ)
+            return [tR * brI.ev(tR, tZ) / bphi, tR * bzI.ev(tR, tZ) / bphi]
 
-        tX = float(startR) * np.cos(float(startPhi))
-        tY = float(startR) * np.sin(float(startPhi))
-        tZ = float(startZ)
-        tR = float(startR)
+        sol = solve_ivp(
+            rhs,
+            (phi[0], phi[-1]),
+            [float(startR), float(startZ)],
+            t_eval=phi,
+            method="DOP853",
+            rtol=1e-10,
+            atol=1e-12,
+        )
+        if not sol.success or sol.y.shape[1] != phi.size:
+            raise RuntimeError(f"Field-line trace from R={startR}, z={startZ} failed: {sol.message}")
 
-        for i in range(0, numTor):
-
-            tphi = phi[i]
-
-            # update the trace arrays
-            self.data["x"][i] = tX
-            self.data["y"][i] = tY
-            self.data["z"][i] = tZ
-            self.data["R"][i] = tR
-
-            tBR = brI(tR, tZ).T.item()
-            tBZ = bzI(tR, tZ).T.item()
-
-            tBphi = self.bcentr * self.Rmagx / tR
-
-            dR = tBR / tBphi * dphi * tR
-            dZ = tBZ / tBphi * dphi * tR
-
-            dX = -tR * dphi * np.sin(tphi) + dR * np.cos(tphi)
-            dY = tR * dphi * np.cos(tphi) + dR * np.sin(tphi)
-
-            dl = np.sqrt(dX**2 + dY**2 + dZ**2)
-            if i > 0:
-                self.data["L"][i] = self.data["L"][i - 1] + dl
-
-            tX += dX
-            tY += dY
-            tZ += dZ
-            tR += dR
+        tR, tZ = sol.y
+        self.data["R"] = tR
+        self.data["z"] = tZ
+        self.data["x"] = tR * np.cos(phi)
+        self.data["y"] = tR * np.sin(phi)
+        dl = np.sqrt(np.diff(self.data["x"]) ** 2 + np.diff(self.data["y"]) ** 2 + np.diff(tZ) ** 2)
+        self.data["L"] = np.concatenate([[0.0], np.cumsum(dl)])
 
         # Normalize to 2pi
         self.data["phi"] = phi
@@ -161,7 +171,8 @@ class Fieldline_Tracer:
         ax2.set_title("$B_Z$ (T)")
 
         ax3 = plt.subplot(2, 2, 3)
-        c3 = ax3.contourf(self.R, self.Z, self.bcentr * 1.85 / self.R, levels=20, vmin=0, vmax=20.0)
+        Bphi_grid = np.vectorize(self.B_phi)(self.R, self.Z)
+        c3 = ax3.contourf(self.R, self.Z, Bphi_grid, levels=20)
         fig.colorbar(c3, ax=ax3)
         ax3.set_title(r"$B_\phi$ (T)")
 
