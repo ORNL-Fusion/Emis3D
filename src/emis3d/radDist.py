@@ -49,6 +49,8 @@ class RadDist(ABC):
         self.info = dict(config) if config else {}
         self.info["startR"] = startR
         self.info["startZ"] = startZ
+        self.info["integrationStep"] = 0.01  # Default integration step it set a bit smaller, cherab default: 0.1m
+
         if "injectionLocation" in self.info:
             self.info["startPhi"] = self.info["injectionLocation"]
             self.info["startPhiRad"] = np.deg2rad(self.info["injectionLocation"])
@@ -473,7 +475,10 @@ class RadDist(ABC):
                 emitter = val
 
         if emitter is not None:
-            emittting_material = VolumeTransform(RadiationFunction(self._evaluate_cherab), emitter.transform.inverse())
+            # Change the integration step size
+            step = float(self.info.get("integrationStep", 0.1))
+
+            emittting_material = VolumeTransform(RadiationFunction(self._evaluate_cherab, step=step), emitter.transform.inverse())
             emitter.material = emittting_material
         else:
             raise RuntimeError("Could not find Tokamak Wall in tokamak.world.children during bolos_observe().")
@@ -542,7 +547,7 @@ class RadDist(ABC):
                                         * radiance
                                     )
                                     if units == "Brightness":
-                                        ans = radiance * np.pi
+                                        ans = radiance * 4.0 * np.pi
                                         ans_error = radiance_error / radiance * ans
                                     elif units == "Radiance":
                                         ans = radiance

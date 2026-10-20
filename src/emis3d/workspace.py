@@ -48,13 +48,15 @@ import re
 import string
 import subprocess
 from dataclasses import dataclass, field
+from collections.abc import Mapping
+from typing import Literal, overload
 from pathlib import Path
 
 import yaml
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 BUILTIN_MACHINES = PACKAGE_DIR / "machines"
-REPO_ROOT = PACKAGE_DIR.parent.parent   # the source checkout, when there is one (src/emis3d)
+REPO_ROOT = PACKAGE_DIR.parent.parent  # the source checkout, when there is one (src/emis3d)
 
 WORKSPACE_FILE = "emis3d.yaml"
 USER_CONFIG = Path("~/.config/emis3d/config.yaml")
@@ -130,8 +132,8 @@ class Workspace:
 
     templates: dict
     fields: dict
-    layout: str                                   # "workspace" or "unconfigured"
-    sources: dict = field(default_factory=dict)   # role -> where its template came from
+    layout: str  # "workspace" or "unconfigured"
+    sources: dict = field(default_factory=dict)  # role -> where its template came from
     tokamak_templates: dict = field(default_factory=dict)
     run_id: str = field(default_factory=lambda: _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
@@ -144,7 +146,7 @@ class Workspace:
         run_config: str | os.PathLike | None = None,
         run_paths: dict | None = None,
         overrides: dict | None = None,
-        env: dict | None = None,
+        env: Mapping[str, str] | None = None,
         user_config: str | os.PathLike | None = None,
     ) -> "Workspace":
         env = os.environ if env is None else env
@@ -180,7 +182,7 @@ class Workspace:
 
         # --- merge templates, lowest priority first
         ws._merge(_check_roles(user.get("paths"), str(user_file)), f"user config {user_file}")
-        if layout == "workspace":
+        if layout == "workspace" and ws_dir is not None:
             wfile = ws_dir / WORKSPACE_FILE
             if wfile.is_file():
                 wdata = _read_yaml(wfile, _WORKSPACE_KEYS, "workspace file")
@@ -209,16 +211,12 @@ class Workspace:
         expanded = os.path.expanduser(os.path.expandvars(template))
         unset = re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", expanded)
         if unset:
-            raise WorkspaceError(
-                f"Role '{role}' template '{template}' uses unset environment variable(s) {unset}"
-            )
+            raise WorkspaceError(f"Role '{role}' template '{template}' uses unset environment variable(s) {unset}")
         values = {**{k: v for k, v in self.fields.items() if not k.startswith("_")}, "run_id": self.run_id}
         values.update({k: v for k, v in fields.items() if v is not None})
         missing = _template_fields(expanded) - set(values)
         if missing:
-            raise WorkspaceError(
-                f"Role '{role}' template '{template}' needs {sorted(missing)}; pass them as arguments"
-            )
+            raise WorkspaceError(f"Role '{role}' template '{template}' needs {sorted(missing)}; pass them as arguments")
         p = Path(expanded.format(**values))
         if not p.is_absolute():
             if "workspace" not in self.fields:
@@ -227,10 +225,7 @@ class Workspace:
         return p
 
     def _unconfigured_error(self, role: str) -> WorkspaceError:
-        return WorkspaceError(
-            f"No location configured for '{role}'. Create a workspace with "
-            "`emis3d init <folder>`, or set EMIS3D_RUNS_DIR to an existing one."
-        )
+        return WorkspaceError(f"No location configured for '{role}'. Create a workspace with " "`emis3d init <folder>`, or set EMIS3D_RUNS_DIR to an existing one.")
 
     def path(self, role: str, tokamak: str | None = None, **fields) -> Path:
         """Folder for a role, e.g. ws.path('raddists', tokamak='DIII-D')."""
@@ -248,6 +243,12 @@ class Workspace:
             templates = [templates]
         roots = [self._expand(t, "machines", tokamak=tokamak) for t in templates]
         return [*roots, BUILTIN_MACHINES]
+
+    @overload
+    def machine_file(self, tokamak: str, *parts: str, required: Literal[True] = True) -> Path: ...
+
+    @overload
+    def machine_file(self, tokamak: str, *parts: str, required: bool) -> Path | None: ...
 
     def machine_file(self, tokamak: str, *parts: str, required: bool = True) -> Path | None:
         """First existing <root>/<tokamak>/<parts...> over the machine search path."""
@@ -306,16 +307,15 @@ class Workspace:
         """Record of code version and resolved locations, saved beside results."""
         try:
             from importlib.metadata import version
+
             pkg_version = version("emis3d")
         except Exception:
             pkg_version = "unknown"
         commit, dirty = None, None
         if (REPO_ROOT / ".git").exists():
             try:
-                commit = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
-                                        capture_output=True, text=True, timeout=5).stdout.strip() or None
-                dirty = bool(subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--porcelain"],
-                                            capture_output=True, text=True, timeout=5).stdout.strip())
+                commit = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip() or None
+                dirty = bool(subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--porcelain"], capture_output=True, text=True, timeout=5).stdout.strip())
             except Exception:
                 pass
         return {

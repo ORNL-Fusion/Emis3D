@@ -1259,6 +1259,8 @@ class Tokamak(object):
             illumination.parent = self.world
 
         if WithWallCAD:
+            if self.info is None:
+                raise RuntimeError("Load tokamak settings before adding the wall CAD")
             # load the machine's CAD file named in its settings
             pfcs = import_stl(
                 self.ws.machine_file(
