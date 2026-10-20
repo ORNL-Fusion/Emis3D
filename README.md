@@ -27,15 +27,21 @@ uv pip install -e .
 
 ### Python Compatibility
 
-`cherab` and `raysect` ship Cython-compiled C extensions that don't build
-on CPython 3.13+ — the `_PyLong_AsByteArray` API changed in that release.
-Lift the cap once `cherab` ships a build compatible with newer Python.
+Emis3D uses raysect 0.9.1 and Cherab 1.6, which require numpy 2. Both publish
+ready-built packages for Linux only; on macOS pip compiles them from source,
+which needs the Xcode command-line tools and takes several minutes. They
+support Python 3.13 as well, but Emis3D has only been tested on 3.11 and 3.12,
+so `requires-python` stays at `<3.13` for now.
 
 ### Troubleshooting
 
-If `pip install -e .` fails with a `clang` / `_PyLong_AsByteArray` error,
-the Python version is too new. Check with `python --version` and recreate
-the venv with 3.12.
+`ValueError: numpy.dtype size changed, may indicate binary incompatibility`
+when importing emis3d means raysect or Cherab were compiled against a
+different numpy than the one installed. Rebuild them against the venv's numpy:
+
+```bash
+pip install --force-reinstall --no-cache-dir --no-binary raysect,cherab raysect cherab
+```
 
 
 ## Repository layout
