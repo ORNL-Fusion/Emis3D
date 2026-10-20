@@ -90,26 +90,18 @@ class RadDistFitting:
                 data_ = self.data[units][emissionName][bolo_]
                 phi_ = [self._as_segment_list(v) for v in phi_loc[emissionName][bolo_]]
                 map_phi = dict(zip(channels, phi_))
-                data_ = [
-                    self._as_segment_list(v)
-                    for v in self.data[units][emissionName][bolo_]
-                ]
+                data_ = [self._as_segment_list(v) for v in self.data[units][emissionName][bolo_]]
 
                 map_data = dict(zip(channels, data_))
 
-                data_error = [
-                    self._as_segment_list(v)
-                    for v in self.data[f"{units}_error"][emissionName][bolo_]
-                ]
+                data_error = [self._as_segment_list(v) for v in self.data[f"{units}_error"][emissionName][bolo_]]
                 map_data_error = dict(zip(channels, data_error))
 
                 self.data_maps[emissionName]["data"].update(map_data)
                 self.data_maps[emissionName]["data_error"].update(map_data_error)
                 self.data_maps[emissionName]["observed_phi_loc"].update(map_phi)
 
-    def prepare_for_fits(
-        self, channelOrder: list, data_max: float | None = None
-    ) -> None:
+    def prepare_for_fits(self, channelOrder: list, data_max: float | None = None) -> None:
         """
         Prepares the data for fitting, will arrange the data
         in nested lists as well as create parameters used with LMFIT.
@@ -149,37 +141,26 @@ class RadDistFitting:
                     # --- Each channel holds a list with one entry per toroidal
                     # observation segment; missing channels get a single zero
                     # segment so the shapes stay consistent.
-                    temp_data.append(
-                        self.data_maps[emissionName]["data"].get(chan, [0.0])
-                    )
-                    temp_data_error.append(
-                        self.data_maps[emissionName]["data_error"].get(chan, [1.0e19])
-                    )
+                    temp_data.append(self.data_maps[emissionName]["data"].get(chan, [0.0]))
+                    temp_data_error.append(self.data_maps[emissionName]["data_error"].get(chan, [1.0e19]))
                     # --- The toroidal location(s) of the channel's observation
-                    temp_phi.append(
-                        self.data_maps[emissionName]["observed_phi_loc"].get(
-                            chan, [0.0]
-                        )
-                    )
+                    temp_phi.append(self.data_maps[emissionName]["observed_phi_loc"].get(chan, [0.0]))
 
                 self.fitSynthetic[emissionName]["data"].append(temp_data)
                 self.fitSynthetic[emissionName]["data_error"].append(temp_data_error)
                 self.fitSynthetic[emissionName]["observed_phi_loc"].append(temp_phi)
 
-        # --- Find the synthetic scaling factor, set to 1 if the user doesn't provide data_max
+        # --- Normalization: peak of the summed model equals the data peak at a = 1
         scale = 1.0
         if data_max is not None:
-            scale_ = []
+            total = None
             for emissionName in self.info["emissionNames"]:
-                synth_max = find_max_nested_lists(
-                    self.fitSynthetic[emissionName]["data"]
-                )
-                if synth_max is not None and synth_max > 0:
-                    scale_.append(data_max / synth_max)
-
-            # --- Use the max value
-            if len(scale_) > 0:
-                scale = np.nanmax(scale_)
+                per_chan = [[float(np.sum(seg)) for seg in group] for group in self.fitSynthetic[emissionName]["data"]]
+                flat = np.concatenate([np.asarray(g, dtype=float) for g in per_chan])
+                total = flat if total is None else total + flat
+            total_max = np.nanmax(total) if total is not None and total.size else 0.0
+            if total_max > 0.0:
+                scale = data_max / total_max
 
         # --- Scale the synthetic data
         for emissionName in self.info["emissionNames"]:
@@ -195,9 +176,7 @@ class RadDistFitting:
             temp_ = []
             for val in self.fitSynthetic[emissionName]["data_error"]:
                 temp_.append([scale * np.asarray(chan) for chan in val])
-            self.fitSynthetic[emissionName]["data_error"] = convert_arrays_to_list(
-                temp_
-            )
+            self.fitSynthetic[emissionName]["data_error"] = convert_arrays_to_list(temp_)
 
     def create_parameters(
         self,
@@ -218,7 +197,9 @@ class RadDistFitting:
             # --- Create constant multiplication value
             paramName = f"a_{loc_tag(self.info['injectionLocation'])}"
             self.fitSynthetic["params"]["paramName"].append(paramName)
-            params.add(paramName, value=1.0, min=1.0, max=6.0)
+            # Start at 1 (model peak = data peak); allow scaling down for
+            # multi-component radDists and up for strong toroidal decay
+            params.add(paramName, value=1.0, min=0.05, max=20.0)
 
         # --- Only create the constant value for each bolometer if preforming a cross-calib
         else:
@@ -229,17 +210,13 @@ class RadDistFitting:
 
         # --- Create a peak radiation variable if vary_peak_rad_location is True:
         if vary_peak_rad_location:
-            default_ = np.deg2rad(int(self.info["injectionLocation"]))
-            default_ = np.deg2rad(225.0)
-            paramName = f"peak_rad_loc"
-            self.fitSynthetic["params"]["paramName"].append(paramName)
-            params.add(
-                paramName,
-                value=default_,  # Start at the injection location
-                min=0.1,
-                max=2.0 * np.pi,
-                vary=True,
-            )
+            two_pi = 2.0 * np.pi
+            mu0 = np.deg2rad(int(self.info["injectionLocation"])) % two_pi
+            window = np.deg2rad(float(self.info.get("peak_shift_max_deg", 180.0)))
+            params.add("injector_phi", value=mu0, vary=False)
+            params.add("peak_shift", value=0.0, min=-window, max=window)
+            params.add("peak_rad_loc", expr="(injector_phi + peak_shift) % (2*pi)")
+            self.fitSynthetic["params"]["paramName"] += ["peak_shift", "peak_rad_loc"]
 
         # --- The exponential decay factor for each emission, only do one for helical directions
         for emissionName in self.info["emissionNames"]:
@@ -253,14 +230,11 @@ class RadDistFitting:
                 max_ = 0.4
 
             # --- Add it to the params pool
-            if (
-                paramName is not None
-                and paramName not in self.fitSynthetic["params"]["paramName"]
-            ):
+            if paramName is not None and paramName not in self.fitSynthetic["params"]["paramName"]:
                 self.fitSynthetic["params"]["paramName"].append(paramName)
                 params.add(
                     paramName,
-                    value=(max_ - min_) / 2.0,
+                    value=0.5 * (max_ + min_),
                     vary=enable_dphi_scaling,
                     min=min_,
                     max=max_,

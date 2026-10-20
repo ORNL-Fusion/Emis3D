@@ -21,6 +21,7 @@ class RunConfig:
     error_definition: str = "exponential"
     enable_dphi_scaling: bool = True
     vary_peak_rad_location: bool = False
+    peak_shift_max_degrees: float = 180.0  # How far the injector can stray from the starting location
     crossCalib: bool = False
     helical_endpoint_weight: float = 1.0
     numProcessorsFitting: int = 1
