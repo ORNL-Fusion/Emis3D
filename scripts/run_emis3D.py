@@ -14,8 +14,8 @@ Written by JLH Sept. 2025
 from concurrent.futures import ThreadPoolExecutor
 
 import time
-from emis3d.Emis3D import Emis3D
-import emis3d.Util_emis3D as Util_emis3D
+from emis3d.emis3D import Emis3D
+import emis3d.util_emis3D as Util_emis3D
 
 _global_data_dict = None
 

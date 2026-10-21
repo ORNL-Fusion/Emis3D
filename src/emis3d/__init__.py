@@ -7,9 +7,9 @@ from emis3d import Emis3D, Tokamak, Diagnostic
 from emis3d import Helical, HelicalRing, ElongatedRing, SquareTube
 """
 
-from emis3d.Emis3D import Emis3D
-from emis3d.Tokamak import Tokamak
-from emis3d.Diagnostic import Bolometer as Diagnostic
+from emis3d.emis3D import Emis3D
+from emis3d.tokamak import Tokamak
+from emis3d.diagnostic import Bolometer as Diagnostic
 from emis3d.radDist import Helical, HelicalRing, ElongatedRing, SquareTube
 
 __all__ = [

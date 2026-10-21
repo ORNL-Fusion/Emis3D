@@ -127,7 +127,7 @@ def camera_amplitude(data, error, synth) -> tuple[float, float, float, int]:
     d = np.asarray(data, dtype=float)
     e = np.asarray(error, dtype=float)
     s = np.asarray(synth, dtype=float)
-    from emis3d.Emis3D import DEAD_CHANNEL_ERROR
+    from emis3d.emis3D import DEAD_CHANNEL_ERROR
 
     use = np.isfinite(d) & np.isfinite(e) & np.isfinite(s) & (d > 0) & (e > 0) & (e < DEAD_CHANNEL_ERROR)
     if not use.any() or not np.any(s[use] != 0):
@@ -165,7 +165,7 @@ def cross_calibrate(
     reference : camera every factor is relative to; by default the camera with
                 the largest median amplitude
     """
-    from emis3d.Emis3D import Emis3D
+    from emis3d.emis3D import Emis3D
 
     times = [float(t) for t in np.atleast_1d(times)]
     if not times:

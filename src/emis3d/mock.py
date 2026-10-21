@@ -157,7 +157,7 @@ def _analytic_etendues(machines_root: Path, cam_names: list[str]) -> dict[str, l
     """Analytic etendue of every foil, from cameras built exactly as Emis3D builds them."""
     from raysect.optical import World
 
-    from emis3d.Diagnostic import Bolometer
+    from emis3d.diagnostic import Bolometer
     from emis3d.workspace import Workspace
 
     ws = Workspace.resolve(workspace=machines_root, overrides={"machines": [str(machines_root)]},
@@ -227,8 +227,8 @@ def selftest(workdir: str | Path | None = None, pixel_samples: int = 50, verbose
     """
     import h5py
 
-    import emis3d.Util_emis3D as Util_emis3D
-    from emis3d.Emis3D import Emis3D
+    import emis3d.util_emis3D as Util_emis3D
+    from emis3d.emis3D import Emis3D
     from emis3d.radDist import ElongatedRing
     from emis3d.workspace import Workspace, set_workspace
 

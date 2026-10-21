@@ -91,7 +91,7 @@ drive, scratch); paths may use `{tokamak}`, `{shot}`, `{run}`, `{run_dir}`,
 `src/emis3d/workspace.py` for the full rules.
 
 ```python
-from emis3d.Emis3D import Emis3D
+from emis3d.emis3D import Emis3D
 run = Emis3D(runConfigName="~/projects/emis3d-runs/runs/184407/run.yaml")
 ```
 
