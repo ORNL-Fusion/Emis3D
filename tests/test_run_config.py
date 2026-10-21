@@ -23,7 +23,8 @@ MINIMAL = {
 
 def test_defaults_are_filled_in():
     c = RunConfig.from_dict(dict(MINIMAL))
-    assert c.scale_def == "linear" and c.error_definition == "exponential"
+    assert c.scale_def == "linear" and c.error_definition == "floor_relative"
+    assert c.error_floor == 0.05 and c.error_relative == 0.05 and c.fit_method == "least_squares"
     assert c.helical_endpoint_weight == 1.0 and c.paths == {}
 
 

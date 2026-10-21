@@ -18,11 +18,14 @@ SUPPORTED_TOKAMAKS: list[str] = ["MOCK", "DIII-D", "SPARC", "SPARC_FDR", "JET"]
 SCALE_DEFINITIONS: list[str] = ["linear", "exponential", "constant", "step"]
 
 # Availble error definitions for the data
-ERROR_DEFINITIONS: list[str] = ["exponential", "inverse", "inverse square", "constant"]
+ERROR_DEFINITIONS: list[str] = ["floor_relative", "exponential", "inverse", "inverse square", "constant"]
+
+# Minimizers a run config can choose (fit_method)
+FIT_METHODS: list[str] = ["least_squares", "differential_evolution"]
 
 # Explicit export list
 # Version of the saved radDist format. RadDistFitting refuses any other
 # version: radDists saved by earlier Emis3D versions must be regenerated.
 RADDIST_FORMAT: int = 2
 
-__all__ = ["SUPPORTED_TOKAMAKS", "SCALE_DEFINITIONS", "ERROR_DEFINITIONS", "RADDIST_FORMAT"]
+__all__ = ["SUPPORTED_TOKAMAKS", "SCALE_DEFINITIONS", "ERROR_DEFINITIONS", "FIT_METHODS", "RADDIST_FORMAT"]

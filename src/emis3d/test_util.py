@@ -1,7 +1,7 @@
 """
 tests/test_util.py
 ==================
-Unit tests for src/emis3d/Util.py
+Unit tests for src/emis3d/util.py
 Covers coordinate conversions, wall helpers, JSON/H5 helpers, and utility functions.
 No cherab or raysect objects are required.
 """

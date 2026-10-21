@@ -288,7 +288,7 @@ def selftest(workdir: str | Path | None = None, pixel_samples: int = 50, verbose
     run.write_text(yaml.safe_dump({
         "tokamakName": NAME, "shot": 1, "dt": 0.2, "injectionLocation": inj,
         "radDistDirectories_LocIndependent": ["ring"], "radDistDirectories_LocDependent": [],
-        "BOLOMETERS": bolos, "scale_def": "exponential", "error_definition": "exponential",
+        "BOLOMETERS": bolos, "scale_def": "exponential",
         "enable_dphi_scaling": True, "vary_peak_rad_location": False,
     }, sort_keys=False))
 

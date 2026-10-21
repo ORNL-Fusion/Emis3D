@@ -2,7 +2,7 @@
 """Loads and verifys the run configuration file loaded"""
 
 from dataclasses import dataclass, field, fields
-from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS
+from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS
 
 
 @dataclass
@@ -18,7 +18,14 @@ class RunConfig:
     Nt: int | None = None
     dt: float | None = None
     scale_def: str = "linear"
-    error_definition: str = "exponential"
+    # --- Channel errors (Util_emis3D.channel_error). floor_relative:
+    # sigma^2 = (error_floor * peak)^2 + (error_relative * signal)^2, with the
+    # floor raised per channel to the noise measured in noise_window, if given
+    error_definition: str = "floor_relative"
+    error_floor: float = 0.05  # fraction of the peak signal
+    error_relative: float = 0.05  # fraction of each channel's signal
+    noise_window: list | None = None  # [t_start, t_end], a quiet period before the event
+    fit_method: str = "least_squares"  # or "differential_evolution" (global, slower)
     enable_dphi_scaling: bool = True
     vary_peak_rad_location: bool = False
     peak_shift_max_degrees: float = 180.0  # How far the injector can stray from the starting location
@@ -34,6 +41,18 @@ class RunConfig:
         # (case-insensitive, like Util_emis3D.signal_error)
         if self.error_definition.lower() not in ERROR_DEFINITIONS:
             raise ValueError(f"Unknown error_definition: {self.error_definition!r}")
+        if self.fit_method not in FIT_METHODS:
+            raise ValueError(f"Unknown fit_method: {self.fit_method!r}; choose from {FIT_METHODS}")
+        if self.error_floor < 0 or self.error_relative < 0:
+            raise ValueError("error_floor and error_relative must be >= 0")
+        if self.error_definition.lower() == "floor_relative" and self.error_floor == 0 and self.noise_window is None:
+            raise ValueError("floor_relative needs error_floor > 0 or a noise_window, or near-zero channels get zero error")
+        if self.noise_window is not None and (len(self.noise_window) != 2 or self.noise_window[0] >= self.noise_window[1]):
+            raise ValueError("noise_window must be [t_start, t_end] with t_start < t_end")
+        for name, bolo in self.BOLOMETERS.items():
+            bad = (bolo or {}).get("badChannels", [])
+            if not isinstance(bad, list):
+                raise ValueError(f"BOLOMETERS.{name}.badChannels must be a list of channel names")
         # Check if the radDist directories are listed
         if not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
             raise ValueError("No radDist directories configured")

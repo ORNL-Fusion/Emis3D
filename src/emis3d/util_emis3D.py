@@ -382,7 +382,6 @@ def residual(
     data_dict,
     synthetic_dict,
     scale_def: str | None = None,
-    boloNames=None,  # removed feature; kept so positional calls still line up
     residual: bool = True,
     helical_endpoint_weight: float = 0.0,
 ):
@@ -401,12 +400,6 @@ def residual(
     :func:`helical_endpoint_penalty`. A weight of 0 disables the constraint.
     """
 
-    if boloNames is not None:
-        raise TypeError(
-            "residual(): cross-calibration was moved out of the fit; use "
-            "emis3d.calibration.cross_calibrate (`emis3d calibrate`). Pass None "
-            "for the boloNames slot, which is kept only for positional compatibility."
-        )
 
     a = 0.0
     b = 0.0
@@ -490,20 +483,17 @@ def residual(
         res = []
         # --- Loop over each bolometer group
         for ii in temp_:
-            data_ = np.array(data_dict["observed"][ii].copy())
-            data_error = np.array(data_dict["observed_error"][ii].copy())
+            data_ = np.asarray(data_dict["observed"][ii], dtype=float)
+            data_error = np.asarray(data_dict["observed_error"][ii], dtype=float)
 
-            # --- Make sure there are no zeros in the error
-            data_error[data_error <= 1.0e-6] = 1.0e-6
+            # --- Bad channels have an infinite error (see channel_error) and are
+            # left out entirely, so chi-square and AIC count only real channels.
+            # Near-zero and negative readings stay in: they constrain where the
+            # radiation is not.
+            use = np.isfinite(data_) & np.isfinite(data_error) & (data_error > 0)
 
-            # --- Ignore channels with non-positive observed values
-            bad_indices = np.where(data_ <= 0)[0]
-            # --- Set the temp_ values equal to the bad data values so the residual is zero
-            temp_[ii][bad_indices] = data_[bad_indices]
-
-            # LMFIT minimizes the sum of squares, so we return the raw residual
-            numerator = np.abs(data_ - temp_[ii])
-            res.extend(convert_arrays_to_list(numerator / data_error))
+            # --- Signed residual; LMFIT squares it
+            res.extend(((data_[use] - temp_[ii][use]) / data_error[use]).tolist())
 
         # --- Soft constraint: tie paired clockwise / counterClock helical
         # distributions together at the helix endpoint (phi = mu mod 2*pi).
@@ -522,26 +512,77 @@ def residual(
         return data
 
 
-def runParallel(job):
-    """Thin wrapper around residual minimization for use with ProcessPoolExecutor."""
-    res_ = True
-    fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight = job
-
-    fit = minimize(
+def fit_radDist(
+    pars,
+    data_dict: dict,
+    synthetic_dict: dict,
+    scale_def: str,
+    helical_endpoint_weight: float = 0.0,
+    method: str = "least_squares",
+):
+    """
+    Fit one radDist to the data: minimize chi-square with LMFIT. Both
+    Emis3D._minimize_radDists and runParallel (scripts/run_emis3D.py) call
+    this, so the two paths always fit the same way.
+    """
+    return minimize(
         residual,
         pars,
-        args=(
-            data_dict,
-            synth_dict,
-            scale_def,
-            None,  # no longer used (cross-calibration moved to emis3d.calibration)
-            res_,
-            helical_endpoint_weight,
-        ),
-        method="leastsq",
+        args=(data_dict, synthetic_dict, scale_def, True, helical_endpoint_weight),
+        method=method,
     )
 
-    return fit_index, fit
+
+def fit_score(fit) -> float:
+    """
+    Score used to rank radDists (lower is better): lmfit's AIC,
+    N ln(chi2 / N) + 2 k. It does not depend on the overall scale of the
+    channel errors, and it charges for each free parameter, so radDist types
+    with more parameters (helical) are compared fairly with simpler ones.
+    """
+    aic = float(getattr(fit, "aic", np.inf))
+    return aic if np.isfinite(aic) else np.inf
+
+
+def runParallel(job):
+    """Thin wrapper around fit_radDist for use with an executor."""
+    fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method = job
+    return fit_index, fit_radDist(pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method)
+
+
+def channel_error(
+    definition: str,
+    signal,
+    peak: float,
+    floor: float = 0.05,
+    relative: float = 0.05,
+    noise=None,
+) -> np.ndarray:
+    """
+    Absolute error (sigma) of each channel, in the data's units.
+
+    floor_relative (default): sigma^2 = (floor * peak)^2 + (relative * signal)^2.
+        The floor is an additive error, so near-zero channels count in absolute
+        terms and cannot dominate the fit; the relative term is the calibration
+        uncertainty, so strong channels are fitted to about that fraction. If
+        noise is given (per channel, same units), the floor is raised to it.
+    Other definitions (exponential, inverse, inverse square, constant) keep
+        their fractional form, sigma = signal * signal_error(...). They are not
+        defined for signal <= 0, so those channels get an infinite error and are
+        left out of the fit.
+    """
+    d = np.asarray(signal, dtype=float)
+    if definition.lower() == "floor_relative":
+        floor_abs = np.full(d.shape, floor * peak)
+        if noise is not None:
+            floor_abs = np.maximum(floor_abs, np.asarray(noise, dtype=float))
+        return np.sqrt(floor_abs**2 + (relative * d) ** 2)
+
+    out = np.full(d.shape, np.inf)
+    pos = np.isfinite(d) & (d > 0)
+    if np.any(pos):
+        out[pos] = d[pos] * np.asarray(signal_error(definition, d[pos], peak), dtype=float)
+    return out
 
 
 def signal_error(

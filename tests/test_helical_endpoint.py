@@ -125,8 +125,8 @@ class TestResidualIntegration:
     def test_residual_appends_one_penalty_element(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36, with_fit_data=True)
         data = {"observed": {0: [1.0] * 4}, "observed_error": {0: [0.1] * 4}}
-        res_off = U.residual(_params(1.0, 1.0, 3.0), data, sd, "exponential", None, True, 0.0)
-        res_on = U.residual(_params(1.0, 1.0, 3.0), data, sd, "exponential", None, True, 1.0)
+        res_off = U.residual(_params(1.0, 1.0, 3.0), data, sd, "exponential", True, 0.0)
+        res_on = U.residual(_params(1.0, 1.0, 3.0), data, sd, "exponential", True, 1.0)
         assert len(res_on) == len(res_off) + 1
 
     '''

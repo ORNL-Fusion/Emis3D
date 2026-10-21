@@ -40,7 +40,7 @@ def shape(i, g, n):
     return np.exp(-((x - centre) ** 2) / (2 * width**2)) + 0.05
 
 
-def write_workspace(root, miscal=MISCAL, drift=None, scaling=None, loc_dependent=False, noise=0.01):
+def write_workspace(root, miscal=MISCAL, drift=None, scaling=None, loc_dependent=False, noise=0.01, **config):
     (root / "emis3d.yaml").write_text("version: 1\n")
     rd_dir = root / "raddists" / "MOCK" / "ring"
     rd_dir.mkdir(parents=True)
@@ -89,6 +89,7 @@ def write_workspace(root, miscal=MISCAL, drift=None, scaling=None, loc_dependent
                 "error_definition": "constant",
                 "enable_dphi_scaling": False,
                 "BOLOMETERS": {c: {"dataFileName": f"1/{c}.h5", "scalingFactor": (scaling or {}).get(c, 1.0)} for c in CAMS},
+                **config,
             }
         )
     )
@@ -175,18 +176,24 @@ def test_cli_calibrate_writes_the_block(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_camera_amplitude_is_exact_and_skips_dead_channels():
+def test_camera_amplitude_is_exact_and_skips_bad_channels():
     s = np.array([1.0, 2.0, 3.0, 4.0])
     d = 2.5 * s
-    d_dead = d.copy()
-    d_dead[1] = 0.0  # non-positive: left out
     e = np.full(4, 0.1)
-    e_dead = e.copy()
-    e_dead[3] = 1.0e8  # DEAD_CHANNEL_ERROR: left out
     c, sc, chi2, n = camera_amplitude(d, e, s)
     assert c == pytest.approx(2.5) and chi2 == pytest.approx(0.0) and n == 4
-    c, _, _, n = camera_amplitude(d_dead, e_dead, s)
+    e_bad = e.copy()
+    e_bad[3] = np.inf  # bad channel: left out
+    d_nan = d.copy()
+    d_nan[1] = np.nan  # missing value: left out
+    c, _, _, n = camera_amplitude(d_nan, e_bad, s)
     assert c == pytest.approx(2.5) and n == 2
+
+
+def test_camera_amplitude_counts_near_zero_channels():
+    s = np.array([0.0, 1.0, 2.0])
+    c, _, chi2, n = camera_amplitude(np.array([-0.01, 1.0, 2.0]), np.full(3, 0.1), s)
+    assert n == 3 and chi2 > 0  # the slightly negative reading counts
 
 
 def test_parse_times():
@@ -201,10 +208,3 @@ def test_crosscalib_flag_is_gone():
     base = {"BOLOMETERS": {}, "shot": 1, "radDistDirectories_LocIndependent": ["x"]}
     with pytest.raises(ValueError, match="crossCalib"):
         RunConfig.from_dict({**base, "crossCalib": False})
-
-
-def test_residual_rejects_the_old_bolometer_names_argument():
-    import emis3d.util_emis3D as U
-
-    with pytest.raises(TypeError, match="cross_calibrate"):
-        U.residual(None, None, {"emissionNames": []}, "constant", ["POL_A"])

@@ -118,18 +118,16 @@ def camera_amplitude(data, error, synth) -> tuple[float, float, float, int]:
     """
     Weighted least-squares amplitude c minimizing sum(((d - c s) / sigma)^2).
 
-    Channels with non-positive or non-finite data are left out, as the fit's
-    residual does, and so are dead channels (marked with DEAD_CHANNEL_ERROR by
-    Emis3D's data preparation). Returns (c, sigma_c, chi2, n_channels_used); sigma_c is
+    Bad channels (infinite error, see Util_emis3D.channel_error) and
+    non-finite values are left out, as the fit's residual does; near-zero and
+    negative readings count. Returns (c, sigma_c, chi2, n_channels_used); sigma_c is
     scaled by the camera's reduced chi-square, so it reflects the actual
     scatter rather than the error model's arbitrary normalization.
     """
     d = np.asarray(data, dtype=float)
     e = np.asarray(error, dtype=float)
     s = np.asarray(synth, dtype=float)
-    from emis3d.emis3D import DEAD_CHANNEL_ERROR
-
-    use = np.isfinite(d) & np.isfinite(e) & np.isfinite(s) & (d > 0) & (e > 0) & (e < DEAD_CHANNEL_ERROR)
+    use = np.isfinite(d) & np.isfinite(e) & np.isfinite(s) & (e > 0)
     if not use.any() or not np.any(s[use] != 0):
         return float("nan"), float("nan"), 0.0, 0
     w2 = 1.0 / e[use] ** 2

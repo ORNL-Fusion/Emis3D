@@ -109,7 +109,6 @@ from emis3d.radDist import Helical, ElongatedRing, HelicalRing
 
 # --- Fit weight assigned to dead / zero-signal channels so the minmizer ignores
 # them.
-DEAD_CHANNEL_ERROR = 1.0e8
 
 # --- Plot styling
 PLOT_COLORS = ["green", "orangered", "blue", "cyan", "magenta"]
@@ -369,6 +368,22 @@ class Emis3D:
 
             temp_["DATA_CALIBRATED"] *= self.info["BOLOMETERS"][bolo_].get("scalingFactor", 1.0)
 
+            # --- Bad channels: listed under badChannels, or zero for the whole
+            # shot (the DIII-D saver zeroes channels it was told are bad)
+            chans = list(temp_["channelOrder"])
+            listed = set(self.info["BOLOMETERS"][bolo_].get("badChannels", []))
+            unknown = listed - set(chans)
+            if unknown:
+                raise ValueError(f"badChannels for {bolo_} are not in its data file: {sorted(unknown)}")
+            zero = {ch for ch, row in zip(chans, np.asarray(temp_["DATA_CALIBRATED"])) if np.all(row == 0)}
+            if zero - listed:
+                logger.warning(
+                    "%s: channels %s are zero for the whole shot and are treated as bad; " "list them under badChannels to silence this",
+                    bolo_,
+                    sorted(zero - listed),
+                )
+            temp_["badChannels"] = listed | zero
+
             self.data["observed"][bolo_] = temp_
 
     def _create_master_channel_order(self) -> None:
@@ -475,16 +490,36 @@ class Emis3D:
         start = np.abs(time_ - (evalTime - dt_)).argmin()
         end = np.abs(time_ - (evalTime + dt_)).argmin()
 
-        # --- Average the data, include endpoint to prevent errors when dt is too small
-        vals = np.mean(
-            self.data["observed"][arrayName]["DATA_CALIBRATED"][:, start : end + 1],
-            axis=1,
-        )
-
-        # --- Replace NaNs with zero
-        vals = np.where(np.isnan(vals), 0.0, vals)
+        # --- Average the data, include endpoint to prevent errors when dt is too small.
+        # A channel with no valid samples stays NaN and is treated as bad.
+        window = np.asarray(self.data["observed"][arrayName]["DATA_CALIBRATED"][:, start : end + 1], dtype=float)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            vals = np.nanmean(window, axis=1)
 
         return convert_arrays_to_list(vals)
+
+    def _channel_noise(self, arrayName: str, evalTime: float) -> np.ndarray | None:
+        """
+        Per-channel noise of the averaged signal at evalTime: the standard
+        deviation of the raw samples in the run config's noise_window (a quiet
+        period), divided by sqrt(number of samples averaged). None without a
+        noise_window.
+        """
+        window = self.info.get("noise_window")
+        if not window:
+            return None
+        obs = self.data["observed"][arrayName]
+        time_ = np.asarray(obs["TIME"], dtype=float)
+        quiet = (time_ >= window[0]) & (time_ <= window[1])
+        if quiet.sum() < 3:
+            raise ValueError(f"noise_window {window} holds fewer than 3 samples for {arrayName}")
+        std = np.nanstd(np.asarray(obs["DATA_CALIBRATED"], dtype=float)[:, quiet], axis=1, ddof=1)
+
+        dt_ = self.info["dt"]
+        start = np.abs(time_ - (evalTime - dt_)).argmin()
+        end = np.abs(time_ - (evalTime + dt_)).argmin()
+        return std / np.sqrt(end - start + 1)
 
     def _prepare_data_for_fit(self, evalTime: float) -> None:
         """
@@ -514,45 +549,37 @@ class Emis3D:
         }
 
         # --- Average and map the data to a dict
-        data_ = {}
+        data_, noise_, bad_ = {}, {}, set()
         for bolo_ in self.data["observed"]:
+            obs = self.data["observed"][bolo_]
             temp = self._average_observed_data(arrayName=bolo_, evalTime=evalTime)
-            data_.update(dict(zip(self.data["observed"][bolo_]["channelOrder"], temp)))
+            data_.update(dict(zip(obs["channelOrder"], temp)))
+            noise = self._channel_noise(bolo_, evalTime)
+            if noise is not None:
+                noise_.update(dict(zip(obs["channelOrder"], noise)))
+            bad_ |= set(obs.get("badChannels", ()))
 
         self.fitData[evalTime]["dataMap"] = data_
 
-        # --- Find the max value in all the channels
-        max_ = max(
-            (data_[ch] for bolo_ in self.channel_order["channel_list"] for ch in bolo_),
-            default=0.0,
-        )
+        # --- The peak over the good channels sets the error floor
+        good = [data_[ch] for bolo_ in self.channel_order["channel_list"] for ch in bolo_ if ch not in bad_ and np.isfinite(data_[ch])]
+        max_ = max(good, default=0.0)
 
         for ii, bolo_chans in enumerate(self.channel_order["channel_list"]):
-            temp = []
-            temp_e = []
-
-            # --- Find the max value for that specific array
-            """
-            max_ = 0
-            for channel in channels:
-                if data_[channel] > max_:
-                    max_ = data_[channel]
-            """
-
-            for channel in bolo_chans:
-                val = data_[channel]
-                temp.append(val)
-
-                # --- Large error for zero signal, use definition otherwise
-                if val > 1.0:
-                    err_frac = 0.05
-                    if self.info is not None:
-                        err_frac = Util_emis3D.signal_error(self.info["error_definition"], val, max_, scale_factor=1.0)
-                    err_ = val * err_frac
-                else:
-                    err_ = np.float64(DEAD_CHANNEL_ERROR)
-
-                temp_e.append(err_)
+            temp = [data_[ch] for ch in bolo_chans]
+            noise = [noise_[ch] for ch in bolo_chans] if noise_ else None
+            err = Util_emis3D.channel_error(
+                self.info["error_definition"],
+                temp,
+                max_,
+                floor=self.info["error_floor"],
+                relative=self.info["error_relative"],
+                noise=noise,
+            )
+            # --- Bad or missing channels are left out of the fit
+            out = np.array([ch in bad_ or not np.isfinite(data_[ch]) for ch in bolo_chans])
+            err[out] = np.inf
+            temp_e = err.tolist()
 
             self.fitData[evalTime]["observed"].append(temp)
             self.fitData[evalTime]["observed_error"].append(temp_e)
@@ -719,7 +746,8 @@ class Emis3D:
         num_fits = len(self.fits[evalTime])
         if self.info is not None:
             self.info["numFits"] = num_fits
-        self.fits[evalTime]["chiSqVec"] = np.full(num_fits, 1.0e19)
+        # --- Ranking score per fit (Util_emis3D.fit_score, lower is better)
+        self.fits[evalTime]["scores"] = np.full(num_fits, np.inf)
 
     # ------------------------------------------------------------------
     # Minimization
@@ -727,8 +755,8 @@ class Emis3D:
 
     def _minimize_radDists(self, evalTime: float) -> None:
         """
-        Run leastsq minimization for every fit candidate stored in
-        self.fits[evalTime].
+        Fit every candidate radDist in self.fits[evalTime] (Util_emis3D.fit_radDist,
+        with the run config's fit_method) and record its score (fit_score: AIC).
         """
 
         try:
@@ -751,53 +779,19 @@ class Emis3D:
                 pars = self.fits[evalTime][ii]["parameters"]
 
                 try:
-                    self.fits[evalTime][ii]["fit"] = minimize(
-                        Util_emis3D.residual,
+                    fit = Util_emis3D.fit_radDist(
                         pars,
-                        args=(
-                            data_dict,
-                            synth_dict,
-                            self.info["scale_def"],
-                            None,  # no longer used (cross-calibration moved to emis3d.calibration)
-                            True,  # residual = True
-                            helical_endpoint_weight,
-                        ),
-                        method="differential_evolution",
+                        data_dict,
+                        synth_dict,
+                        self.info["scale_def"],
+                        helical_endpoint_weight,
+                        method=self.info["fit_method"],
                     )
-                    """
-                    results_global = minimize(
-                        Util_emis3D.residual,
-                        pars,
-                        args=(
-                            data_dict,
-                            synth_dict,
-                            self.info["scale_def"],
-                            None,  # no longer used (cross-calibration moved to emis3d.calibration)
-                            True,  # residual = True
-                            helical_endpoint_weight,
-                        ),
-                        method = "differential_evolution",
-                    )
-
-                    self.fits[evalTime][ii]["fit"] = minimize(
-                        Util_emis3D.residual,
-                        results_global.params, # type:ignore
-                        args=(
-                            data_dict,
-                            synth_dict,
-                            self.info["scale_def"],
-                            None,  # no longer used (cross-calibration moved to emis3d.calibration)
-                            True,  # residual = True
-                            helical_endpoint_weight,
-                        ),
-                        method="least_squares",
-                    )
-                    """
-
-                    self.fits[evalTime]["chiSqVec"][ii] = self.fits[evalTime][ii]["fit"].redchi
+                    self.fits[evalTime][ii]["fit"] = fit
+                    self.fits[evalTime]["scores"][ii] = Util_emis3D.fit_score(fit)
                 except Exception as e:
                     logger.warning(f"An error occurred during the {ii} iteration: {e}")
-                    self.fits[evalTime]["chiSqVec"][ii] = 1.0e19
+                    self.fits[evalTime]["scores"][ii] = np.inf
 
         except Exception as e:
             logger.warning(f"An error occurred while fitting: {e}")
@@ -881,7 +875,10 @@ class Emis3D:
         """Identify the best fit and reorganise synthetic data by bolometer."""
 
         # --- Find the best fit
-        bestFitID = np.array(self.fits[evalTime]["chiSqVec"]).argmin().item()
+        scores = np.asarray(self.fits[evalTime]["scores"], dtype=float)
+        if not np.any(np.isfinite(scores)):
+            raise RuntimeError(f"Every fit failed at t={evalTime}; see the warnings above for the errors")
+        bestFitID = int(np.argmin(scores))
 
         # --- Print the results of the best fit
         print("\n-----------Best Fit-----------")
@@ -1259,15 +1256,15 @@ class Emis3D:
         """Plots the observed signals, each fitted emission componenet, and their
         total for one bolometer
 
-        Channels with the DEAD_CHANNEL_ERROR fit weight are excluded from the error bars
+        Bad channels (infinite fit error) are excluded from the error bars
         and y-limit
         """
         data = np.asarray(self.fitData[evalTime]["boloData"][boloName], dtype=float)
         err = np.asarray(self.fitData[evalTime]["boloData_error"][boloName], dtype=float)
         channels = self._channel_numbers(boloName)
 
-        # --- Mask the dead-channel fit weights for display
-        valid = err != DEAD_CHANNEL_ERROR
+        # --- Bad channels have an infinite fit error
+        valid = np.isfinite(err)
         plot_err = np.where(valid, err, 0.0)
 
         ax.errorbar(
