@@ -85,3 +85,76 @@ def test_tpf_panel_draws_the_band_and_a_full_height_peak_marker(fitted):
         assert len(ax.collections) == 2                            # 68% and 95% bands
     finally:
         plt.close(f)
+
+
+# ---------------------------------------------------------------------------
+# Best-fit figure
+# ---------------------------------------------------------------------------
+
+def test_tpf_panel_is_centred_on_the_injector(fitted):
+    f, ax = plt.subplots()
+    try:
+        fitted._plot_tpf_panel(ax, T)
+        best_fit = [ln for ln in ax.get_lines() if ln.get_label() == "best fit"][0]
+        x = np.asarray(best_fit.get_xdata())
+        assert x.min() >= -180 and x.max() < 180 and np.all(np.diff(x) > 0)
+        peak = [ln for ln in ax.get_lines() if ln.get_linestyle() == "--"][0]
+        assert abs(peak.get_xdata()[0]) < 1e-9                       # the peak is at the injector
+        assert "total power" in ax.get_title()
+    finally:
+        plt.close(f)
+
+
+def test_cameras_at_one_angle_share_a_marker(fitted):
+    tok = Tokamak(tokamakName="MOCK", mode="Analysis", loadBolometers=True, workspace=fitted.ws)
+    f, ax = plt.subplots()
+    try:
+        fitted._plot_tpf_panel(ax, T, tok=tok)
+        labels = sorted(t.get_text().strip() for t in ax.texts if t.get_text().strip() != "peak")
+        assert labels == ["POL_A", "POL_B, SKEW", "POL_C", "WRAP"]
+    finally:
+        plt.close(f)
+
+
+def test_signal_panel_residuals_and_not_fitted_channels(fitted):
+    cam = "POL_C"
+    err = fitted.fitData[T]["boloData_error"][cam]
+    saved = list(err)
+    err[2] = np.inf                                                  # leave one channel out of the fit
+    data = np.asarray(fitted.fitData[T]["boloData"][cam], dtype=float)
+    fitted.bestFits[T]["synthData"] = {"elongatedRing": {cam: 0.95 * data}}   # a model 5% low
+    f, (ax, res) = plt.subplots(2, 1)
+    try:
+        fitted._plot_signal_panel(ax, cam, T, "[W/m2]", legend=True, resid_ax=res)
+        assert "χ²/N" in ax.get_title() and "(7 channels)" in ax.get_title()
+        hollow = [ln for ln in ax.get_lines() if ln.get_label() == "not fitted"]
+        assert len(hollow) == 1 and len(hollow[0].get_xdata()) == 1
+        points = [ln for ln in res.get_lines() if ln.get_marker() == "o"][0]
+        assert len(points.get_xdata()) == 7
+        legend = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert "model" in legend and not any(t.endswith(" emission") for t in legend)
+    finally:
+        err[:] = saved
+        plt.close(f)
+
+
+def test_chord_numbers_can_be_thinned(fitted):
+    tok = Tokamak(tokamakName="MOCK", mode="Build", loadBolometers=True, workspace=fitted.ws)
+    f, ax = plt.subplots()
+    try:
+        tok._plot_bolometers(ax, "POL_A", label_every=5)
+        assert sorted(t.get_text() for t in ax.texts) == ["1", "5"]
+    finally:
+        plt.close(f)
+
+
+@pytest.mark.cherab
+def test_best_fit_figure_is_saved_and_closed(tmp_path):
+    from emis3d.mock import selftest
+
+    selftest(workdir=tmp_path, pixel_samples=20, verbose=False)
+    e = Emis3D(runConfigName=str(tmp_path / "runs" / "selftest" / "run.yaml"))
+    e._perform_fits(evalTime=T)
+    e._plot_bestFit(evalTime=T, save=True)
+    assert list((tmp_path / "runs" / "selftest" / "results").glob("*/images/1_10.0000.png"))
+    assert plt.get_fignums() == []

@@ -618,9 +618,10 @@ class RadDist(ABC):
             for bolo_ in boloCameras:
                 bolo_._change_parent(value=self.tokamak.world)
 
-    def plotCrossSection(self, phi: float = 0.0, ax=None) -> None:
+    def plotCrossSection(self, phi: float = 0.0, ax=None):
         """
-        Returns a contour plot of the radDist at a given phi location
+        Contour plot of the radDist's emissivity at a given phi location.
+        Returns the filled contour set, for a colorbar.
         """
 
         if self.tokamak.wall is None:
@@ -662,6 +663,7 @@ class RadDist(ABC):
             linewidths=0.4,
             alpha=0.4,
         )
+        return cf
 
     def _plotOverview_crossSection(self, ax, boloGroup: str, plot_etendue: list = []) -> None:
         """

@@ -634,11 +634,14 @@ class Tokamak(object):
         plot_chord_info=False,
         plot_etendue=[],
         legend=False,
+        label_every: int = 1,
     ) -> None:
         """
         Plots the chords for a specific bolometer group
         ax :: matplotlib.plot
         boloGroupName :: The GROUP_NAME in each bolometer file
+        label_every :: write the channel number on every n-th chord (and channel 1),
+                       so dense cameras stay readable
         plot_chord_info :: Plot r0, rf, etc. in each bolometer file, typically used for initial
                         debugging of new bolometers since it compares Cherab to known chord positions
         """
@@ -802,15 +805,20 @@ class Tokamak(object):
                             n = foil.name.split("_")[1]
                             ch = n[2:]
 
-                        ax.text(
-                            hit_rz[0],
-                            hit_rz[1],
-                            ch,
-                            fontsize="10",
-                            ha="center",
-                            va="center",
-                            weight="bold",
-                        )
+                        try:
+                            show = label_every <= 1 or int(ch) == 1 or int(ch) % label_every == 0
+                        except (TypeError, ValueError):
+                            show = label_every <= 1
+                        if show:
+                            ax.text(
+                                hit_rz[0],
+                                hit_rz[1],
+                                ch,
+                                fontsize="10",
+                                ha="center",
+                                va="center",
+                                weight="bold",
+                            )
 
                         # --- Highlight the etendue of each channel
                         if foil.name in plot_etendue:

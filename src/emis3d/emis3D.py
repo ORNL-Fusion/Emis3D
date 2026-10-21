@@ -1141,77 +1141,119 @@ class Emis3D:
     # ------------------------------------------------------------------
 
     def _plot_bestFit(self, evalTime: float, save: bool = False) -> None:
-        """Plots the fit synthetic signal, data, and radDist for the given evalTime."""
-        logger.debug(f"→ Plotting the best fit")
+        """
+        Best-fit figure for one time. One column per camera (chords over the
+        best radDist, signals with the fitted model, residuals), and a last
+        column with the radDist's cross-section at the injector and the
+        toroidal profile with its ranges. Saved as PNG in the run's results.
+        """
+        logger.debug("→ Plotting the best fit")
 
         if not self.info:
             return
-
-        # --- Rebuild the bestFit radDist
         if not hasattr(self, "bestFits"):
-            logger.info("Please run _post_process_fit_arrangement() and " "_post_process_calculations() before _plot_bestFit()")
+            logger.info("Please run _post_process_fit_arrangement() and _post_process_calculations() before _plot_bestFit()")
             return
 
-        # --- Find the eqFileName, if it exists
-        eqFileName = self.bestFits[evalTime]["radDistInfo"]["eqFileName"]
-
+        best = self.bestFits[evalTime]
         tok = Tokamak(
             tokamakName=self.info["tokamakName"],
             mode="Build",
             reflections=False,
-            eqFileName=eqFileName,
+            eqFileName=best["radDistInfo"]["eqFileName"],
             loadBolometers=True,
         )
 
         bolometerGroups = list(self.info["BOLOMETERS"])
-        units = self.bestFits[evalTime]["radDist"].info["units"]
-        units_label = UNIT_LABELS.get(units, "[arb]")
+        units_label = UNIT_LABELS.get(best["radDist"].info["units"], "[arb]")
+        ncol = len(bolometerGroups) + 1
 
-        num_columns = len(bolometerGroups) + 1
-        f = plt.figure(figsize=(15, 8))
+        f = plt.figure(figsize=(5.0 * ncol, 11.5))
+        # Two rows of panels with room for titles between them; the lower row
+        # of each column is split again into signals and a residual strip
+        gs = f.add_gridspec(2, ncol, height_ratios=[3.0, 3.2], hspace=0.32, wspace=0.3)
 
-        # --- Plot the bolometer chords and radDist contour
-        count_ = 0
-        # Bolometers is a list
-        for boloGroupName in bolometerGroups:
-            count_ += 1
-            ax = f.add_subplot(2, num_columns, count_)
-            self._plot_chord_panel(ax, tok, boloGroupName, evalTime)
+        for jj, boloGroupName in enumerate(bolometerGroups):
+            # --- Chords over the best radDist at the camera's toroidal location
+            self._plot_chord_panel(f.add_subplot(gs[0, jj]), tok, boloGroupName, evalTime)
+            # --- Signals and the fitted model, residuals underneath
+            lower = gs[1, jj].subgridspec(2, 1, height_ratios=[2.3, 0.9], hspace=0.06)
+            ax_sig = f.add_subplot(lower[0])
+            ax_res = f.add_subplot(lower[1], sharex=ax_sig)
+            self._plot_signal_panel(ax_sig, boloGroupName, evalTime, units_label, legend=(jj == 0), resid_ax=ax_res)
 
-        # --- Plot the contour at the injection location
-        count_ += 1
-        ax = f.add_subplot(2, num_columns, count_)
+        # --- The best radDist's cross-section at the injector, with a colorbar
+        ax = f.add_subplot(gs[0, -1])
         tok._plot_first_wall(ax)
-        phi = float(self.info["injectionLocation"])
-        self.bestFits[evalTime]["radDist"].plotCrossSection(phi=np.deg2rad(phi), ax=ax)
-        ax.set_title(f"Injection location = {phi:.2f} degrees")
+        inj = float(best["synthetic_dict"]["injectionLocation"])
+        cf = best["radDist"].plotCrossSection(phi=np.deg2rad(inj), ax=ax)
+        if cf is not None:
+            f.colorbar(cf, ax=ax, label="emissivity [arb.]", shrink=0.85)
+        ax.set_title(f"At the injector ({inj:.1f}°)\n{self._raddist_description(evalTime)}", fontsize=10)
+        ax.set_xlabel("R [m]")
+        ax.set_ylabel("z [m]")
 
-        for bolo_ in bolometerGroups:
-            count_ += 1
-            ax = f.add_subplot(2, num_columns, count_)
-            self._plot_signal_panel(ax, bolo_, evalTime, units_label, legend=True)
+        # --- Toroidal profile with its ranges, below it
+        self._plot_tpf_panel(f.add_subplot(gs[1, -1]), evalTime, tok=tok)
 
-        # --- Plot the radiation behavior
-        tpf_ax = f.add_subplot(2, num_columns, count_ + 1)
-        self._plot_tpf_panel(tpf_ax, evalTime)
-
-        plt.tight_layout()
+        f.suptitle(self._figure_title(evalTime), fontsize=12)
+        f.subplots_adjust(left=0.05, right=0.97, top=0.91, bottom=0.06)
 
         if save:
             if "shot" in self.info and "tokamakName" in self.info:
                 filename = f"{self.info['shot']}_{evalTime:.4f}.png"
                 img_dir = self._results_dir() / "images"
-
-                # --- Make the directory
                 os.makedirs(img_dir, exist_ok=True)
                 out_path = img_dir / filename
-                plt.savefig(out_path, dpi=100, format="png")
+                f.savefig(out_path, dpi=100, format="png")
                 logger.debug(f"→ Figure saved to {out_path}")
-            # --- Saved figures are closed, so long runs do not accumulate them (S2)
+            # --- Saved figures are closed, so long runs do not accumulate them
             plt.close(f)
-
         else:
             plt.show()
+
+    def _figure_title(self, evalTime: float) -> str:
+        """Shot, time, chosen radDist and how it was fitted, so a saved PNG describes itself."""
+        best = self.bestFits[evalTime]
+        path = best.get("radDistInfo", {}).get("radDistPath")
+        chosen = Path(path).parent.name + "/" + Path(path).stem if path else best.get("radDistInfo", {}).get("distType", "")
+        score = Util_emis3D.fit_score(best["fit"]) if "fit" in best else np.nan
+        return (
+            f"{self.info['tokamakName']} {self.info['shot']}   t = {evalTime:g}   best radDist: {chosen}\n"
+            f"scale_def: {self.info['scale_def']}   errors: {self.info['error_definition']}   "
+            f"fit: {self.info['fit_method']}   AIC = {score:.1f}"
+        )
+
+    def _raddist_description(self, evalTime: float) -> str:
+        """The chosen shape's parameters, from its class's SAVE_KEYS, and its start position."""
+        best = self.bestFits[evalTime]
+        rd = best.get("radDist")
+        info = best.get("radDistInfo", {})
+        parts = []
+        for key, label in getattr(rd, "SAVE_KEYS", ()):
+            if info.get(key) is not None:
+                v = info[key]
+                parts.append(f"{label} {v:g}" if isinstance(v, (int, float)) else f"{label} {v}")
+        if "startR" in info and "startZ" in info:
+            parts.append(f"at R {float(info['startR']):.2f}, z {float(info['startZ']):.2f} m")
+        return ", ".join(parts)
+
+    def _camera_phis(self, evalTime: float, tok=None) -> list:
+        """
+        (camera, toroidal angle in degrees) for each camera in the fit, from
+        the tokamak's camera configs; falls back to the unnamed locations from
+        _post_process_bolo_locations.
+        """
+        tok = tok if tok is not None else getattr(self.bestFits[evalTime].get("radDist"), "tokamak", None)
+        used = {ch for group in self.channel_order["channel_list"] for ch in group} if self.channel_order else set()
+        out = {}
+        if tok is not None and getattr(tok, "bolometers", None):
+            for bolo in tok.bolometers:
+                if used & set(bolo.info.get("CHANNEL_TAGS", [])):
+                    out.setdefault(bolo.group_name, float(bolo.info["CAMERA_POSITION_R_Z_PHI"][2]))
+            return sorted(out.items(), key=lambda kv: kv[1])
+        locs = self.bestFits[evalTime].get("bolometer_phi_locations")
+        return [("", float(np.rad2deg(p))) for p in np.atleast_1d(locs)] if locs is not None else []
 
     def _plot_chord_panel(self, ax, tok, boloGroupName: str, evalTime: float) -> None:
         """Plots the first wall, one camera's chords and the radDist cross-section
@@ -1219,96 +1261,105 @@ class Emis3D:
         """
 
         tok._plot_first_wall(ax)
-        tok._plot_bolometers(ax, boloGroupName)
+        n_chords = sum(len(b.info.get("CHANNEL_TAGS", [])) for b in tok.bolometers if b.group_name == boloGroupName)
+        tok._plot_bolometers(ax, boloGroupName, label_every=1 if n_chords <= 12 else 5)
 
         # Loop over each bolometer to find one that has the same group name
         # This is needed to get the phi location
+        phi = None
         for bolo_ in tok.bolometers:
-            # --- Add the radDist plot
             if bolo_.group_name == boloGroupName:
-
                 phi = tok.get_ave_bolometer_tor_loc(boloGroupName=bolo_.group_name)
                 if phi is not None:
                     self.bestFits[evalTime]["radDist"].plotCrossSection(phi=np.deg2rad(phi), ax=ax)
                 break
 
-        ax.set_title(boloGroupName)
+        ax.set_title(boloGroupName if phi is None else f"{boloGroupName} (φ = {phi:.1f}°)")
+        ax.set_xlabel("R [m]")
+        ax.set_ylabel("z [m]")
 
-    def _plot_signal_panel(self, ax, boloName: str, evalTime: float, units_label: str, legend: bool) -> None:
-        """Plots the observed signals, each fitted emission componenet, and their
-        total for one bolometer
-
-        Bad channels (infinite fit error) are excluded from the error bars
-        and y-limit
+    def _plot_signal_panel(
+        self, ax, boloName: str, evalTime: float, units_label: str, legend: bool, resid_ax=None
+    ) -> None:
+        """
+        One camera's signals, the fitted model and (with resid_ax) the
+        residuals (data - model) / sigma underneath. Channels left out of the
+        fit (bad, dead or missing: infinite error) are drawn hollow. The title
+        gives the camera's chi-square per channel.
         """
         data = np.asarray(self.fitData[evalTime]["boloData"][boloName], dtype=float)
         err = np.asarray(self.fitData[evalTime]["boloData_error"][boloName], dtype=float)
         channels = self._channel_numbers(boloName)
+        used = np.isfinite(err) & np.isfinite(data) & (err > 0)
 
-        # --- Bad channels have an infinite fit error
-        valid = np.isfinite(err)
-        plot_err = np.where(valid, err, 0.0)
+        ax.errorbar(channels[used], data[used], yerr=err[used], marker="s", ms=5, c="black", linestyle="none", label="data")
+        if np.any(~used):
+            ax.plot(channels[~used], np.nan_to_num(data[~used]), marker="s", ms=6, mfc="none", mec="black",
+                    linestyle="none", label="not fitted")
 
-        ax.errorbar(
-            channels,
-            data,
-            yerr=plot_err,
-            marker="s",
-            ms=5,
-            c="black",
-            linestyle="none",
-            label="data",
-        )
+        # --- Fitted emission components (only when there is more than one) and their total
+        synth = self.bestFits[evalTime]["synthData"]
+        total = np.zeros(data.size)
+        for jj, emissionName in enumerate(synth):
+            em = np.asarray(synth[emissionName][boloName], dtype=float)
+            total += em
+            if len(synth) > 1:
+                ax.plot(channels, em, marker=PLOT_MARKERS[jj % len(PLOT_MARKERS)], color=PLOT_COLORS[jj % len(PLOT_COLORS)],
+                        label=f"{emissionName}")
+        ax.plot(channels, total, color="purple", label="model" if len(synth) == 1 else "total", linewidth=2.5)
 
-        # --- Fitted emission components and their total
-        tot_emission = np.zeros(data.size)
-        for jj, emissionName in enumerate(self.bestFits[evalTime]["synthData"]):
-            em_data = np.asarray(
-                self.bestFits[evalTime]["synthData"][emissionName][boloName],
-                dtype=float,
-            )
-            tot_emission += em_data
-            ax.plot(
-                channels,
-                em_data,
-                marker=PLOT_MARKERS[jj % len(PLOT_MARKERS)],
-                color=PLOT_COLORS[jj % len(PLOT_COLORS)],
-                label=f"{emissionName} emission",
-            )
-
-        ax.plot(
-            channels,
-            tot_emission,
-            color="purple",
-            label="total emission",
-            linewidth=3.0,
-        )
-
-        # --- y-limit from valid channels and the synthetic total only
-        dat_ = np.concatenate((data + np.abs(err), tot_emission))
-        ymax = np.nanmax(dat_)
-        if np.any(valid):
-            dat_ = np.concatenate((data[valid] + np.abs(err[valid]), tot_emission[valid]))
-            ymax = np.nanmax(dat_)
-
+        # --- y-limit from the fitted channels and the model
+        vals = np.concatenate((data[used] + err[used], total)) if np.any(used) else total
+        ymax = np.nanmax(vals) if vals.size else np.nan
         if np.isfinite(ymax) and ymax > 0:
-            ax.set_ylim(0, float(ymax) * 1.02)
+            ax.set_ylim(0, float(ymax) * 1.05)
 
-        ax.set_xlabel("Channel Number")
+        # --- Fit quality of this camera
+        r = (data[used] - total[used]) / err[used]
+        title = boloName
+        if r.size:
+            title += f"   χ²/N = {np.sum(r**2) / r.size:.2f}  ({r.size} channels)"
+        ax.set_title(title, fontsize=10)
         ax.set_ylabel(f"Emission {units_label}")
-        ax.set_title(boloName)
         if legend:
             ax.legend(fontsize=8)
 
-    def _plot_tpf_panel(self, ax, evalTime: float) -> None:
-        """Toroidal radiation profile with its uncertainty band and the TPF range."""
+        if resid_ax is None:
+            ax.set_xlabel("Channel Number")
+            return
 
+        # --- Residual strip: within +-1 sigma is shaded, +-2 sigma dotted
+        ax.tick_params(labelbottom=False)
+        resid_ax.axhspan(-1, 1, color="0.9", lw=0)
+        for y in (-2, 2):
+            resid_ax.axhline(y, color="0.6", linestyle=":", lw=0.8)
+        resid_ax.axhline(0, color="purple", lw=1.0)
+        resid_ax.plot(channels[used], r, marker="o", ms=4, color="black", linestyle="none")
+        lim = max(3.0, float(np.nanmax(np.abs(r))) * 1.15) if r.size else 3.0
+        resid_ax.set_ylim(-lim, lim)
+        resid_ax.set_ylabel("(data − model)/σ", fontsize=8)
+        resid_ax.set_xlabel("Channel Number")
+
+    def _plot_tpf_panel(self, ax, evalTime: float, tok=None) -> None:
+        """
+        Toroidal radiation profile with its 68%/95% ranges, plotted against the
+        toroidal angle from the injector (so the peak is in the middle), with
+        the cameras' locations marked: the profile is measured there and
+        modelled in between. TPF and total power, with ranges, in the title.
+        """
         best = self.bestFits[evalTime]
         rad = best["radiation_distribution"]
         ranges = best.get("ranges")
+        inj = float(best["synthetic_dict"]["injectionLocation"])
 
-        phi_deg = np.rad2deg(rad["phi"])
-        y = np.asarray(rad["total_power"], dtype=float)
+        def from_injector(deg):
+            return (np.asarray(deg, dtype=float) - inj + 180.0) % 360.0 - 180.0
+
+        x = from_injector(np.rad2deg(rad["phi"]))
+        order = np.argsort(x)
+        x = x[order]
+        y = np.asarray(rad["total_power"], dtype=float)[order]
+
         y_max = np.nanmax(y)
         if ranges is not None:
             y_max = max(y_max, np.nanmax(ranges["profile_band"]["95%"][1]))
@@ -1317,27 +1368,50 @@ class Emis3D:
 
         if ranges is not None:
             band = ranges["profile_band"]
-            ax.fill_between(phi_deg, band["95%"][0] / norm, band["95%"][1] / norm, color="0.85", lw=0, label="95%")
-            ax.fill_between(phi_deg, band["68%"][0] / norm, band["68%"][1] / norm, color="0.65", lw=0, label="68%")
-        ax.plot(phi_deg, y / norm, color="black", linewidth=2.0, label="best fit")
+            for level, colour in (("95%", "0.85"), ("68%", "0.65")):
+                lo = np.asarray(band[level][0])[order] / norm
+                hi = np.asarray(band[level][1])[order] / norm
+                ax.fill_between(x, lo, hi, color=colour, lw=0, label=f"profile {level} range")
+        ax.plot(x, y / norm, color="black", linewidth=2.0, label="best fit")
 
-        # --- Peak marker spans the whole axis (axvline's ymin/ymax are axis fractions)
-        x_peak = np.rad2deg(rad["peak_emission"]) % 360.0
+        # --- Cameras: where the profile is measured (cameras at one angle share a marker)
+        at_angle = {}
+        for name, phi in self._camera_phis(evalTime, tok=tok):
+            at_angle.setdefault(round(phi % 360.0, 3), []).append(name)
+        for phi, names in sorted(at_angle.items()):
+            name = ", ".join(n for n in names if n)
+            xc = float(from_injector(phi))
+            ax.axvline(xc, color="tab:blue", linestyle=":", lw=1.2)
+            if name:
+                # label on the inside of the line near the left edge, so it is not cut off
+                ha = "left" if xc < -170.0 else "right"
+                ax.text(xc, 0.98, f" {name} ", rotation=90, ha=ha, va="top", fontsize=8, color="tab:blue",
+                        transform=ax.get_xaxis_transform())
+
+        # --- Peak: at the injector unless its location was fitted
+        x_peak = float(from_injector(np.rad2deg(rad["peak_emission"]) % 360.0))
         ax.axvline(x_peak, linestyle="dashed", color="tab:red")
-        ax.text(x_peak, 0.02, "Peak\nradiation", ha="center", va="bottom", size=10, transform=ax.get_xaxis_transform())
+        ax.text(x_peak, 0.02, " peak", ha="left", va="bottom", fontsize=9, color="tab:red",
+                transform=ax.get_xaxis_transform())
 
-        ax.set_xlim(0, 360)
+        ax.set_xlim(-180, 180)
+        ax.set_xticks(np.arange(-180, 181, 60))
         ax.set_ylim(bottom=0)
-        ax.set_xlabel("phi [degrees]")
-        ax.set_ylabel(f"radiation [$10^{{{int(scale)}}}$ arb]")
+        ax.set_xlabel(f"toroidal angle from the injector at {inj:.1f}° [deg]")
+        ax.set_ylabel(f"radiated power per radian [$10^{{{int(scale)}}}$ arb.]")
 
-        title = f"time = {evalTime:.4f} ms\nTPF {rad['toroidal_peaking_factor']:.2f}"
+        title = f"TPF {rad['toroidal_peaking_factor']:.2f}"
+        P_tot = rad.get("quantities", {}).get("total_power")
         if ranges is not None and "tpf" in ranges["total"]:
             lo, hi = ranges["total"]["tpf"]["68%"]
-            title += f" (68%: {lo:.2f}\u2013{hi:.2f})"
+            title += f" (68%: {lo:.2f}–{hi:.2f})"
+        if P_tot is not None:
+            title += f"\ntotal power {P_tot:.3g}"
+            if ranges is not None and "total_power" in ranges["total"]:
+                lo, hi = ranges["total"]["total_power"]["68%"]
+                title += f" (68%: {lo:.3g}–{hi:.3g})"
         ax.set_title(title, fontsize=10)
-        if ranges is not None:
-            ax.legend(fontsize=8, loc="upper right")
+        ax.legend(fontsize=8, loc="lower center", framealpha=0.9)
 
     def _channel_numbers(self, boloName: str) -> np.ndarray:
         """
