@@ -35,6 +35,7 @@ from emis3d.Util import (
 import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 # For NIMROD class
 import json
@@ -554,14 +555,11 @@ class RadDist(ABC):
                                         ans_error = radiance_error
 
                             except Exception as e:
-                                logger.error(
-                                    "Error observing radiance/brightness: %s " "(etendue=%.4g, sensitivity=%.4g, mean=%.4g, error=%.4g)",
-                                    e,
-                                    bolo_.etendues[jj],
-                                    foil.sensitivity,
-                                    foil.pipelines[0].value.mean,
-                                    foil.pipelines[0].value.error(),
-                                )
+                                raise RuntimeError(
+                                    f"Could not convert the observation to {units} "
+                                    f"(etendue={bolo_.etendues[jj]:.4g}, sensitivity={foil.sensitivity:.4g}, "
+                                    f"mean={foil.pipelines[0].value.mean:.4g})"
+                                ) from e
 
                         elif units == "Power":
                             ans = foil.pipelines[0].value.mean
@@ -571,10 +569,9 @@ class RadDist(ABC):
                         ans_error = ans_error * FOIL_SLIT_ANGLE_FACTOR
 
                     except Exception as e:
-                        logger.error("An error occurred in bolos_observe: %s", e)
-                        # print(
-                        #    f"Single layer cameras currently not supported, add functionality within bolos_observe!"
-                        # )
+                        # A failed observation must not become data: before, it was
+                        # stored as 0 +- 1e3 and saved like a real measurement
+                        raise RuntimeError(f"Observation failed for foil {foil.name} of camera {bolo_.name} " f"({emissionName}); no radDist was saved: {e}") from e
 
                     # --- Each channel stores a list of observation segments,
                     # one per toroidal angle in data["observed_phi_loc"]. For
@@ -801,6 +798,9 @@ class RadDist(ABC):
             "info": convert_arrays_to_list(self.info),
             "data": convert_arrays_to_list(self.data),
         }
+
+        folderName, saveFileName = self._save_names()
+
         folderName = (
             f"{self.info['distType']}_sigma_R_{self.info['sigma_R']}_sigma_z_{self.info['sigma_z']}"
             # f"{self._folder_suffix()}"
@@ -1280,34 +1280,33 @@ class SquareTube(RadDist):
         return [[float(phi)] for _ in range(numChan)]
 
 
-class NIMROD(RadDist):
+class SimulationRadDist(RadDist):
     """
-    Takes emissivity data from a timestep of a NIMROD 3D MHD simulation
-    and interprets it as a radiation structure
+    Emissivity from one timestep of a 3-D simulation, on a regular (R, z, phi)
+    grid stored as JSON with keys pradArray, r_list, z_list and phi_list.
 
-    Note: This class is very un-optimized. If we ever end up building a
-    lot of these we should linearize the evaluate function and stuff
-    like that.
+    Subclasses set NAME and AXES, the order of pradArray's axes.
 
-    Also, previous Emis3D implementation included a rotation angle in
-    case the NIMROD simulation used different angle convention from
-    Emis3D. Could be implemented if necessary
+    The toroidal grid is treated as periodic. Simulations usually write phi on
+    [0, 2*pi) without the endpoint; the first plane is repeated at +2*pi so
+    the interpolator also covers the last interval, and every angle is wrapped
+    into the grid's period. Without this, any chord crossing the gap raised
+    inside Cherab, and bolos_observe stored the whole channel as 0.
+
+    The previous Emis3D implementation included a rotation angle in case the
+    simulation used a different angle convention from Emis3D. It could be
+    added here if needed.
     """
 
-    def __init__(
-        self,
-        # startR=None,
-        # startZ=None,
-        nimrodFile,
-        timestep,
-        config={},
-    ):
+    NAME = "SIMULATION"
+    AXES: tuple[str, str, str] = ("z", "r", "phi")
 
-        super(NIMROD, self).__init__(config=config or {})
-        self.info["distType"] = "NIMROD"
-        self.info["emissionNames"] = ["NIMROD"]
-        self.info["startR"] = int(timestep)  # haphazard way of making the savefile have the timestep in it
-        self.info["startZ"] = int(timestep)
+    def __init__(self, simFile, timestep, config=None):
+        super().__init__(config=config or {})
+        self.info["distType"] = self.NAME
+        self.info["emissionNames"] = [self.NAME]
+        self.info["sourceFile"] = simFile
+        self.info["timestep"] = timestep
 
         self._build_tokamak(
             tokamakName=self.info["tokamakName"],
@@ -1316,23 +1315,47 @@ class NIMROD(RadDist):
             eqFileName=self.info["eqFileName"],
         )
 
-        str_ = f"→ Building NIMROD radDist"
-        logger.info("%s", str_)
+        logger.info("%s", f"→ Building {self.NAME} radDist")
 
-        with open(nimrodFile) as file:
+        self._load_grid(simFile)
+
+    def _load_grid(self, path) -> None:
+        with open(path) as file:
             properties = json.load(file)
-            # if "phiRotation" in properties.keys():
-            #     self.phiRotation = properties["phiRotation"]
 
-        self.emis_values = properties["pradArray"]
-        self.r_list = properties["r_list"]
-        self.z_list = properties["z_list"]
-        self.phi_list = properties["phi_list"]
-        self.rmin = min(self.r_list)
-        self.rmax = max(self.r_list)
-        self.zmin = min(self.z_list)
-        self.zmax = max(self.z_list)
-        self.interp_operator = Interpolate3DLinear(self.z_list, self.r_list, self.phi_list, self.emis_values)
+        axes = {
+            "r": np.asarray(properties["r_list"], dtype=float),
+            "z": np.asarray(properties["z_list"], dtype=float),
+            "phi": np.asarray(properties["phi_list"], dtype=float),
+        }
+        values = np.asarray(properties["pradArray"], dtype=float)
+        expected = tuple(axes[a].size for a in self.AXES)
+        if values.shape != expected:
+            raise ValueError(f"{self.NAME} pradArray has shape {values.shape}, but the axis lists give " f"{expected} for axis order {self.AXES}")
+        for name, ax in axes.items():
+            if ax.size < 2 or np.any(np.diff(ax) <= 0):
+                raise ValueError(f"{self.NAME} {name}_list must be strictly increasing")
+
+        # --- Periodic toroidal grid: close it with the first plane at +2*pi
+        phi = axes["phi"]
+        two_pi = 2.0 * np.pi
+        span = phi[-1] - phi[0]
+        step = float(np.median(np.diff(phi)))
+        if span > two_pi + 1e-9:
+            raise ValueError(f"{self.NAME} phi_list spans {np.rad2deg(span):.1f} deg, more than a full turn")
+        if not np.isclose(span, two_pi, atol=1e-6):
+            if not np.isclose(span + step, two_pi, rtol=0.0, atol=0.5 * step):
+                raise ValueError(f"{self.NAME} phi_list covers {np.rad2deg(span):.1f} deg; a full turn is " "needed (either [0, 2*pi) or [0, 2*pi])")
+            k = self.AXES.index("phi")
+            values = np.concatenate([values, np.take(values, [0], axis=k)], axis=k)
+            axes["phi"] = np.append(phi, phi[0] + two_pi)
+
+        self.r_list, self.z_list, self.phi_list = axes["r"], axes["z"], axes["phi"]
+        self.emis_values = values
+        self.phi0 = float(axes["phi"][0])
+        self.rmin, self.rmax = float(axes["r"][0]), float(axes["r"][-1])
+        self.zmin, self.zmax = float(axes["z"][0]), float(axes["z"][-1])
+        self.interp_operator = Interpolate3DLinear(*(axes[a] for a in self.AXES), values)
 
     def _evaluate(
         self,
@@ -1342,11 +1365,11 @@ class NIMROD(RadDist):
         emissionName: str | None = None,
     ) -> dict:
         """
-        Return the emissivity (W/m^3/rad) at the point (R,z,ph).
+        Return the emissivity (W/m^3/rad) at the points (R, z, phi).
 
         Parameters
         ----------
-        R, z, phi    : array-like — evaluation coordinates.
+        R, z, phi    : array-like — evaluation coordinates; phi may be a single value.
         emissionName : str, optional — defaults to self.emissionName if not given.
         """
 
@@ -1354,28 +1377,20 @@ class NIMROD(RadDist):
         if emissionName is None:
             emissionName = self.emissionName
 
-        localEmis = {}
+        R = np.atleast_1d(np.asarray(R, dtype=float))
+        z = np.atleast_1d(np.asarray(z, dtype=float))
+        phi = np.broadcast_to(np.atleast_1d(np.asarray(phi, dtype=float)), R.shape)
+        # --- Any angle, wrapped into the (closed) periodic grid
+        phi = self.phi0 + np.mod(phi - self.phi0, 2.0 * np.pi)
 
-        # breakpoint()
-        localEmisVec = np.zeros(len(z))
-        # if (z >= self.zmin) and (z <= self.zmax) and (R >= self.rmin) and (R <= self.rmax):
-        for indx in range(len(z)):
-            zinst = z[indx]
-            Rinst = R[indx]
-            if phi.size > 1:
-                phiinst = phi[indx]
-            else:
-                phiinst = phi
-            if phiinst < 0:
-                phiinst = phiinst + 2.0 * np.pi
-            if (zinst >= self.zmin) and (zinst <= self.zmax) and (Rinst >= self.rmin) and (Rinst <= self.rmax):
-                localEmisVec[indx] = self.interp_operator(zinst, Rinst, phiinst)
-            else:
-                localEmisVec[indx] = 0.0
+        inside = (R >= self.rmin) & (R <= self.rmax) & (z >= self.zmin) & (z <= self.zmax)
+        emis = np.zeros(R.shape)
+        coords = {"r": R, "z": z, "phi": phi}
+        first, second, third = (coords[a] for a in self.AXES)
+        for i in np.flatnonzero(inside):
+            emis[i] = self.interp_operator(float(first[i]), float(second[i]), float(third[i]))
 
-        localEmis[emissionName] = localEmisVec
-
-        return localEmis
+        return {emissionName: emis}
 
     def _scaling_factor(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
@@ -1394,131 +1409,37 @@ class NIMROD(RadDist):
 
     def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
         """
-        Not yet implimented!
+        Not yet implimented! (review issue 18)
         """
-
-        # print("In _observed_phi_loc")
 
         return []
 
+    def _save_names(self):
+        stem = Path(self.info["sourceFile"]).stem
+        return f"{self.info['distType']}_{stem}_t_{self.info['timestep']}.json"
 
-class M3DC1(RadDist):
+
+class NIMROD(SimulationRadDist):
     """
-    Takes emissivity data from a timestep of an M3DC1 3D MHD simulation
-    and interprets it as a radiation structure
-
-    Note: This class is very un-optimized. If we ever end up building a
-    lot of these we should linearize the evaluate function and stuff
-    like that.
-
-    Also, previous Emis3D implementation included a rotation angle in
-    case the M3DC1 simulation used different angle convention from
-    Emis3D. Could be implemented if necessary
+    Takes emissivity data from a timestep of a NIMROD 3D MHD simulation and
+    interprets it as a radiation structure. pradArray is indexed [z][r][phi].
     """
 
-    def __init__(
-        self,
-        # startR=None,
-        # startZ=None,
-        m3dc1File,
-        timestep,
-        config={},
-    ):
+    NAME = "NIMROD"
+    AXES = ("z", "r", "phi")
 
-        super(M3DC1, self).__init__(config=config or {})
-        self.info["distType"] = "M3DC1"
-        self.info["emissionNames"] = ["M3DC1"]
-        self.info["startR"] = int(timestep)  # haphazard way of making the savefile have the timestep in it
-        self.info["startZ"] = int(timestep)
+    def __init__(self, nimrodFile, timestep, config=None):
+        super().__init__(nimrodFile, timestep, config=config)
 
-        self._build_tokamak(
-            tokamakName=self.info["tokamakName"],
-            mode="Build",
-            reflections=False,
-            eqFileName=self.info["eqFileName"],
-        )
 
-        str_ = f"→ Building M3DC1 radDist"
-        logger.info("%s", str_)
+class M3DC1(SimulationRadDist):
+    """
+    Takes emissivity data from a timestep of an M3DC1 3D MHD simulation and
+    interprets it as a radiation structure. pradArray is indexed [phi][r][z].
+    """
 
-        with open(m3dc1File) as file:
-            properties = json.load(file)
-            # if "phiRotation" in properties.keys():
-            #     self.phiRotation = properties["phiRotation"]
+    NAME = "M3DC1"
+    AXES = ("phi", "r", "z")
 
-        self.emis_values = properties["pradArray"]
-        self.r_list = properties["r_list"]
-        self.z_list = properties["z_list"]
-        self.phi_list = properties["phi_list"]
-        self.rmin = min(self.r_list)
-        self.rmax = max(self.r_list)
-        self.zmin = min(self.z_list)
-        self.zmax = max(self.z_list)
-        self.interp_operator = Interpolate3DLinear(self.phi_list, self.r_list, self.z_list, self.emis_values)
-
-    def _evaluate(
-        self,
-        R: np.ndarray,
-        z: np.ndarray,
-        phi: np.ndarray,
-        emissionName: str | None = None,
-    ) -> dict:
-        """
-        Return the emissivity (W/m^3/rad) at the point (R,z,ph).
-
-        Parameters
-        ----------
-        R, z, phi    : array-like — evaluation coordinates.
-        emissionName : str, optional — defaults to self.emissionName if not given.
-        """
-
-        # --- Set emissionName if called with self._evaluate_cherab()
-        if emissionName is None:
-            emissionName = self.emissionName
-
-        localEmis = {}
-
-        # breakpoint()
-        localEmisVec = np.zeros(len(z))
-        # if (z >= self.zmin) and (z <= self.zmax) and (R >= self.rmin) and (R <= self.rmax):
-        for indx in range(len(z)):
-            zinst = z[indx]
-            Rinst = R[indx]
-            if phi.size > 1:
-                phiinst = phi[indx]
-            else:
-                phiinst = phi
-            if phiinst < 0:
-                phiinst = phiinst + 2.0 * np.pi
-            if (zinst >= self.zmin) and (zinst <= self.zmax) and (Rinst >= self.rmin) and (Rinst <= self.rmax):
-                localEmisVec[indx] = self.interp_operator(phiinst, Rinst, zinst)
-            else:
-                localEmisVec[indx] = 0.0
-
-        localEmis[emissionName] = localEmisVec
-
-        return localEmis
-
-    def _scaling_factor(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
-        """
-        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
-
-        Parameters
-        ----------
-        bolo_info    : dict — bolometer configuration.
-        emissionName : str  — used to extract the revolution number from the name.
-        """
-
-        numChan = bolo_info["NUM_CHANNELS"]
-        phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
-
-        return [float(phi)] * numChan
-
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
-        """
-        Not yet implimented!
-        """
-
-        # print("In _observed_phi_loc")
-
-        return []
+    def __init__(self, m3dc1File, timestep, config=None):
+        super().__init__(m3dc1File, timestep, config=config)
