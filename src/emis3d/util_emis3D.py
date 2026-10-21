@@ -7,14 +7,15 @@ mu is the injection location
 
 Written by JLH Aug. 2025
 
-TODO: Account for rev1, rev2, etc. for the helical distributions. The dphi
+TODO:
+1. Account for rev1, rev2, etc. for the helical distributions. The dphi
+2. scale_step can only have 2 inputs for the step function
 """
 
 import logging
 import re
 import numpy as np
 
-from emis3d.util import convert_arrays_to_list
 from lmfit import minimize
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.
     Inputs:
     A: ndarray, use as the amplitudes in the step function
     phi: Input phi locations (in radians) for every channel for every bolometer (more for toroidal bolometers)
-    bolo_phi_locs: list of just the bolometer phi locations (ex, [90, 225] for JET)
+    bolo_phi_locs: list of just the bolometer phi locations (in radians) (ex, [np.pi, np.deg2rad(225)] for JET)
 
     Amplitude at toroidal location phi is set to be equal to the amplitude A[i] at the
     nearest bolo location bolo_phi_locs[i]. Width of the steps is fully determined by
@@ -399,7 +400,6 @@ def residual(
     distributions together at the helix endpoint; see
     :func:`helical_endpoint_penalty`. A weight of 0 disables the constraint.
     """
-
 
     a = 0.0
     b = 0.0

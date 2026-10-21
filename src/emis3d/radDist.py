@@ -990,11 +990,7 @@ class Helical(RadDist):
         num_channels = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
-        rev_number = 0
-        if emissionName is not None and "rev" in emissionName:
-            rev_number = int(emissionName.split("rev")[-1])
-
-        return [[phi + rev_number * 2.0 * np.pi] for _ in range(num_channels)]
+        return [[phi % (2.0 * np.pi)] for _ in range(num_channels)]
 
 
 class HelicalRing(RadDist):
@@ -1133,11 +1129,7 @@ class HelicalRing(RadDist):
         num_channels = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
-        rev_number = 0
-        if emissionName is not None and "rev" in emissionName:
-            rev_number = int(emissionName.split("rev")[-1])
-
-        return [[phi + rev_number * 2.0 * np.pi] for _ in range(num_channels)]
+        return [[phi % (2.0 * np.pi)] for _ in range(num_channels)]
 
 
 class ElongatedRing(RadDist):
