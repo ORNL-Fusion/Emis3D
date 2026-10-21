@@ -760,44 +760,51 @@ class Emis3D:
         """
         Fit every candidate radDist in self.fits[evalTime] (Util_emis3D.fit_radDist,
         with the run config's fit_method) and record its score (fit_score: AIC).
+        With numProcessorsFitting > 1 the fits run in worker processes
+        (Util_emis3D.FitPool), reused for later evaluation times; call close()
+        when done to stop them early.
         """
+        data_dict = self.fitData[evalTime]
+        jobs = [
+            (
+                ii,
+                self.fits[evalTime][ii]["parameters"],
+                data_dict,
+                self.fits[evalTime][ii]["synthetic_dict"],
+                self.info["scale_def"],
+                self.info["helical_endpoint_weight"],
+                self.info["fit_method"],
+            )
+            for ii in self.fits[evalTime]
+            if isinstance(ii, int)
+        ]
 
-        try:
-            # --- Data used for fitting
-            data_dict = self.fitData[evalTime]
+        workers = int(self.info.get("numProcessorsFitting", 1) or 1)
+        pool = getattr(self, "_fit_pool", None)
+        if pool is None or pool.workers != workers:
+            self.close()
+            pool = Util_emis3D.FitPool(workers)
+            self._fit_pool = pool
 
-            # --- Soft-constraint weight tying helical endpoints together.
-            # Active (1.0) by default; set to 0.0 in the run config to disable.
-            helical_endpoint_weight = self.info["helical_endpoint_weight"]
+        errors = []
+        for ii, fit, error in pool.map(jobs):
+            if fit is None:
+                self.fits[evalTime]["scores"][ii] = np.inf
+                errors.append((ii, error))
+                continue
+            self.fits[evalTime][ii]["fit"] = fit
+            self.fits[evalTime]["scores"][ii] = Util_emis3D.fit_score(fit)
 
-            for ii in self.fits[evalTime]:
+        if errors:
+            shown = "; ".join(f"fit {ii}: {err}" for ii, err in errors[:3])
+            logger.warning("%d of %d fits failed at t=%s (%s)", len(errors), len(jobs), evalTime, shown)
 
-                if not isinstance(ii, int):
-                    continue
-
-                if ii % 1_000 == 0 and self.verbose:
-                    logger.debug(f"→ Preforming fit {ii} out of {self.info['numFits']}")
-
-                synth_dict = self.fits[evalTime][ii]["synthetic_dict"]
-                pars = self.fits[evalTime][ii]["parameters"]
-
-                try:
-                    fit = Util_emis3D.fit_radDist(
-                        pars,
-                        data_dict,
-                        synth_dict,
-                        self.info["scale_def"],
-                        helical_endpoint_weight,
-                        method=self.info["fit_method"],
-                    )
-                    self.fits[evalTime][ii]["fit"] = fit
-                    self.fits[evalTime]["scores"][ii] = Util_emis3D.fit_score(fit)
-                except Exception as e:
-                    logger.warning(f"An error occurred during the {ii} iteration: {e}")
-                    self.fits[evalTime]["scores"][ii] = np.inf
-
-        except Exception as e:
-            logger.warning(f"An error occurred while fitting: {e}")
+    def close(self) -> None:
+        """Stop the fitting worker processes, if any were started."""
+        pool = getattr(self, "_fit_pool", None)
+        if pool is not None:
+            pool.close()
+        self._fit_pool = None
 
     # ------------------------------------------------------------------
     # Post-processing

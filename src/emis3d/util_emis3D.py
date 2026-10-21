@@ -13,7 +13,9 @@ TODO:
 """
 
 import logging
+import multiprocessing
 import re
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 
 from lmfit import minimize
@@ -528,9 +530,60 @@ def fit_score(fit) -> float:
 
 
 def runParallel(job):
-    """Thin wrapper around fit_radDist for use with an executor."""
+    """One fit from a job tuple (fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method)."""
     fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method = job
     return fit_index, fit_radDist(pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method)
+
+
+def _fit_job(job):
+    """
+    Worker for FitPool: one fit. An error is returned rather than raised, so
+    one failing radDist does not stop the others. Defined at module level so
+    worker processes can import it (macOS starts workers fresh, by "spawn").
+    """
+    try:
+        index, fit = runParallel(job)
+        return index, fit, None
+    except Exception as e:
+        return job[0], None, f"{type(e).__name__}: {e}"
+
+
+class FitPool:
+    """
+    Runs fits in worker processes. Each lmfit fit is mostly Python, so threads
+    give little speed-up (the interpreter lock lets one run at a time);
+    processes do.
+
+    The pool is started on first use and reused, so the start-up cost (each
+    worker imports emis3d and Cherab, a few seconds) is paid once per run, not
+    once per evaluation time. It is only started for at least
+    MIN_JOBS_PER_WORKER fits per worker (a typical fit takes 20-50 ms, so
+    about a second of work each); smaller batches run serially, unless the
+    pool is already running. Results come back in job order as
+    (index, fit or None, error or None).
+    """
+
+    MIN_JOBS_PER_WORKER = 50
+
+    def __init__(self, workers: int = 1):
+        self.workers = max(1, int(workers))
+        self._executor = None
+
+    def map(self, jobs: list) -> list:
+        if self.workers == 1 or len(jobs) < 2:
+            return [_fit_job(job) for job in jobs]
+        if self._executor is None and len(jobs) < self.MIN_JOBS_PER_WORKER * self.workers:
+            return [_fit_job(job) for job in jobs]
+        if self._executor is None:
+            self._executor = ProcessPoolExecutor(max_workers=self.workers, mp_context=multiprocessing.get_context("spawn"))
+        # Several jobs per message; the shared data_dict is sent once per chunk
+        chunksize = max(1, len(jobs) // (4 * self.workers))
+        return list(self._executor.map(_fit_job, jobs, chunksize=chunksize))
+
+    def close(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown()
+            self._executor = None
 
 
 def channel_error(
