@@ -23,4 +23,8 @@ SCALE_DEFINITIONS: list[str] = ["linear", "exponential", "constant", "step"]
 ERROR_DEFINITIONS: list[str] = ["exponential", "inverse", "inverse square", "constant"]
 
 # Explicit export list
-__all__ = ["SUPPORTED_TOKAMAKS", "SCALE_DEFINITIONS", "ERROR_DEFINITIONS"]
+# Version of the saved radDist format. RadDistFitting refuses any other
+# version: radDists saved by earlier Emis3D versions must be regenerated.
+RADDIST_FORMAT: int = 2
+
+__all__ = ["SUPPORTED_TOKAMAKS", "SCALE_DEFINITIONS", "ERROR_DEFINITIONS", "RADDIST_FORMAT"]

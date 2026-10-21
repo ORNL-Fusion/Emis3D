@@ -79,12 +79,12 @@ class TestEndpointPenalty:
             U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 0.0) == []
         )
 
-    def test_missing_P_pol_disables(self):
+    def test_missing_P_pol_is_an_error(self):
+        """Every current radDist stores its toroidal power profile; a missing one is a bug."""
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
         del sd["clockwise_rev0"]["P_pol"]
-        assert (
-            U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 1.0) == []
-        )
+        with pytest.raises(KeyError, match="P_pol"):
+            U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 1.0)
 
     def test_symmetric_pair_zero_penalty(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)

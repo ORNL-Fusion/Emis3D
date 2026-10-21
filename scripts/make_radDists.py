@@ -58,10 +58,9 @@ if __name__ == "__main__":
     # --- Only change these variables! ---
     # ------------------------------------------------------
     # configFileName is a path, or a name inside the workspace's 'raddists' location
-    tokamakName = "DIII-D"
-    configFileName = "helical_config.yaml"  # "elongatedRing_config.yaml"
+    # (or pass --tokamak and --config, e.g. --tokamak DIII-D --config helical_config.yaml)
     tokamakName = "JET"
-    configFileName = "elongatedRing_config.yaml"  # "elongatedRing_config.yaml"
+    configFileName = "elongatedRing_config.yaml"
     # ------------------------------------------------------
     # --- Do not change anything below this line ---
     # ------------------------------------------------------
@@ -142,25 +141,17 @@ if __name__ == "__main__":
     if rzArray is not None:
         # --- Build the full task list up front: one (rz, config) task per
         # radDist, with a config snapshot per parameter combination.
+        # Only distinct shapes: circles, rotated twins and parameters the
+        # radDist type ignores would otherwise rebuild the same radDist
+        shapes = Util_radDist.shape_parameter_sets(
+            config["distType"], sigma_R_vals, sigma_z_vals, rotationAngles
+        )
+        print(f"{len(shapes)} distinct shape(s) x {len(rzArray)} start positions")
         arg_list = []
-        for rotationAngle in rotationAngles:
-            for sigma_R in sigma_R_vals:
-                for sigma_z in sigma_z_vals:
-
-                    # --- Skip rotation angles for circles (sigma_z == sigma_R):
-                    # only the rotationAngle = 0 case is unique
-                    if sigma_z == sigma_R and rotationAngle > 0.0:
-                        continue
-                    # --- Skip duplicates: rotationAngle 90 with sigma_z equal
-                    # to one of the sigma_R values reproduces a 0-degree case
-                    if rotationAngle == 90 and sigma_z in sigma_R_vals:
-                        continue
-
-                    cfg = dict(config)
-                    cfg["sigma_R"] = sigma_R
-                    cfg["sigma_z"] = sigma_z
-                    cfg["rotationAngle"] = rotationAngle
-                    arg_list.extend((val, cfg) for val in rzArray)
+        for params in shapes:
+            cfg = dict(config)
+            cfg.update(params)
+            arg_list.extend((val, cfg) for val in rzArray)
 
         # CHANGE THIS BELOW, let's go back to the older
         worker_fn = {

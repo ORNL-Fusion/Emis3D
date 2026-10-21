@@ -11,10 +11,11 @@ import json
 import pytest
 
 from emis3d.Emis3D import Emis3D
+from emis3d.Globals import RADDIST_FORMAT
 from emis3d.workspace import Workspace
 
 
-def write_raddist(path):
+def write_raddist(path, version=RADDIST_FORMAT, scalar_channels=False):
     """A minimal radDist file with the fields loading needs."""
     data = {
         "Brightness": {"channelOrder": {"CAM": ["C1", "C2"]}, "ring": {"CAM": [[1.0], [2.0]]}},
@@ -22,7 +23,12 @@ def write_raddist(path):
         "observed_phi_loc": {"ring": {"CAM": [[0.0], [0.0]]}},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"info": {"units": "Brightness", "emissionNames": ["ring"]}, "data": data}))
+    if scalar_channels:          # one number per channel, as radDists saved before segments
+        data["Brightness"]["ring"]["CAM"] = [1.0, 2.0]
+    info = {"units": "Brightness", "emissionNames": ["ring"]}
+    if version is not None:
+        info["radDistFormat"] = version
+    path.write_text(json.dumps({"info": info, "data": data}))
 
 
 @pytest.fixture
@@ -98,4 +104,17 @@ def test_only_one_folder_key_is_enough(run):
 def test_no_folders_at_all_is_an_error(run):
     e, _ = run
     with pytest.raises(RuntimeError, match="No radDist folders"):
+        e._load_radDists()
+
+
+@pytest.mark.parametrize("kwargs, reason", [
+    ({"version": None}, "format None"),            # saved before format versions existed
+    ({"version": 1}, "format 1"),
+    ({"scalar_channels": True}, "not a list of toroidal segments"),
+])
+def test_old_radDists_are_rejected_with_a_message(run, kwargs, reason):
+    e, base = run
+    write_raddist(base / "ring/R_0.json", **kwargs)
+    e.info["radDistDirectories_LocIndependent"] = ["ring"]
+    with pytest.warns(UserWarning, match=reason), pytest.raises(RuntimeError, match="None of the 1 files"):
         e._load_radDists()

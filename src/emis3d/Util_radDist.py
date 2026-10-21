@@ -459,3 +459,52 @@ def bivariate_normal_isodensity_points(
     weights = np.ones(n) / n
 
     return points, weights
+
+
+def shape_parameter_sets(distType: str, sigma_R_vals, sigma_z_vals, rotationAngles) -> list[dict]:
+    """
+    The distinct shape parameters to generate for one radDist type, in
+    request order, so make_radDists never builds the same radDist twice.
+
+    ElongatedRing  sigma_R, sigma_z, rotationAngle, compared as ellipses: an
+                   angle is taken mod 180, a circle has no rotation, and a
+                   90-degree ellipse equals the 0-degree one with the sigmas
+                   swapped. Only a real duplicate is dropped, so a 90-degree
+                   case whose swapped twin was not requested is kept.
+    HelicalRing    sigma_R, sigma_z (no rotation)
+    Helical        sigma_R only (the width comes from sigma_R and sigmaKernel)
+    other types    one set: their shape is set elsewhere in the config
+                   (SquareTube uses dR and dz)
+    """
+    sets, seen = [], set()
+
+    def add(key, params):
+        if key not in seen:
+            seen.add(key)
+            sets.append(params)
+
+    def same(a, b):
+        return bool(np.isclose(a, b, rtol=1e-9, atol=1e-12))
+
+    if distType == "ElongatedRing":
+        for angle in rotationAngles:
+            for sR in sigma_R_vals:
+                for sz in sigma_z_vals:
+                    a = float(angle) % 180.0
+                    if same(sR, sz):
+                        key = (round(sR, 9), round(sz, 9), 0.0)
+                    elif same(a, 90.0):
+                        key = (round(sz, 9), round(sR, 9), 0.0)
+                    else:
+                        key = (round(sR, 9), round(sz, 9), round(a, 9))
+                    add(key, {"sigma_R": sR, "sigma_z": sz, "rotationAngle": angle})
+    elif distType == "HelicalRing":
+        for sR in sigma_R_vals:
+            for sz in sigma_z_vals:
+                add((round(sR, 9), round(sz, 9)), {"sigma_R": sR, "sigma_z": sz})
+    elif distType == "Helical":
+        for sR in sigma_R_vals:
+            add((round(sR, 9),), {"sigma_R": sR})
+    else:
+        add((), {})
+    return sets

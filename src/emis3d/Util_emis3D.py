@@ -21,28 +21,17 @@ from lmfit import minimize
 logger = logging.getLogger(__name__)
 
 
-def _get_observed_phi_loc(emission_dict: dict):
-    """
-    Return the toroidal observation angles from a synthetic_dict emission
-    entry. Newer radDists store these under 'observed_phi_loc'; older saved
-    radDists used the name 'scaleFactor'.
-    """
-    phi_loc = emission_dict.get("observed_phi_loc", emission_dict.get("scaleFactor"))
-    if phi_loc is None:
-        raise KeyError("synthetic_dict entry contains neither 'observed_phi_loc' nor the " "legacy 'scaleFactor' key")
-    return phi_loc
-
-
 def _as_channel_segments(rows) -> list:
     """
-    Normalize a per-bolometer-group list so that every channel entry is a 1D
-    float array of toroidal segments. Scalars (the legacy single-plane format)
-    are promoted to single-element arrays; empty channels become a single zero
-    segment so downstream per-channel reductions stay well-defined.
+    Every channel entry of a bolometer group as a 1D float array of toroidal
+    segments. Empty channels become a single zero segment so downstream
+    per-channel reductions stay well-defined.
     """
     out = []
     for chan in rows:
-        arr = np.atleast_1d(np.asarray(chan, dtype=float))
+        arr = np.asarray(chan, dtype=float)
+        if arr.ndim != 1:
+            raise ValueError("each channel must be a list of toroidal segments")
         if arr.size == 0:
             arr = np.zeros(1)
         out.append(arr)
@@ -307,9 +296,7 @@ def helical_endpoint_penalty(
 
     Returns an empty list (no constraint) when:
       * ``weight == 0``,
-      * no clockwise/counterClock pair is present (non-helical distribution),
-      * the radiated-power profile (``P_pol`` / ``phi_array``) was not threaded
-        into ``synthetic_dict`` (e.g. older saved radDists), or
+      * no clockwise/counterClock pair is present (non-helical distribution), or
       * the shared amplitude ``a_<tag>`` is absent.
 
     Notes
@@ -346,15 +333,12 @@ def helical_endpoint_penalty(
     for cw_name, ccw_name in pairs:
         endpoint_power = {}
         peak_Ppol = {}
-        usable = True
+        usable = True  # False if the scale definition gives no value
 
         for name in (cw_name, ccw_name):
-            sub = synthetic_dict.get(name, {})
-            phi_arr = np.asarray(sub.get("phi_array", []), dtype=float)
-            P_pol = np.asarray(sub.get("P_pol", []), dtype=float)
-            if phi_arr.size == 0 or P_pol.size == 0:
-                usable = False
-                break
+            sub = synthetic_dict[name]
+            phi_arr = np.asarray(sub["phi_array"], dtype=float)
+            P_pol = np.asarray(sub["P_pol"], dtype=float)
 
             b = params.get(f"b_{name}_{tag}", 0.0)
 
@@ -441,7 +425,7 @@ def residual(
     # --- Find the bolometer phi locations, combine to one large list
     bolo_phis = []
     for emissionName in synthetic_dict["emissionNames"]:
-        phi_loc = _get_observed_phi_loc(synthetic_dict[emissionName])
+        phi_loc = synthetic_dict[emissionName]["observed_phi_loc"]
         for group in phi_loc:
             for chan in group:
                 bolo_phis.extend(np.atleast_1d(chan).tolist())
@@ -459,13 +443,12 @@ def residual(
         # --- Loop over each bolometer group
         for ii in range(len(synthetic_dict[emissionName]["data"])):
 
-            # phi = np.array(synthetic_dict[emissionName]["scaleFactor"][ii])
 
             # --- Per-channel lists of toroidal observation segments. Each
             # channel holds one phi and one synthetic value per segment
             # (single-element lists for poloidal-fan cameras).
 
-            phi_segs = _as_channel_segments(_get_observed_phi_loc(synthetic_dict[emissionName])[ii])
+            phi_segs = _as_channel_segments(synthetic_dict[emissionName]["observed_phi_loc"][ii])
             synth_segs = _as_channel_segments(synthetic_dict[emissionName]["data"][ii])
 
             # --- Check to make sure lists are equal

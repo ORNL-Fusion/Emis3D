@@ -15,7 +15,7 @@ import os
 import numpy as np
 import pytest
 
-from emis3d.Globals import SUPPORTED_TOKAMAKS
+from emis3d.Globals import RADDIST_FORMAT, SUPPORTED_TOKAMAKS
 from emis3d.workspace import BUILTIN_MACHINES
 from emis3d.radDistFitting import RadDistFitting
 from emis3d.Util import find_max_nested_lists
@@ -78,6 +78,7 @@ def _minimal_raddist_json(
 
     data = {
         "info": {
+            "radDistFormat": RADDIST_FORMAT,
             "distType": distType,
             "emissionNames": [emission],
             "injectionLocation": 120.0,
@@ -274,23 +275,17 @@ class TestSaveRadDistConsolidation:
                 "saveRadDist" not in cls.__dict__
             ), f"{cls.__name__} still overrides saveRadDist — should use base class"
 
-    def test_helical_folder_suffix_uses_sigma_kernel(self):
-        """Helical._folder_suffix must use sigmaKernel, not rotationAngle."""
+    def test_helical_save_name_includes_sigma_kernel(self):
+        """Helical radDists that differ only in sigmaKernel must not share a file."""
         from emis3d.radDist import Helical
 
-        assert (
-            "_folder_suffix" in Helical.__dict__
-        ), "Helical must override _folder_suffix"
-        import inspect
+        assert "sigmaKernel" in dict(Helical.SAVE_KEYS)
 
-        src = inspect.getsource(Helical._folder_suffix)
-        assert "sigmaKernel" in src
+    def test_parametric_subclasses_use_the_base_naming(self):
+        """Parametric types list SAVE_KEYS; only simulation radDists override _save_names."""
+        from emis3d.radDist import HelicalRing, ElongatedRing, SquareTube, Helical, SimulationRadDist
 
-    def test_other_subclasses_use_base_folder_suffix(self):
-        """HelicalRing, ElongatedRing, SquareTube must use the base _folder_suffix."""
-        from emis3d.radDist import HelicalRing, ElongatedRing, SquareTube
-
-        for cls in (HelicalRing, ElongatedRing, SquareTube):
-            assert (
-                "_folder_suffix" not in cls.__dict__
-            ), f"{cls.__name__} should not override _folder_suffix"
+        for cls in (Helical, HelicalRing, ElongatedRing, SquareTube):
+            assert "_save_names" not in cls.__dict__, f"{cls.__name__} should use RadDist._save_names"
+            assert cls.SAVE_KEYS, f"{cls.__name__} must list its SAVE_KEYS"
+        assert "_save_names" in SimulationRadDist.__dict__

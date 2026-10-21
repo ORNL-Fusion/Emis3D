@@ -13,6 +13,7 @@ TODO: Update powerPerBin and uncomment it from the self.build()
 """
 
 import logging
+import os
 
 import numpy as np
 from cherab.tools.emitters import RadiationFunction
@@ -23,6 +24,7 @@ from raysect.core.math.random import seed as _raysect_seed
 import emis3d.Util_radDist as Util_radDist
 
 logger = logging.getLogger(__name__)
+from emis3d.Globals import RADDIST_FORMAT
 from emis3d.workspace import get_workspace
 from emis3d.Tokamak import Tokamak
 from emis3d.Util import (
@@ -42,8 +44,18 @@ import json
 from cherab.core.math.interpolators.interpolators3d import Interpolate3DLinear
 
 
+def _name_value(value) -> str:
+    """A parameter value as it appears in a file or folder name."""
+    if isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool):
+        return f"{float(value):g}"
+    return str(value).replace("/", "-").replace(" ", "")
+
+
 class RadDist(ABC):
     """Parent RadDist class."""
+
+    # --- (info key, label) pairs that make up the save folder name
+    SAVE_KEYS: tuple[tuple[str, str], ...] = ()
 
     def __init__(self, startR=2.96, startZ=0.0, config=None):
 
@@ -792,24 +804,38 @@ class RadDist(ABC):
         plt.show()
         return None
 
+    def _save_names(self) -> tuple[str, str]:
+        """
+        (folder, file) for saveRadDist. The folder is the distType followed by
+        every SAVE_KEYS parameter; the file is the start position to 0.1 mm.
+        """
+        parts = [str(self.info["distType"])]
+        for key, label in self.SAVE_KEYS:
+            if self.info.get(key) is not None:
+                parts.append(f"{label}_{_name_value(self.info[key])}")
+        folder = "_".join(parts)
+        file = f"R_{float(self.info['startR']):.4f}_z_{float(self.info['startZ']):.4f}.json"
+        return folder, file
+
     def saveRadDist(self) -> None:
-        """Save the radDist info and data to a JSON file."""
+        """
+        Save the radDist info and data to
+        <raddists>/<saveRunsDirectoryName>/<folder>/<file> (see _save_names).
+        The file is written under a temporary name and then renamed, so an
+        interrupted worker never leaves a half-written radDist.
+        """
+        self.info["radDistFormat"] = RADDIST_FORMAT
         toSave = {
             "info": convert_arrays_to_list(self.info),
             "data": convert_arrays_to_list(self.data),
         }
 
         folderName, saveFileName = self._save_names()
-
-        folderName = (
-            f"{self.info['distType']}_sigma_R_{self.info['sigma_R']}_sigma_z_{self.info['sigma_z']}"
-            # f"{self._folder_suffix()}"
-        )
-        saveFileName = f"R_{self.info['startR']:.2f}_z_{self.info['startZ']:.2f}.json"
         pathFileName = get_workspace().path("raddists", tokamak=self.info["tokamakName"]) / self.info["saveRunsDirectoryName"] / folderName
-        save_json(toSave, pathFileName, saveFileName)
-        str_ = f"radDist saved to:\n" f"  folder  : {pathFileName}\n" f"  filename: {saveFileName}"
-        logger.info("%s", str_)
+        tmpName = f".{saveFileName}.{os.getpid()}.tmp"
+        save_json(toSave, pathFileName, tmpName)
+        os.replace(pathFileName / tmpName, pathFileName / saveFileName)
+        logger.info("radDist saved to:\n  folder  : %s\n  filename: %s", pathFileName, saveFileName)
 
     @abstractmethod
     def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
@@ -833,6 +859,14 @@ class Helical(RadDist):
     setFieldLine    : bool      — Wether to trace the field lines on construction.
                                   Should be True in almost all cases
     """
+
+    SAVE_KEYS = (
+        ("sigma_R", "sigma_R"),
+        ("sigmaKernel", "kernel"),
+        ("numTransists", "transits"),
+        ("numFieldLines", "lines"),
+        ("startPhi", "phi"),
+    )
 
     def __init__(
         self,
@@ -865,9 +899,6 @@ class Helical(RadDist):
                 eqFileName=self.info["eqFileName"],
             )
             self.setFieldLine()
-
-    def _folder_suffix(self) -> str:
-        return f"_sigmaKernel{self.info['sigmaKernel']}"
 
     def setFieldLine(self) -> None:
         """
@@ -977,6 +1008,13 @@ class HelicalRing(RadDist):
     config          : dict      — dict of the configuration file.
     setFieldLine    : bool      — Trace the field line, should be true 99% of the time.
     """
+
+    SAVE_KEYS = (
+        ("sigma_R", "sigma_R"),
+        ("sigma_z", "sigma_z"),
+        ("numTransists", "transits"),
+        ("startPhi", "phi"),
+    )
 
     def __init__(
         self,
@@ -1112,6 +1150,8 @@ class ElongatedRing(RadDist):
     numBins :: The number of toroidal bins
     """
 
+    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("rotationAngle", "rot"))
+
     def __init__(
         self,
         startR=None,
@@ -1198,6 +1238,8 @@ class SquareTube(RadDist):
     foil.observe() functionality with a simple geometry and make sure that things are correct.
 
     """
+
+    SAVE_KEYS = (("dR", "dR"), ("dz", "dz"))
 
     def __init__(
         self,
@@ -1414,9 +1456,10 @@ class SimulationRadDist(RadDist):
 
         return []
 
-    def _save_names(self):
+    def _save_names(self) -> tuple[str, str]:
+        """(folder, file): one folder per simulation file, one file per timestep."""
         stem = Path(self.info["sourceFile"]).stem
-        return f"{self.info['distType']}_{stem}_t_{self.info['timestep']}.json"
+        return f"{self.info['distType']}_{stem}", f"t_{_name_value(self.info['timestep'])}.json"
 
 
 class NIMROD(SimulationRadDist):

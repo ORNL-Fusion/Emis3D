@@ -10,6 +10,7 @@ import numpy as np
 from lmfit import Parameters
 from emis3d.Util import load_json, convert_arrays_to_list, find_max_nested_lists
 from emis3d.Util_emis3D import loc_tag
+from emis3d.Globals import RADDIST_FORMAT
 
 
 class RadDistFitting:
@@ -36,6 +37,12 @@ class RadDistFitting:
         """
         try:
             temp = load_json(self.info["radDistPath"])
+            version = temp["info"].get("radDistFormat")
+            if version != RADDIST_FORMAT:
+                raise ValueError(
+                    f"saved in radDist format {version}, but this Emis3D reads format "
+                    f"{RADDIST_FORMAT}; regenerate it with make_radDists.py"
+                )
             self.data = temp["data"]
             self.info.update(temp["info"])
             self._load_ok = True
@@ -46,17 +53,13 @@ class RadDistFitting:
 
     @staticmethod
     def _as_segment_list(value) -> list:
-        """
-        Normalize a per-channel entry to a list of toroidal segments.
-
-        Older saved radDists stored a single float per channel (one toroidal
-        observation plane); newer radDists store a list with one entry per
-        toroidal segment of the observation. Scalars are promoted to
-        single-element lists so downstream code only sees lists.
-        """
-        if isinstance(value, (list, tuple)):
-            return list(value)
-        return [value]
+        """A channel entry: the list of its toroidal segments."""
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(
+                f"radDist channel entry {value!r} is not a list of toroidal segments; "
+                "regenerate the radDist with the current Emis3D"
+            )
+        return list(value)
 
     def _map_signals(self) -> None:
         """
@@ -74,19 +77,14 @@ class RadDistFitting:
             for val in ["observed_phi_loc", "data", "data_error"]:
                 self.data_maps[emissionName][val] = {}
 
-        # --- The toroidal observation angles; formerly saved as "scaleFactor"
-        phi_loc = self.data.get("observed_phi_loc", None)
-        if phi_loc is None:
-            raise KeyError("radDist data contains neither 'observed_phi_loc' key")
+        # --- The toroidal observation angles
+        phi_loc = self.data["observed_phi_loc"]
 
         # --- Loop over each signal
         for bolo_ in bolos:
             channels = self.data[units]["channelOrder"][bolo_]
 
             for emissionName in self.info["emissionNames"]:
-                # scale_ = self.data["scaleFactor"][emissionName][bolo_]
-                # map_scale = dict(zip(channels, scale_))
-
                 data_ = self.data[units][emissionName][bolo_]
                 phi_ = [self._as_segment_list(v) for v in phi_loc[emissionName][bolo_]]
                 map_phi = dict(zip(channels, phi_))

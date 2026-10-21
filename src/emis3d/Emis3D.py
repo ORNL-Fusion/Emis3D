@@ -652,13 +652,10 @@ class Emis3D:
             }
 
             # --- Toroidal radiated-power profile, used by the helical endpoint
-            # continuity constraint (Util_emis3D.helical_endpoint_penalty).
-            # Stored under 'phi_array'/'P_pol' on the radDist; absent for older
-            # saved radDists, in which case the constraint quietly turns off.
-            tor_power = radDist_.data.get("toroidalRadiatedPower", {})
-            if emissionName in tor_power:
-                synthetic_dict[emissionName]["phi_array"] = tor_power[emissionName].get("phi_array")
-                synthetic_dict[emissionName]["P_pol"] = tor_power[emissionName].get("P_pol")
+            # continuity constraint (Util_emis3D.helical_endpoint_penalty)
+            tor_power = radDist_.data["toroidalRadiatedPower"][emissionName]
+            synthetic_dict[emissionName]["phi_array"] = tor_power["phi_array"]
+            synthetic_dict[emissionName]["P_pol"] = tor_power["P_pol"]
 
         return synthetic_dict
 

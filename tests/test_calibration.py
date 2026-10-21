@@ -16,6 +16,7 @@ import yaml
 
 from emis3d import cli
 from emis3d.calibration import camera_amplitude, cross_calibrate, parse_times
+from emis3d.Globals import RADDIST_FORMAT
 from emis3d.run_config import RunConfig
 from emis3d.workspace import BUILTIN_MACHINES
 
@@ -44,16 +45,18 @@ def write_workspace(root, miscal=MISCAL, drift=None, scaling=None, loc_dependent
     rd_dir = root / "raddists" / "MOCK" / "ring"
     rd_dir.mkdir(parents=True)
     for i in range(3):
+        phi = np.linspace(0, 2 * np.pi, 100, endpoint=False)
         data = {"Brightness": {"channelOrder": {}, "elongatedRing": {}},
-                "Brightness_error": {"elongatedRing": {}}, "observed_phi_loc": {"elongatedRing": {}}}
+                "Brightness_error": {"elongatedRing": {}}, "observed_phi_loc": {"elongatedRing": {}},
+                "toroidalRadiatedPower": {"elongatedRing": {"phi_array": phi.tolist(), "P_pol": [1.0] * 100}}}
         for g, cam in enumerate(CAMS):
             tags, phi = cam_info(cam)
             data["Brightness"]["channelOrder"][cam] = tags
             data["Brightness"]["elongatedRing"][cam] = [[float(v)] for v in shape(i, g, len(tags))]
             data["Brightness_error"]["elongatedRing"][cam] = [[0.0]] * len(tags)
             data["observed_phi_loc"]["elongatedRing"][cam] = [[float(phi)]] * len(tags)
-        info = {"units": "Brightness", "emissionNames": ["elongatedRing"], "injectionLocation": 0.0,
-                "distType": "elongatedRing", "tokamakName": "MOCK"}
+        info = {"radDistFormat": RADDIST_FORMAT, "units": "Brightness", "emissionNames": ["elongatedRing"],
+                "injectionLocation": 0.0, "distType": "elongatedRing", "tokamakName": "MOCK"}
         (rd_dir / f"R_{i}.json").write_text(json.dumps({"info": info, "data": data}))
 
     rng = np.random.default_rng(0)
@@ -181,11 +184,11 @@ def test_parse_times():
         parse_times(["1:2"])
 
 
-def test_crosscalib_flag_is_retired():
+def test_crosscalib_flag_is_gone():
+    """crossCalib is no longer a run-config option; cross-calibrate with `emis3d calibrate`."""
     base = {"BOLOMETERS": {}, "shot": 1, "radDistDirectories_LocIndependent": ["x"]}
-    assert RunConfig.from_dict({**base, "crossCalib": False}).crossCalib is False   # old configs still load
-    with pytest.raises(ValueError, match="emis3d calibrate"):
-        RunConfig.from_dict({**base, "crossCalib": True})
+    with pytest.raises(ValueError, match="crossCalib"):
+        RunConfig.from_dict({**base, "crossCalib": False})
 
 
 def test_residual_rejects_the_old_bolometer_names_argument():
