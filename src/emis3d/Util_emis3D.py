@@ -29,10 +29,7 @@ def _get_observed_phi_loc(emission_dict: dict):
     """
     phi_loc = emission_dict.get("observed_phi_loc", emission_dict.get("scaleFactor"))
     if phi_loc is None:
-        raise KeyError(
-            "synthetic_dict entry contains neither 'observed_phi_loc' nor the "
-            "legacy 'scaleFactor' key"
-        )
+        raise KeyError("synthetic_dict entry contains neither 'observed_phi_loc' nor the " "legacy 'scaleFactor' key")
     return phi_loc
 
 
@@ -91,9 +88,7 @@ def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.
     the bolometer locations.
     """
     A_arr = np.concatenate((A, A, A))
-    bolo_phis = np.concatenate(
-        (bolo_phi_locs, bolo_phi_locs + (2 * np.pi), bolo_phi_locs - (2 * np.pi))
-    )
+    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs + (2 * np.pi), bolo_phi_locs - (2 * np.pi)))
 
     amplitudes = np.zeros(shape=phi.shape)
     bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
@@ -134,9 +129,7 @@ def scale_wrapper(
     """
 
     if phi is None and dphi is None:
-        raise ValueError(
-            "Phi or dphi array must be populated when calling scale_wrapper!"
-        )
+        raise ValueError("Phi or dphi array must be populated when calling scale_wrapper!")
 
     # --- Find dphi
     if dphi is None and phi is not None:
@@ -159,9 +152,7 @@ def scale_wrapper(
         if bolo_phi_locs is not None:
             return scale_step(A=np.array([a, b]), phi=phi, bolo_phi_locs=bolo_phi_locs)
         else:
-            print(
-                f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def"
-            )
+            print(f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def")
             return np.zeros(len(dphi))
     else:
         return np.ones(dphi.shape[0])
@@ -319,7 +310,7 @@ def helical_endpoint_penalty(
       * no clockwise/counterClock pair is present (non-helical distribution),
       * the radiated-power profile (``P_pol`` / ``phi_array``) was not threaded
         into ``synthetic_dict`` (e.g. older saved radDists), or
-      * the shared amplitude ``a_<tag>`` is absent (cross-calibration fits).
+      * the shared amplitude ``a_<tag>`` is absent.
 
     Notes
     -----
@@ -341,7 +332,6 @@ def helical_endpoint_penalty(
 
     a_name = f"a_{tag}"
     if a_name not in params:
-        # cross-calibration mode has no shared amplitude; nothing to tie together
         return []
     a = params[a_name]
 
@@ -409,7 +399,7 @@ def residual(
     data_dict,
     synthetic_dict,
     scale_def: str | None = None,
-    boloNames=None,
+    boloNames=None,  # removed feature; kept so positional calls still line up
     residual: bool = True,
     helical_endpoint_weight: float = 0.0,
 ):
@@ -427,6 +417,13 @@ def residual(
     distributions together at the helix endpoint; see
     :func:`helical_endpoint_penalty`. A weight of 0 disables the constraint.
     """
+
+    if boloNames is not None:
+        raise TypeError(
+            "residual(): cross-calibration was moved out of the fit; use "
+            "emis3d.calibration.cross_calibrate (`emis3d calibrate`). Pass None "
+            "for the boloNames slot, which is kept only for positional compatibility."
+        )
 
     a = 0.0
     b = 0.0
@@ -456,18 +453,11 @@ def residual(
 
         data[emissionName] = {}
         tag = loc_tag(synthetic_dict["injectionLocation"])
-        # --- Get the new scale factor for the normal runs
-        if boloNames is None:
-            a = params[f"a_{tag}"]
-            b = params[f"b_{emissionName}_{tag}"]
+        a = params[f"a_{tag}"]
+        b = params[f"b_{emissionName}_{tag}"]
 
         # --- Loop over each bolometer group
         for ii in range(len(synthetic_dict[emissionName]["data"])):
-
-            # --- Different parameter names when doing the cross-calibration
-            if boloNames is not None:
-                a = params[f"{boloNames[ii]}"]
-                b = 0.0
 
             # phi = np.array(synthetic_dict[emissionName]["scaleFactor"][ii])
 
@@ -475,26 +465,16 @@ def residual(
             # channel holds one phi and one synthetic value per segment
             # (single-element lists for poloidal-fan cameras).
 
-            phi_segs = _as_channel_segments(
-                _get_observed_phi_loc(synthetic_dict[emissionName])[ii]
-            )
+            phi_segs = _as_channel_segments(_get_observed_phi_loc(synthetic_dict[emissionName])[ii])
             synth_segs = _as_channel_segments(synthetic_dict[emissionName]["data"][ii])
 
             # --- Check to make sure lists are equal
             if len(phi_segs) != len(synth_segs):
-                raise RuntimeError(
-                    f"observed_phi_loc and data have different channel counts "
-                    f"({len(phi_segs)} vs {len(synth_segs)}) for "
-                    f"'{emissionName}', bolometer group {ii}"
-                )
+                raise RuntimeError(f"observed_phi_loc and data have different channel counts " f"({len(phi_segs)} vs {len(synth_segs)}) for " f"'{emissionName}', bolometer group {ii}")
 
             for jj, (p_, s_) in enumerate(zip(phi_segs, synth_segs)):
                 if len(p_) != len(s_):
-                    raise RuntimeError(
-                        f"Channel {jj} of '{emissionName}', bolometer group "
-                        f"{ii} has {len(p_)} observed_phi_loc segments but "
-                        f"{len(s_)} data segments"
-                    )
+                    raise RuntimeError(f"Channel {jj} of '{emissionName}', bolometer group " f"{ii} has {len(p_)} observed_phi_loc segments but " f"{len(s_)} data segments")
 
             phi_flat = np.concatenate(phi_segs)
             synth_flat = np.concatenate(synth_segs)
@@ -563,7 +543,6 @@ def residual(
 
 def runParallel(job):
     """Thin wrapper around residual minimization for use with ProcessPoolExecutor."""
-    boloNames = None
     res_ = True
     fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight = job
 
@@ -574,7 +553,7 @@ def runParallel(job):
             data_dict,
             synth_dict,
             scale_def,
-            boloNames,
+            None,  # no longer used (cross-calibration moved to emis3d.calibration)
             res_,
             helical_endpoint_weight,
         ),

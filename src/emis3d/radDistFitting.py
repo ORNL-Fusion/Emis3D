@@ -180,7 +180,6 @@ class RadDistFitting:
 
     def create_parameters(
         self,
-        boloNames: list | None = None,
         enable_dphi_scaling: bool = False,
         vary_peak_rad_location: bool = False,
         scale_def: str = "",
@@ -192,21 +191,12 @@ class RadDistFitting:
         self.fitSynthetic["params"]["paramName"] = []
         params = Parameters()
 
-        # --- Create parameters for the normal fitting case
-        if boloNames is None:
-            # --- Create constant multiplication value
-            paramName = f"a_{loc_tag(self.info['injectionLocation'])}"
-            self.fitSynthetic["params"]["paramName"].append(paramName)
-            # Start at 1 (model peak = data peak); allow scaling down for
-            # multi-component radDists and up for strong toroidal decay
-            params.add(paramName, value=1.0, min=0.05, max=20.0)
-
-        # --- Only create the constant value for each bolometer if preforming a cross-calib
-        else:
-            for bolo_ in boloNames:
-                paramName = f"{bolo_}"
-                self.fitSynthetic["params"]["paramName"].append(paramName)
-                params.add(paramName, value=0.3, min=0)
+        # --- Constant multiplication value
+        paramName = f"a_{loc_tag(self.info['injectionLocation'])}"
+        self.fitSynthetic["params"]["paramName"].append(paramName)
+        # Start at 1 (model peak = data peak); allow scaling down for
+        # multi-component radDists and up for strong toroidal decay
+        params.add(paramName, value=1.0, min=0.05, max=20.0)
 
         # --- Create a peak radiation variable if vary_peak_rad_location is True:
         if vary_peak_rad_location:

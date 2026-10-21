@@ -67,7 +67,7 @@ if __name__ == "__main__":
     t = Emis3D(tokamakName=tokamakName, runConfigName=runConfigName, verbose=verbose)
 
     for evalTime in evalTimes:
-        t._prepare_fits(evalTime=evalTime, crossCalib=False)
+        t._prepare_fits(evalTime=evalTime)
 
         jobs = []
         data_dict = t.fitData[evalTime]

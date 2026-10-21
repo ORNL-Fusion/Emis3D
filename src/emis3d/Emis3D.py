@@ -51,7 +51,7 @@ REMINDERS:
 in order to scale them relative to each other. Then you should load the processed data in this program.
 3. This program uses a right-handed coordinate system (positive phi in counter-clockwise direction when looking down).
 So you need to offset your angles by 360 - x from DIII-D coordinates.
-4. crossCalib Flag set to True should only be used to find cross-calibration factors between bolometers for a specific shot.
+4. Cross-calibration between cameras is a separate tool: `emis3d calibrate` (emis3d.calibration).
 This is typically done during the current quench, when the radiation is assumed to be axisymmetric. The flag allows for each
 bolometer to have indpendent scaling factors, see the example on how to cross-calibrate uncalibrated bolometers.
 
@@ -174,25 +174,23 @@ class Emis3D:
         self._load_radDists()
         self._prune_channel_order_to_radDists()
 
-    def _perform_fits(self, evalTime: float, crossCalib: bool = False) -> None:
+    def _perform_fits(self, evalTime: float) -> None:
         """
         Prepares the data, preforms the fits
 
         Parameters
         ----------
         evalTime   : Time to run the fit
-        crossCalib : Flag to tell the program to find the calibration
-                     factor between bolometers during the CQ
         """
 
         # Added a bunch of timing flags, to see where improvement can be made
-        self._prepare_fits(evalTime=evalTime, crossCalib=crossCalib)
+        self._prepare_fits(evalTime=evalTime)
         t_start = time.time()
 
-        self._minimize_radDists(evalTime=evalTime, crossCalib=crossCalib)
+        self._minimize_radDists(evalTime=evalTime)
         logger.info(f"→ Fitting done in {time.time() - t_start:.2f} seconds")
         t_start = time.time()
-        self._post_process_fit_arrangement(evalTime=evalTime, crossCalib=crossCalib)
+        self._post_process_fit_arrangement(evalTime=evalTime)
 
         logger.info(f"→ Done with fit post-processing step 1 out of 2 in {time.time() - t_start:.2f} seconds")
         t_start = time.time()
@@ -567,7 +565,7 @@ class Emis3D:
         if self.verbose:
             logger.debug("→ Observed data prepared for fitting")
 
-    def _prepare_synthetic_for_fits(self, evalTime: float, crossCalib: bool = False) -> None:
+    def _prepare_synthetic_for_fits(self, evalTime: float) -> None:
         """Prepare and parameterise every radDist for the minimization."""
 
         print_minor_error = True
@@ -586,8 +584,6 @@ class Emis3D:
 
         if self.info is not None:
 
-            boloNames = self.channel_order["bolometer_order"] if crossCalib else None
-
             # --- Arrange and create parameters for the location dependent data
             for loc in self.data["synthetic"]["locDependent"]:
                 for number_ in self.data["synthetic"]["locDependent"][loc]:
@@ -598,7 +594,6 @@ class Emis3D:
                     )
 
                     radD.create_parameters(
-                        boloNames=boloNames,
                         enable_dphi_scaling=self.info["enable_dphi_scaling"],
                         vary_peak_rad_location=self.info["vary_peak_rad_location"],
                         scale_def=self.info["scale_def"],
@@ -612,7 +607,6 @@ class Emis3D:
                 radD = self.data["synthetic"]["locIndependent"][number_]
                 radD.prepare_for_fits(self.channel_order["channel_list"], data_max=max_data_val)
                 radD.create_parameters(
-                    boloNames=boloNames,
                     enable_dphi_scaling=self.info["enable_dphi_scaling"],
                     vary_peak_rad_location=self.info["vary_peak_rad_location"],
                     scale_def=self.info["scale_def"],
@@ -668,7 +662,7 @@ class Emis3D:
 
         return synthetic_dict
 
-    def _prepare_fits(self, evalTime: float, crossCalib: bool = False) -> None:
+    def _prepare_fits(self, evalTime: float) -> None:
         """
         Organise data and synthetic signals into self.fits[evalTime] in
         preparation for _minimize_radDists.
@@ -678,7 +672,7 @@ class Emis3D:
             logger.debug("→ Preparing data for fitting")
 
         self._prepare_data_for_fit(evalTime=evalTime)
-        self._prepare_synthetic_for_fits(evalTime=evalTime, crossCalib=crossCalib)
+        self._prepare_synthetic_for_fits(evalTime=evalTime)
 
         if self.verbose:
             logger.debug("→ Arranging radDists for fitting")
@@ -734,7 +728,7 @@ class Emis3D:
     # Minimization
     # ------------------------------------------------------------------
 
-    def _minimize_radDists(self, evalTime: float, crossCalib: bool = False) -> None:
+    def _minimize_radDists(self, evalTime: float) -> None:
         """
         Run leastsq minimization for every fit candidate stored in
         self.fits[evalTime].
@@ -760,11 +754,6 @@ class Emis3D:
                 pars = self.fits[evalTime][ii]["parameters"]
 
                 try:
-                    boloNames = None
-                    # --- Include bolometer names if doing a cross-calibration
-                    if crossCalib and (self.channel_order is not None and "bolometer_order" in self.channel_order):
-                        boloNames = self.channel_order["bolometer_order"]
-
                     self.fits[evalTime][ii]["fit"] = minimize(
                         Util_emis3D.residual,
                         pars,
@@ -772,7 +761,7 @@ class Emis3D:
                             data_dict,
                             synth_dict,
                             self.info["scale_def"],
-                            boloNames,
+                            None,  # no longer used (cross-calibration moved to emis3d.calibration)
                             True,  # residual = True
                             helical_endpoint_weight,
                         ),
@@ -786,7 +775,7 @@ class Emis3D:
                             data_dict,
                             synth_dict,
                             self.info["scale_def"],
-                            boloNames,
+                            None,  # no longer used (cross-calibration moved to emis3d.calibration)
                             True,  # residual = True
                             helical_endpoint_weight,
                         ),
@@ -800,7 +789,7 @@ class Emis3D:
                             data_dict,
                             synth_dict,
                             self.info["scale_def"],
-                            boloNames,
+                            None,  # no longer used (cross-calibration moved to emis3d.calibration)
                             True,  # residual = True
                             helical_endpoint_weight,
                         ),
@@ -891,7 +880,7 @@ class Emis3D:
 
         return radDist_
 
-    def _post_process_fit_arrangement(self, evalTime: float, crossCalib: bool = False) -> None:
+    def _post_process_fit_arrangement(self, evalTime: float) -> None:
         """Identify the best fit and reorganise synthetic data by bolometer."""
 
         # --- Find the best fit
@@ -909,17 +898,12 @@ class Emis3D:
         self.bestFits[evalTime] = self.fits[evalTime][bestFitID]
         self.bestFits[evalTime]["bestFitID"] = bestFitID
 
-        boloNames = None
-        if crossCalib and (self.channel_order is not None and "bolometer_order" in self.channel_order):
-            boloNames = self.channel_order["bolometer_order"]
-
         # --- First multiply the synthetic data by the fit parameters
         data_ = Util_emis3D.residual(
             self.bestFits[evalTime]["fit"].params,
             None,
             self.bestFits[evalTime]["synthetic_dict"],
             self.info["scale_def"],
-            boloNames=boloNames,
             residual=False,
         )
 

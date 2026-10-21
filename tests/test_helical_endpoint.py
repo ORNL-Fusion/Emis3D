@@ -117,7 +117,7 @@ class TestEndpointPenalty:
         )
         assert abs(pen[0]) > 1e-3
 
-    def test_cross_calib_no_shared_amplitude(self):
+    def test_no_shared_amplitude_no_penalty(self):
         # no a_<tag> -> nothing to tie together
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
         p = Parameters()

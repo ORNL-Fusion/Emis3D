@@ -6,6 +6,8 @@ The ``emis3d`` command.
     emis3d paths [--config RUN] [--workspace DIR] [--tokamak T] [--shot N]
     emis3d machines [--workspace DIR]      list machines on the search path
     emis3d selftest [--keep DIR]           run the whole pipeline on the MOCK machine
+    emis3d calibrate RUN --times T [T ...] [--reference CAMERA] [--output FILE]
+                                           cross-calibrate cameras (emis3d.calibration)
 """
 
 from __future__ import annotations
@@ -148,6 +150,23 @@ def cmd_selftest(args) -> int:
     return 0
 
 
+def cmd_calibrate(args) -> int:
+    from emis3d.calibration import cross_calibrate, parse_times
+
+    result = cross_calibrate(
+        args.config, parse_times(args.times), reference=args.reference, workspace=args.workspace
+    )
+    print()
+    print(result.table())
+    block = result.yaml_block()
+    print()
+    print(block)
+    if args.output:
+        Path(args.output).expanduser().write_text(block)
+        print(f"Written to {args.output}")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="emis3d", description="Emis3D command-line tools")
     sub = p.add_subparsers(dest="command", required=True)
@@ -174,6 +193,15 @@ def main(argv=None) -> int:
     ps.add_argument("--keep", help="folder to keep the self-test workspace in (default: temporary)")
     ps.add_argument("--pixel-samples", type=int, default=50)
     ps.set_defaults(func=cmd_selftest)
+
+    pc = sub.add_parser("calibrate", help="cross-calibrate cameras against an axisymmetric radDist")
+    pc.add_argument("config", help="run config whose radDist folders hold axisymmetric radDists")
+    pc.add_argument("--times", nargs="+", required=True,
+                    help="evaluation times, e.g. 2124 or 2120:2128:0.5 (start:stop:step, inclusive)")
+    pc.add_argument("--reference", help="camera the others are scaled to (default: largest amplitude)")
+    pc.add_argument("--workspace")
+    pc.add_argument("--output", help="also write the BOLOMETERS block to this file")
+    pc.set_defaults(func=cmd_calibrate)
 
     args = p.parse_args(argv)
     try:
