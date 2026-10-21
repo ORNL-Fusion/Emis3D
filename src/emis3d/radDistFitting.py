@@ -175,9 +175,11 @@ class RadDistFitting:
         enable_dphi_scaling: bool = False,
         vary_peak_rad_location: bool = False,
         scale_def: str = "",
+        peak_shift_max_degrees: float = 180.0,
     ) -> None:
         """
-        Creates the LMFIT parameters for the radDist
+        Creates the LMFIT parameters for the radDist. peak_shift_max_degrees
+        limits how far a fitted peak may move from the injector (run config).
         """
         self.fitSynthetic["params"] = {}
         self.fitSynthetic["params"]["paramName"] = []
@@ -193,8 +195,8 @@ class RadDistFitting:
         # --- Create a peak radiation variable if vary_peak_rad_location is True:
         if vary_peak_rad_location:
             two_pi = 2.0 * np.pi
-            mu0 = np.deg2rad(int(self.info["injectionLocation"])) % two_pi
-            window = np.deg2rad(float(self.info.get("peak_shift_max_deg", 180.0)))
+            mu0 = np.deg2rad(float(self.info["injectionLocation"])) % two_pi
+            window = np.deg2rad(float(peak_shift_max_degrees))
             params.add("injector_phi", value=mu0, vary=False)
             params.add("peak_shift", value=0.0, min=-window, max=window)
             params.add("peak_rad_loc", expr="(injector_phi + peak_shift) % (2*pi)")

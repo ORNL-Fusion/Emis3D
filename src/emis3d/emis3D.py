@@ -625,6 +625,7 @@ class Emis3D:
                         enable_dphi_scaling=self.info["enable_dphi_scaling"],
                         vary_peak_rad_location=self.info["vary_peak_rad_location"],
                         scale_def=self.info["scale_def"],
+                        peak_shift_max_degrees=self.info["peak_shift_max_degrees"],
                     )
                     if "ERROR CHANNELS" in radD.info and print_minor_error:
                         print_error(radD)
@@ -638,6 +639,7 @@ class Emis3D:
                     enable_dphi_scaling=self.info["enable_dphi_scaling"],
                     vary_peak_rad_location=self.info["vary_peak_rad_location"],
                     scale_def=self.info["scale_def"],
+                    peak_shift_max_degrees=self.info["peak_shift_max_degrees"],
                 )
 
                 if "ERROR CHANNELS" in radD.info and print_minor_error:

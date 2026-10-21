@@ -1,5 +1,13 @@
 # emis3d/run_config.py
-"""Loads and verifys the run configuration file loaded"""
+"""
+Run configuration: loads and validates the YAML file that describes one
+Emis3D analysis (which data, which radDists, how to fit them).
+
+Every key in the file must be a field below; unknown keys are an error, so a
+typo cannot silently fall back to a default. Angles are in degrees, times in
+the units of the measurement files. File paths are relative to the
+workspace locations shown by `emis3d paths`.
+"""
 
 from dataclasses import dataclass, field, fields
 from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS
@@ -7,33 +15,44 @@ from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS
 
 @dataclass
 class RunConfig:
-    BOLOMETERS: dict
-    shot: int
-    tokamakName: str | None = None
-    radDistDirectories_LocIndependent: list = field(default_factory=list)
-    radDistDirectories_LocDependent: list = field(default_factory=list)
-    injectionLocation: float = 0.0
-    tstart: float | None = None
-    tend: float | None = None
-    Nt: int | None = None
-    dt: float | None = None
-    scale_def: str = "linear"
-    # --- Channel errors (Util_emis3D.channel_error). floor_relative:
+    # --- What is being analysed
+    BOLOMETERS: dict  # cameras to fit: name -> {dataFileName, scalingFactor (default 1), badChannels (default [])}
+    shot: int  # shot number; also used in result file names and path templates
+    tokamakName: str | None = None  # machine, e.g. "JET"; selects machines/, measurements/, raddists/, equilibria/
+
+    # --- Candidate radiation distributions, folders relative to <raddists>/<tokamak>
+    radDistDirectories_LocIndependent: list = field(default_factory=list)  # e.g. elongated rings
+    radDistDirectories_LocDependent: list = field(default_factory=list)  # e.g. helical; combined per injector
+    injectionLocation: float = 0.0  # injector angle [deg]; must match the radDists' (the fit uses theirs; plots use this)
+
+    # --- Times
+    tstart: float | None = None  # start of the analysis window (for reference; times are passed to _perform_fits)
+    tend: float | None = None  # end of the analysis window (for reference)
+    Nt: int | None = None  # number of times in the window (for reference)
+    dt: float | None = None  # averaging half-width: data are averaged over [t - dt, t + dt]
+
+    # --- Toroidal shape of the radiation (how emission falls off away from the injector)
+    scale_def: str = "linear"  # "linear", "exponential", "constant" or "step"
+    enable_dphi_scaling: bool = True  # fit the fall-off (b); False keeps b fixed and fits only the amplitude
+    vary_peak_rad_location: bool = False  # True fits the peak's toroidal location instead of fixing it at the injector
+    peak_shift_max_degrees: float = 180.0  # how far the fitted peak may move from the injector [deg]
+    helical_endpoint_weight: float = 1.0  # ties clockwise/counterclockwise helical endpoints; 0 = off; helical only
+
+    # --- Channel errors (util_emis3D.channel_error). floor_relative:
     # sigma^2 = (error_floor * peak)^2 + (error_relative * signal)^2, with the
     # floor raised per channel to the noise measured in noise_window, if given
-    error_definition: str = "floor_relative"
-    error_floor: float = 0.05  # fraction of the peak signal
-    error_relative: float = 0.05  # fraction of each channel's signal
+    error_definition: str = "floor_relative"  # or "constant", "poisson", "exponential"
+    error_floor: float = 0.05  # additive error, as a fraction of the peak signal
+    error_relative: float = 0.05  # relative error, as a fraction of each channel's signal
     noise_window: list | None = None  # [t_start, t_end], a quiet period before the event
-    fit_method: str = "least_squares"  # or "differential_evolution" (global, slower)
-    enable_dphi_scaling: bool = True
-    vary_peak_rad_location: bool = False
-    peak_shift_max_degrees: float = 180.0  # How far the injector can stray from the starting location
-    helical_endpoint_weight: float = 1.0
-    numProcessorsFitting: int = 1
-    paths: dict = field(default_factory=dict)
-    # Ranges for TPF and other derived quantities (emis3d.uncertainty.UncertaintyConfig)
-    uncertainty: dict = field(default_factory=dict)
+
+    # --- Fitting
+    fit_method: str = "least_squares"  # or "differential_evolution" (global, slower; for a fitted peak location)
+    numProcessorsFitting: int = 1  # parallel fits in scripts/run_emis3D.py
+
+    # --- Optional blocks
+    paths: dict = field(default_factory=dict)  # override workspace locations for this run (see emis3d.workspace)
+    uncertainty: dict = field(default_factory=dict)  # TPF and other ranges (see emis3d.uncertainty.UncertaintyConfig)
 
     def __post_init__(self):
         # Check for valid scale definitions

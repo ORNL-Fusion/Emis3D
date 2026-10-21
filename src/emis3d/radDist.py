@@ -62,7 +62,8 @@ class RadDist(ABC):
         self.info = dict(config) if config else {}
         self.info["startR"] = startR
         self.info["startZ"] = startZ
-        self.info["integrationStep"] = 0.01  # Default integration step it set a bit smaller, cherab default: 0.1m
+        # Ray-integration step [m] (a config value wins; Cherab's default is 0.1 m)
+        self.info.setdefault("integrationStep", 0.01)
 
         if "injectionLocation" in self.info:
             self.info["startPhi"] = self.info["injectionLocation"]
@@ -326,7 +327,9 @@ class RadDist(ABC):
         self.data = {}
         self.data["toroidalRadiatedPower"] = {}
         for emissionName in self.info["emissionNames"]:
-            self.data["toroidalRadiatedPower"][emissionName] = self._total_radiated_power(emissionName=emissionName)
+            self.data["toroidalRadiatedPower"][emissionName] = self._total_radiated_power(
+                emissionName=emissionName, n_phi=int(self.info.get("numBins", 100))
+            )
 
     def power_per_bin_calc(self, Errfrac: float = 0.01, Pointsupdate: int = int(1e5)) -> None:
         """
