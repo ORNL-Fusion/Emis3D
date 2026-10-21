@@ -10,6 +10,8 @@ workspace locations shown by `emis3d paths`.
 """
 
 from dataclasses import dataclass, field, fields
+
+import numpy as np
 from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS
 
 
@@ -25,10 +27,11 @@ class RunConfig:
     radDistDirectories_LocDependent: list = field(default_factory=list)  # e.g. helical; combined per injector
     injectionLocation: float = 0.0  # injector angle [deg]; must match the radDists' (the fit uses theirs; plots use this)
 
-    # --- Times
-    tstart: float | None = None  # start of the analysis window (for reference; times are passed to _perform_fits)
-    tend: float | None = None  # end of the analysis window (for reference)
-    Nt: int | None = None  # number of times in the window (for reference)
+    # --- Times: Nt evenly spaced evaluation times from tstart to tend, inclusive
+    # (see eval_times; tstart alone, or tend == tstart, gives one time)
+    tstart: float | None = None  # first evaluation time, in the units of the measurement files
+    tend: float | None = None  # last evaluation time (default: tstart)
+    Nt: int | None = None  # number of evaluation times from tstart to tend (default: 1)
     dt: float | None = None  # averaging half-width: data are averaged over [t - dt, t + dt]
 
     # --- Toroidal shape of the radiation (how emission falls off away from the injector)
@@ -85,9 +88,31 @@ class RunConfig:
         unknown_cams = set(unc.calibration) - set(self.BOLOMETERS)
         if unknown_cams:
             raise ValueError(f"uncertainty.calibration lists cameras not in BOLOMETERS: {sorted(unknown_cams)}")
+        # --- Evaluation times
+        if self.tstart is None and (self.tend is not None or self.Nt is not None):
+            raise ValueError("tend and Nt need tstart")
+        if self.tstart is not None and self.tend is not None and self.tend < self.tstart:
+            raise ValueError(f"tend ({self.tend}) is before tstart ({self.tstart})")
+        if self.Nt is not None and (int(self.Nt) != self.Nt or self.Nt < 1):
+            raise ValueError(f"Nt must be a whole number >= 1, got {self.Nt}")
         # Check if the radDist directories are listed
         if not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
             raise ValueError("No radDist directories configured")
+
+    def eval_times(self) -> list[float]:
+        """
+        Evaluation times from tstart, tend and Nt: Nt evenly spaced times from
+        tstart to tend, inclusive. tstart alone, or tend == tstart, gives one
+        time (whatever Nt is). Times are rounded to 1e-9 so they can be used as
+        dictionary keys (run.bestFits[50.951]). Empty if tstart is not set.
+        """
+        if self.tstart is None:
+            return []
+        tend = self.tstart if self.tend is None else self.tend
+        if tend == self.tstart:
+            return [float(self.tstart)]
+        n = int(self.Nt) if self.Nt is not None else 1
+        return [float(t) for t in np.round(np.linspace(self.tstart, tend, n), 9)]
 
     @classmethod
     def from_dict(cls, d: dict) -> "RunConfig":

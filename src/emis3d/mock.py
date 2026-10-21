@@ -286,7 +286,7 @@ def selftest(workdir: str | Path | None = None, pixel_samples: int = 50, verbose
 
     run = ws_dir / "runs/selftest/run.yaml"
     run.write_text(yaml.safe_dump({
-        "tokamakName": NAME, "shot": 1, "dt": 0.2, "injectionLocation": inj,
+        "tokamakName": NAME, "shot": 1, "tstart": 10.0, "dt": 0.2, "injectionLocation": inj,
         "radDistDirectories_LocIndependent": ["ring"], "radDistDirectories_LocDependent": [],
         "BOLOMETERS": bolos, "scale_def": "exponential",
         "enable_dphi_scaling": True, "vary_peak_rad_location": False,
@@ -295,7 +295,7 @@ def selftest(workdir: str | Path | None = None, pixel_samples: int = 50, verbose
     say("fitting")
     np.random.seed(0)
     e = Emis3D(runConfigName=str(run), workspace=ws)
-    e._perform_fits(evalTime=10.0)
+    assert e._perform_fits() == [10.0]  # times from the run config
     e._save_bestFits()
     best = e.bestFits[10.0]
     tag = Util_emis3D.loc_tag(inj)

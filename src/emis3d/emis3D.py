@@ -85,7 +85,7 @@ import dill
 import yaml
 import numpy as np
 import matplotlib.pyplot as plt
-from lmfit import minimize, report_fit
+from lmfit import report_fit
 
 import emis3d.util_emis3D as Util_emis3D
 import emis3d.uncertainty as uncertainty
@@ -173,31 +173,52 @@ class Emis3D:
         self._load_radDists()
         self._prune_channel_order_to_radDists()
 
-    def _perform_fits(self, evalTime: float) -> None:
-        """
-        Prepares the data, preforms the fits
+    def eval_times(self) -> list[float]:
+        """Evaluation times from the run config's tstart, tend and Nt (RunConfig.eval_times)."""
+        config = getattr(self, "config", None)
+        return config.eval_times() if config is not None else []
 
-        Parameters
-        ----------
-        evalTime   : Time to run the fit
+    def _perform_fits(self, evalTime: float | None = None, cleanup: bool | None = None) -> list[float]:
         """
+        Prepare the data, fit every radDist and post-process (best fit,
+        profile, TPF, ranges).
 
-        # Added a bunch of timing flags, to see where improvement can be made
-        self._prepare_fits(evalTime=evalTime)
+        evalTime : one time; by default every time from the run config
+                   (tstart, tend, Nt; see eval_times)
+        cleanup  : after each time, keep only the best fit's candidate
+                   (_cleanup_fits) to free memory. Default: on when looping
+                   over the config's times, off for a single evalTime.
+
+        Returns the times fitted.
+        """
+        if evalTime is not None:
+            self._perform_fit(float(evalTime), cleanup=bool(cleanup))
+            return [float(evalTime)]
+
+        times = self.eval_times()
+        if not times:
+            raise ValueError("No evaluation times: set tstart (and tend, Nt) in the run config, or pass evalTime")
+        for k, t in enumerate(times, start=1):
+            logger.info("→ Time %d of %d: %s", k, len(times), t)
+            self._perform_fit(t, cleanup=True if cleanup is None else cleanup)
+        return times
+
+    def _perform_fit(self, evalTime: float, cleanup: bool = False) -> None:
+        """Prepare, fit and post-process one evaluation time."""
         t_start = time.time()
-
+        self._prepare_fits(evalTime=evalTime)
         self._minimize_radDists(evalTime=evalTime)
         logger.info(f"→ Fitting done in {time.time() - t_start:.2f} seconds")
+
         t_start = time.time()
         self._post_process_fit_arrangement(evalTime=evalTime)
-
-        logger.info(f"→ Done with fit post-processing step 1 out of 2 in {time.time() - t_start:.2f} seconds")
-        t_start = time.time()
-
         self._post_process_bolo_locations(evalTime=evalTime)
         self._post_process_calculations(evalTime=evalTime)
-        self._post_process_uncertainty(evalTime=evalTime)
-        logger.info(f"→ Done with fit post-processing step 2 out of 2 in {time.time() - t_start:.2f} seconds")
+        self._post_process_uncertainty(evalTime=evalTime)  # needs the other candidates
+        logger.info(f"→ Post-processing done in {time.time() - t_start:.2f} seconds")
+
+        if cleanup:
+            self._cleanup_fits(evalTime=evalTime)
 
     # ------------------------------------------------------------------
     # Configuration / data loading
@@ -689,6 +710,17 @@ class Emis3D:
 
         return synthetic_dict
 
+    def _check_time_in_data(self, evalTime: float) -> None:
+        """The averaging window [t - dt, t + dt] must lie within every camera's data."""
+        dt_ = self.info.get("dt") or 0.0
+        for name, obs in self.data.get("observed", {}).items():
+            time_ = np.asarray(obs["TIME"], dtype=float)
+            if evalTime - dt_ < time_.min() or evalTime + dt_ > time_.max():
+                raise ValueError(
+                    f"t = {evalTime} (dt = {dt_}) is outside {name}'s data, "
+                    f"which runs from {time_.min():g} to {time_.max():g}"
+                )
+
     def _prepare_fits(self, evalTime: float) -> None:
         """
         Organise data and synthetic signals into self.fits[evalTime] in
@@ -698,6 +730,7 @@ class Emis3D:
         if self.verbose:
             logger.debug("→ Preparing data for fitting")
 
+        self._check_time_in_data(evalTime)
         self._prepare_data_for_fit(evalTime=evalTime)
         self._prepare_synthetic_for_fits(evalTime=evalTime)
 
@@ -1147,7 +1180,21 @@ class Emis3D:
     # Plotting
     # ------------------------------------------------------------------
 
-    def _plot_bestFit(self, evalTime: float, save: bool = False) -> None:
+    def _plot_bestFit(self, evalTime: float | None = None, save: bool = False) -> None:
+        """
+        Best-fit figure for evalTime, or for every fitted time when evalTime is
+        not given (one figure, or PNG with save=True, per time).
+        """
+        if evalTime is None:
+            if not getattr(self, "bestFits", None):
+                logger.info("No best fits yet: run _perform_fits() first")
+                return
+            for t in sorted(self.bestFits):
+                self._plot_bestFit_one(t, save=save)
+            return
+        self._plot_bestFit_one(evalTime, save=save)
+
+    def _plot_bestFit_one(self, evalTime: float, save: bool = False) -> None:
         """
         Best-fit figure for one time. One column per camera (chords over the
         best radDist, signals with the fitted model, residuals), and a last
