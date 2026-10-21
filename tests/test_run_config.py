@@ -8,7 +8,7 @@ real run does (no ray tracing).
 import pytest
 import yaml
 
-from emis3d.Emis3D import Emis3D
+from emis3d.emis3D import Emis3D
 from emis3d.run_config import RunConfig
 from emis3d.workspace import Workspace
 
@@ -27,12 +27,15 @@ def test_defaults_are_filled_in():
     assert c.helical_endpoint_weight == 1.0 and c.paths == {}
 
 
-@pytest.mark.parametrize("change, match", [
-    ({"scale_def": "liner"}, "scale_def"),
-    ({"error_definition": "gaussian"}, "error_definition"),
-    ({"dtt": 1.0}, "Unknown run-config keys"),
-    ({"radDistDirectories_LocIndependent": []}, "No radDist directories"),
-])
+@pytest.mark.parametrize(
+    "change, match",
+    [
+        ({"scale_def": "liner"}, "scale_def"),
+        ({"error_definition": "gaussian"}, "error_definition"),
+        ({"dtt": 1.0}, "Unknown run-config keys"),
+        ({"radDistDirectories_LocIndependent": []}, "No radDist directories"),
+    ],
+)
 def test_bad_configs_are_rejected(change, match):
     with pytest.raises(ValueError, match=match):
         RunConfig.from_dict({**MINIMAL, **change})
@@ -62,7 +65,7 @@ def test_emis3d_loads_a_run_config_by_path(workspace, monkeypatch):
     e = Emis3D(initialize=False)
     e._load_config_file(runConfigName=str(run))
     assert e.info["tokamakName"] == "MOCK" and e.info["shot"] == 1
-    assert e.info["scale_def"] == "linear"                     # default filled in
+    assert e.info["scale_def"] == "linear"  # default filled in
     assert e.run_config_path == run.resolve()
     assert e.ws is not None and e.ws.fields["workspace"] == str(ws_dir.resolve())
 

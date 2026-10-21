@@ -6,14 +6,12 @@ Covers coordinate conversions, wall helpers, JSON/H5 helpers, and utility functi
 No cherab or raysect objects are required.
 """
 
-import json
 import os
-import tempfile
 
 import numpy as np
 import pytest
 
-from emis3d.Util import (
+from emis3d.util import (
     XY_To_RPhi,
     RPhi_To_XY,
     rpz_XYZ,
@@ -61,9 +59,7 @@ class TestXYRPhiRoundtrip:
         """phi should always be in (-π, π]."""
         for x, y in [(1.0, 0.0), (-1.0, 0.5), (0.5, -2.0)]:
             _, phi = XY_To_RPhi(x, y)
-            assert (
-                -np.pi <= phi <= np.pi
-            ), f"phi={phi:.4f} out of range for x={x}, y={y}"
+            assert -np.pi <= phi <= np.pi, f"phi={phi:.4f} out of range for x={x}, y={y}"
 
     def test_toroidal_offset(self):
         """TorOffset shifts phi by the given amount (with wrapping)."""
@@ -98,9 +94,7 @@ class TestRpzXYZ:
 
     def test_auto_transpose(self):
         """Function should accept (3,N) or (N,3) and return (3,N)."""
-        rpz_T = np.array(
-            [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]
-        )  # (2,3) — wrong orientation
+        rpz_T = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])  # (2,3) — wrong orientation
         # rpz_XYZ raises ValueError for non-3-leading arrays that can't be fixed
         rpz_ok = np.array([[1.0], [0.0], [0.0]])
         XYZ = rpz_XYZ(rpz_ok)

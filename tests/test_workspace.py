@@ -14,7 +14,7 @@ import yaml
 from emis3d import cli
 from emis3d.workspace import (
     BUILTIN_MACHINES,
-        Workspace,
+    Workspace,
     WorkspaceError,
 )
 
@@ -35,6 +35,7 @@ def make_ws(tmp_path, workspace_yaml=None):
 # ---------------------------------------------------------------------------
 # Choosing the layout
 # ---------------------------------------------------------------------------
+
 
 def test_nothing_configured_explains_how_to_fix(no_user):
     ws = Workspace.resolve(env={}, user_config=no_user)
@@ -82,18 +83,15 @@ def test_user_default_workspace(tmp_path):
 # Precedence and templates
 # ---------------------------------------------------------------------------
 
+
 def test_precedence_user_workspace_run_explicit(tmp_path):
-    wsdir = make_ws(tmp_path, {"paths": {"raddists": "from_workspace/{tokamak}",
-                                         "cache": "from_workspace_cache"}})
+    wsdir = make_ws(tmp_path, {"paths": {"raddists": "from_workspace/{tokamak}", "cache": "from_workspace_cache"}})
     user = tmp_path / "user.yaml"
-    user.write_text(yaml.safe_dump({"paths": {"raddists": "from_user", "cache": "from_user",
-                                              "equilibria": "from_user/{tokamak}"}}))
-    ws = Workspace.resolve(workspace=wsdir, user_config=user,
-                           run_paths={"cache": "from_run"},
-                           overrides={"equilibria": "/explicit/{tokamak}"})
-    assert ws.path("raddists", tokamak="T") == wsdir / "from_workspace/T"       # workspace beats user
-    assert ws.path("cache") == wsdir / "from_run"                               # run beats workspace
-    assert ws.path("equilibria", tokamak="T") == Path("/explicit/T")           # explicit beats all
+    user.write_text(yaml.safe_dump({"paths": {"raddists": "from_user", "cache": "from_user", "equilibria": "from_user/{tokamak}"}}))
+    ws = Workspace.resolve(workspace=wsdir, user_config=user, run_paths={"cache": "from_run"}, overrides={"equilibria": "/explicit/{tokamak}"})
+    assert ws.path("raddists", tokamak="T") == wsdir / "from_workspace/T"  # workspace beats user
+    assert ws.path("cache") == wsdir / "from_run"  # run beats workspace
+    assert ws.path("equilibria", tokamak="T") == Path("/explicit/T")  # explicit beats all
     assert ws.sources["equilibria"] == "argument"
 
 
@@ -140,6 +138,7 @@ def test_typos_are_errors(tmp_path, no_user, bad):
 # Machine search path
 # ---------------------------------------------------------------------------
 
+
 def test_user_camera_file_overrides_builtin(tmp_path, no_user):
     wsdir = make_ws(tmp_path)
     cam = wsdir / "machines/MOCK/inputs/sxrInfo/POL_A_config.yaml"
@@ -163,7 +162,7 @@ def test_workspace_machine_is_listed(tmp_path, no_user):
 
 def test_tokamak_uses_user_camera_override(tmp_path, no_user):
     """A real Tokamak build picks up a camera file from the workspace."""
-    from emis3d.Tokamak import Tokamak
+    from emis3d.tokamak import Tokamak
 
     wsdir = make_ws(tmp_path)
     builtin = BUILTIN_MACHINES / "MOCK/inputs/sxrInfo/POL_A_config.yaml"
@@ -174,28 +173,29 @@ def test_tokamak_uses_user_camera_override(tmp_path, no_user):
     tok = Tokamak(tokamakName="MOCK", mode="Analysis", loadBolometers=True, workspace=ws)
     phis = {b.name: b.info["CAMERA_POSITION_R_Z_PHI"][2] for b in tok.bolometers}
     assert phis["POL_A"] == 50.0
-    assert phis["POL_C"] == 285.0                       # untouched cameras come from the built-in machine
+    assert phis["POL_C"] == 285.0  # untouched cameras come from the built-in machine
     assert tok.wall is not None
 
 
 def test_camera_config_can_live_anywhere(tmp_path, no_user, monkeypatch):
     """configFileName may be an absolute or ~ path instead of a name in sxrInfo/."""
-    from emis3d.Tokamak import Tokamak
+    from emis3d.tokamak import Tokamak
 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     cams = tmp_path / "home" / "cams"
     cams.mkdir(parents=True)
     builtin = BUILTIN_MACHINES / "MOCK"
-    (cams / "POL_A.yaml").write_text(
-        (builtin / "inputs/sxrInfo/POL_A_config.yaml").read_text().replace("[2.3, 0.8, 45.0]", "[2.3, 0.8, 55.0]"))
-    (cams / "POL_C.yaml").write_text(
-        (builtin / "inputs/sxrInfo/POL_C_config.yaml").read_text().replace("[2.3, 0.8, 285.0]", "[2.3, 0.8, 290.0]"))
+    (cams / "POL_A.yaml").write_text((builtin / "inputs/sxrInfo/POL_A_config.yaml").read_text().replace("[2.3, 0.8, 45.0]", "[2.3, 0.8, 55.0]"))
+    (cams / "POL_C.yaml").write_text((builtin / "inputs/sxrInfo/POL_C_config.yaml").read_text().replace("[2.3, 0.8, 285.0]", "[2.3, 0.8, 290.0]"))
     wsdir = make_ws(tmp_path)
     settings = wsdir / "machines/MOCK/MOCK_settings.yaml"
     settings.parent.mkdir(parents=True)
-    settings.write_text((builtin / "MOCK_settings.yaml").read_text()
-                        .replace("configFileName: POL_A_config.yaml", "configFileName: ~/cams/POL_A.yaml")
-                        .replace("configFileName: POL_C_config.yaml", f"configFileName: {cams / 'POL_C.yaml'}"))
+    settings.write_text(
+        (builtin / "MOCK_settings.yaml")
+        .read_text()
+        .replace("configFileName: POL_A_config.yaml", "configFileName: ~/cams/POL_A.yaml")
+        .replace("configFileName: POL_C_config.yaml", f"configFileName: {cams / 'POL_C.yaml'}")
+    )
     ws = Workspace.resolve(workspace=wsdir, user_config=no_user)
     tok = Tokamak(tokamakName="MOCK", mode="Analysis", loadBolometers=True, workspace=ws)
     phis = {b.name: b.info["CAMERA_POSITION_R_Z_PHI"][2] for b in tok.bolometers}
@@ -203,7 +203,7 @@ def test_camera_config_can_live_anywhere(tmp_path, no_user, monkeypatch):
 
 
 def test_unknown_machine_lists_what_exists(no_user):
-    from emis3d.Tokamak import Tokamak
+    from emis3d.tokamak import Tokamak
 
     ws = Workspace.resolve(env={}, user_config=no_user)
     with pytest.raises(ValueError, match="MOCK"):
@@ -213,6 +213,7 @@ def test_unknown_machine_lists_what_exists(no_user):
 # ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
+
 
 def test_cli_init_and_paths(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("emis3d.workspace.USER_CONFIG", tmp_path / "none.yaml")
@@ -232,7 +233,7 @@ def test_cli_init_and_paths(tmp_path, capsys, monkeypatch):
     assert str(target / "measurements" / "MOCK") in out
     assert "built-in" in out
 
-    assert cli.main(["init", str(target)]) == 1          # refuses to overwrite
+    assert cli.main(["init", str(target)]) == 1  # refuses to overwrite
 
 
 def test_cli_init_set_default(tmp_path, monkeypatch):

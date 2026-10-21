@@ -46,10 +46,10 @@ import sys
 
 from concurrent.futures import ProcessPoolExecutor
 
-import emis3d.Util_radDist as Util_radDist
-from emis3d.Globals import *
-from emis3d.Tokamak import Tokamak
-from emis3d.Util import config_loader
+import emis3d.util_radDist as Util_radDist
+from emis3d.globals import *
+from emis3d.tokamak import Tokamak
+from emis3d.util import config_loader
 from emis3d.workspace import Workspace, set_workspace
 
 if __name__ == "__main__":
@@ -68,10 +68,8 @@ if __name__ == "__main__":
     # --- Command-line arguments override the defaults above
     parser = argparse.ArgumentParser(description="Generate a radDist library")
     parser.add_argument("--tokamak", default=tokamakName)
-    parser.add_argument("--config", default=configFileName,
-                        help="radDist config: a path, or a name in the 'raddists' location")
-    parser.add_argument("--workspace", default=None,
-                        help="workspace folder (default: nearest emis3d.yaml, EMIS3D_RUNS_DIR or user config)")
+    parser.add_argument("--config", default=configFileName, help="radDist config: a path, or a name in the 'raddists' location")
+    parser.add_argument("--workspace", default=None, help="workspace folder (default: nearest emis3d.yaml, EMIS3D_RUNS_DIR or user config)")
     args = parser.parse_args()
     tokamakName = args.tokamak
 
@@ -90,9 +88,7 @@ if __name__ == "__main__":
 
     else:
         config = None
-        print(
-            f"Could not load the configuration file, file does not exist: {pathFileName}"
-        )
+        print(f"Could not load the configuration file, file does not exist: {pathFileName}")
 
     if config is not None:
         print(f"Loaded configuration file: {pathFileName}")
@@ -143,9 +139,7 @@ if __name__ == "__main__":
         # radDist, with a config snapshot per parameter combination.
         # Only distinct shapes: circles, rotated twins and parameters the
         # radDist type ignores would otherwise rebuild the same radDist
-        shapes = Util_radDist.shape_parameter_sets(
-            config["distType"], sigma_R_vals, sigma_z_vals, rotationAngles
-        )
+        shapes = Util_radDist.shape_parameter_sets(config["distType"], sigma_R_vals, sigma_z_vals, rotationAngles)
         print(f"{len(shapes)} distinct shape(s) x {len(rzArray)} start positions")
         arg_list = []
         for params in shapes:

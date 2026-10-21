@@ -88,15 +88,15 @@ import matplotlib.pyplot as plt
 from lmfit import minimize, report_fit
 from scipy.integrate import simpson
 
-import emis3d.Util_emis3D as Util_emis3D
+import emis3d.util_emis3D as Util_emis3D
 
 logger = logging.getLogger(__name__)
 from dataclasses import asdict
 from typing import Any
 from emis3d.run_config import RunConfig
 from emis3d.workspace import Workspace, set_workspace
-from emis3d.Tokamak import Tokamak
-from emis3d.Util import (
+from emis3d.tokamak import Tokamak
+from emis3d.util import (
     config_loader,
     convert_arrays_to_list,
     extract_end_numbers,

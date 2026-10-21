@@ -2,7 +2,7 @@
 """Loads and verifys the run configuration file loaded"""
 
 from dataclasses import dataclass, field, fields
-from emis3d.Globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS
+from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS
 
 
 @dataclass

@@ -11,17 +11,17 @@ import numpy as np
 import pytest
 from scipy.integrate import simpson as simps
 
-from emis3d.Util_radDist import (
+from emis3d.util_radDist import (
     bivariate_normal,
     bivariate_normal_elongated,
     createRZGrid,
     bivariate_normal_isodensity_points,
 )
 
-
 # ---------------------------------------------------------------------------
 # bivariate_normal
 # ---------------------------------------------------------------------------
+
 
 class TestBivariateNormal:
 
@@ -59,7 +59,7 @@ class TestBivariateNormal:
         pts = np.array([0.0, 0.3, -0.3, 0.5, -0.5])
         R0, z0, sig = 2.0, 1.0, 0.4
         for delta in [0.1, 0.3, 0.7]:
-            v_plus  = bivariate_normal(np.array([R0 + delta]), np.array([z0]), R0=R0, z0=z0, sigma_z=sig)
+            v_plus = bivariate_normal(np.array([R0 + delta]), np.array([z0]), R0=R0, z0=z0, sigma_z=sig)
             v_minus = bivariate_normal(np.array([R0 - delta]), np.array([z0]), R0=R0, z0=z0, sigma_z=sig)
             assert np.isclose(v_plus[0], v_minus[0], atol=1e-12)
 
@@ -82,6 +82,7 @@ class TestBivariateNormal:
 # bivariate_normal_elongated
 # ---------------------------------------------------------------------------
 
+
 class TestBivariateNormalElongated:
 
     def test_reduces_to_isotropic_at_sigma_R_1_theta_0(self):
@@ -90,8 +91,7 @@ class TestBivariateNormalElongated:
         z = np.zeros_like(R)
         R0, z0, sig = 2.0, 0.0, 0.5
 
-        v_elongated = bivariate_normal_elongated(R, z, R0=R0, z0=z0,
-                                                 sigma_R=sig, sigma_z=sig, theta=0.0)
+        v_elongated = bivariate_normal_elongated(R, z, R0=R0, z0=z0, sigma_R=sig, sigma_z=sig, theta=0.0)
         v_isotropic = bivariate_normal(R, z, R0=R0, z0=z0, sigma_z=sig)
         assert np.allclose(v_elongated, v_isotropic, atol=1e-8)
 
@@ -100,8 +100,7 @@ class TestBivariateNormalElongated:
         z = np.linspace(-2, 2, 300)
         RR, ZZ = np.meshgrid(R, z, indexing="ij")
         R0, z0 = 2.0, 0.5
-        vals = bivariate_normal_elongated(RR.ravel(), ZZ.ravel(),
-                                          R0=R0, z0=z0, sigma_R=0.8, sigma_z=0.3)
+        vals = bivariate_normal_elongated(RR.ravel(), ZZ.ravel(), R0=R0, z0=z0, sigma_R=0.8, sigma_z=0.3)
         idx = np.argmax(vals)
         assert np.isclose(RR.ravel()[idx], R0, atol=0.05)
         assert np.isclose(ZZ.ravel()[idx], z0, atol=0.05)
@@ -110,8 +109,7 @@ class TestBivariateNormalElongated:
         R = np.linspace(0, 5, 30)
         z = np.linspace(-3, 3, 30)
         RR, ZZ = np.meshgrid(R, z)
-        vals = bivariate_normal_elongated(RR.ravel(), ZZ.ravel(),
-                                          R0=2.0, z0=0.0, sigma_R=1.5, sigma_z=0.4)
+        vals = bivariate_normal_elongated(RR.ravel(), ZZ.ravel(), R0=2.0, z0=0.0, sigma_R=1.5, sigma_z=0.4)
         assert np.all(vals >= 0)
 
     def test_theta_changes_orientation(self):
@@ -119,19 +117,15 @@ class TestBivariateNormalElongated:
         R0, z0, sig, elong = 2.0, 0.0, 0.2, 0.8
         # Point displaced in R direction
         R_disp = np.array([R0 + 0.3])
-        z_mid  = np.array([z0])
+        z_mid = np.array([z0])
         # Point displaced in z direction
-        R_mid  = np.array([R0])
+        R_mid = np.array([R0])
         z_disp = np.array([z0 + 0.3])
 
-        v_R_0deg = bivariate_normal_elongated(R_disp, z_mid, R0=R0, z0=z0,
-                                              sigma_R=elong, sigma_z=sig, theta=0.0)
-        v_z_0deg = bivariate_normal_elongated(R_mid, z_disp, R0=R0, z0=z0,
-                                              sigma_R=elong, sigma_z=sig, theta=0.0)
-        v_R_90deg = bivariate_normal_elongated(R_disp, z_mid, R0=R0, z0=z0,
-                                               sigma_R=elong, sigma_z=sig, theta=90.0)
-        v_z_90deg = bivariate_normal_elongated(R_mid, z_disp, R0=R0, z0=z0,
-                                               sigma_R=elong, sigma_z=sig, theta=90.0)
+        v_R_0deg = bivariate_normal_elongated(R_disp, z_mid, R0=R0, z0=z0, sigma_R=elong, sigma_z=sig, theta=0.0)
+        v_z_0deg = bivariate_normal_elongated(R_mid, z_disp, R0=R0, z0=z0, sigma_R=elong, sigma_z=sig, theta=0.0)
+        v_R_90deg = bivariate_normal_elongated(R_disp, z_mid, R0=R0, z0=z0, sigma_R=elong, sigma_z=sig, theta=90.0)
+        v_z_90deg = bivariate_normal_elongated(R_mid, z_disp, R0=R0, z0=z0, sigma_R=elong, sigma_z=sig, theta=90.0)
         # At theta=0: elong > sig so the R direction is broader, giving higher value
         # At theta=90: the roles swap
         assert v_R_0deg[0] > v_z_0deg[0]
@@ -141,6 +135,7 @@ class TestBivariateNormalElongated:
 # ---------------------------------------------------------------------------
 # createRZGrid
 # ---------------------------------------------------------------------------
+
 
 class TestCreateRZGrid:
 
@@ -163,12 +158,12 @@ class TestCreateRZGrid:
     def test_wall_mask_reduces_points(self):
         """When a wall curve is provided, points outside it are dropped."""
         from matplotlib.path import Path
+
         # Square wall: [1,2] × [-0.5, 0.5]
         verts = [(1.0, -0.5), (2.0, -0.5), (2.0, 0.5), (1.0, 0.5), (1.0, -0.5)]
         wall = Path(verts)
-        rz_all  = createRZGrid((0.5, 2.5), (-1.0, 1.0), num_r=20, num_z=20)
-        rz_wall = createRZGrid((0.5, 2.5), (-1.0, 1.0), num_r=20, num_z=20,
-                               wallcurve=wall)
+        rz_all = createRZGrid((0.5, 2.5), (-1.0, 1.0), num_r=20, num_z=20)
+        rz_wall = createRZGrid((0.5, 2.5), (-1.0, 1.0), num_r=20, num_z=20, wallcurve=wall)
         assert rz_wall.shape[0] < rz_all.shape[0]
 
     def test_two_column_output(self):
@@ -180,38 +175,29 @@ class TestCreateRZGrid:
 # bivariate_normal_isodensity_points
 # ---------------------------------------------------------------------------
 
+
 class TestIsodesityPoints:
 
     def test_output_shapes(self):
-        points, weights = bivariate_normal_isodensity_points(
-            R0=2.0, z0=0.0, sigma_target=0.5, sigma_kernel=0.1, n=30, seed=0
-        )
+        points, weights = bivariate_normal_isodensity_points(R0=2.0, z0=0.0, sigma_target=0.5, sigma_kernel=0.1, n=30, seed=0)
         assert points.shape == (30, 2)
         assert weights.shape == (30,)
 
     def test_weights_sum_to_one(self):
-        _, weights = bivariate_normal_isodensity_points(
-            R0=1.0, z0=0.5, sigma_target=0.4, sigma_kernel=0.2, n=50, seed=7
-        )
+        _, weights = bivariate_normal_isodensity_points(R0=1.0, z0=0.5, sigma_target=0.4, sigma_kernel=0.2, n=50, seed=7)
         assert np.isclose(weights.sum(), 1.0)
 
     def test_equal_weights(self):
-        _, weights = bivariate_normal_isodensity_points(
-            R0=0.0, z0=0.0, sigma_target=0.3, sigma_kernel=0.1, n=20, seed=1
-        )
+        _, weights = bivariate_normal_isodensity_points(R0=0.0, z0=0.0, sigma_target=0.3, sigma_kernel=0.1, n=20, seed=1)
         assert np.allclose(weights, weights[0])
 
     def test_raises_when_kernel_ge_target(self):
         with pytest.raises(ValueError, match="sigma_kernel"):
-            bivariate_normal_isodensity_points(
-                R0=0.0, z0=0.0, sigma_target=0.1, sigma_kernel=0.2, n=10
-            )
+            bivariate_normal_isodensity_points(R0=0.0, z0=0.0, sigma_target=0.1, sigma_kernel=0.2, n=10)
 
     def test_raises_when_kernel_equals_target(self):
         with pytest.raises(ValueError):
-            bivariate_normal_isodensity_points(
-                R0=0.0, z0=0.0, sigma_target=0.3, sigma_kernel=0.3, n=10
-            )
+            bivariate_normal_isodensity_points(R0=0.0, z0=0.0, sigma_target=0.3, sigma_kernel=0.3, n=10)
 
     def test_reproducible_with_seed(self):
         pts1, _ = bivariate_normal_isodensity_points(0.0, 0.0, 0.5, 0.1, n=20, seed=42)

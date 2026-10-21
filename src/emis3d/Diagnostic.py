@@ -27,7 +27,7 @@ from raysect.core import (
 )
 from raysect.optical import AbsorbingSurface, NullMaterial  # type: ignore
 from emis3d.workspace import Workspace, get_workspace
-from emis3d.Util import RPhi_To_XY, config_loader, rotate_vector
+from emis3d.util import RPhi_To_XY, config_loader, rotate_vector
 from raysect.primitive import Box, Subtract
 
 
@@ -86,24 +86,17 @@ class Bolometer(object):
                 self.name = self.info["NAME"]
             else:
                 self.name = None
-                print(
-                    f"Configuration file loaded but missing 'NAME' key: {pathFileName}"
-                )
+                print(f"Configuration file loaded but missing 'NAME' key: {pathFileName}")
             if self.info is not None and "GROUP_NAME" in self.info:
                 self.group_name = self.info["GROUP_NAME"]
             else:
                 self.group_name = None
-                print(
-                    f"Configuration file loaded but missing 'GROUP_NAME' key: {pathFileName}"
-                )
+                print(f"Configuration file loaded but missing 'GROUP_NAME' key: {pathFileName}")
         else:
             self.info = None
             self.name = None
             self.group_name = None
-            print(
-                f"Could not load the configuration file '{self.configFileName}' for "
-                f"{tokamakName}; searched {[str(r) for r in self.ws.machine_roots(tokamakName)]}"
-            )
+            print(f"Could not load the configuration file '{self.configFileName}' for " f"{tokamakName}; searched {[str(r) for r in self.ws.machine_roots(tokamakName)]}")
 
         # --- Load SubArray configuration files
         if self.info is not None and "SUBARRAY_NAMES" in self.info:
@@ -113,9 +106,7 @@ class Bolometer(object):
 
                     if "SUBARRAYS" not in self.info:
                         self.info["SUBARRAYS"] = {}
-                    self.info["SUBARRAYS"][self.info["SUBARRAY_NAMES"][ii]] = (
-                        config_loader(str(pathFileName))
-                    )
+                    self.info["SUBARRAYS"][self.info["SUBARRAY_NAMES"][ii]] = config_loader(str(pathFileName))
 
     def _build(self) -> None:
         """
@@ -130,9 +121,7 @@ class Bolometer(object):
             else:
                 print(f"Build type of {self.info['BUILD_TYPE']} not yet supported!")
         else:
-            print(
-                "Bolometer configuration info is missing or incomplete; cannot build camera."
-            )
+            print("Bolometer configuration info is missing or incomplete; cannot build camera.")
 
     def _build_from_primitives(self) -> None:
         """
@@ -152,9 +141,7 @@ class Bolometer(object):
         """
 
         if self.info is None:
-            print(
-                "Bolometer configuration info is missing; cannot build from primitives."
-            )
+            print("Bolometer configuration info is missing; cannot build from primitives.")
             return
 
         # --- Convenient constants
@@ -244,9 +231,7 @@ class Bolometer(object):
             name="Housing with Aperture",
         )
 
-        camera_housing.material = (
-            AbsorbingSurface()
-        )  # AbsorbingSurface() or NullMaterial()
+        camera_housing.material = AbsorbingSurface()  # AbsorbingSurface() or NullMaterial()
 
         # Attach the finished housing to the camera
         bolometer_camera.camera_geometry = camera_housing
@@ -359,18 +344,12 @@ class Bolometer(object):
         """
 
         if self.info is None:
-            print(
-                "Bolometer configuration info is missing; cannot build from primitives."
-            )
+            print("Bolometer configuration info is missing; cannot build from primitives.")
             return
 
         if "ETENDUE" in self.info:
             self.etendues = self.info["ETENDUE"]
-            self.etendues_error = (
-                self.info["ETENDUE_ERROR"]
-                if "ETENDUE_ERROR" in self.info
-                else [0.0] * len(self.etendues)
-            )
+            self.etendues_error = self.info["ETENDUE_ERROR"] if "ETENDUE_ERROR" in self.info else [0.0] * len(self.etendues)
             return
 
         if "FOIL_SLIT_ANGLE_FACTOR" in self.info:
@@ -382,15 +361,11 @@ class Bolometer(object):
         self.etendues_error = []
         analytic_etendues = []
         for foil in self.bolometer_camera:
-            raytraced_etendue, raytraced_error = foil.calculate_etendue(
-                ray_count=10_000
-            )
+            raytraced_etendue, raytraced_error = foil.calculate_etendue(ray_count=10_000)
             Adet = foil.x_width * foil.y_width
             Aslit = foil.slit.dx * foil.slit.dy
             costhetadet = foil.sightline_vector.normalise().dot(foil.normal_vector)
-            costhetaslit = foil.sightline_vector.normalise().dot(
-                foil.slit.normal_vector
-            )
+            costhetaslit = foil.sightline_vector.normalise().dot(foil.slit.normal_vector)
             distance = foil.centre_point.vector_to(foil.slit.centre_point).length
             analytic_etendue = Adet * Aslit * costhetadet * costhetaslit / distance**2
             """
@@ -437,19 +412,11 @@ class Bolometer(object):
             _DATA_PATH = os.path.join(os.path.dirname(self.config_path), _DATA_PATH)
 
         if camera_id == "KB5V":
-            foils = np.loadtxt(
-                os.path.join(_DATA_PATH, "kb5v_foils.csv"), delimiter=","
-            )
-            slits = np.loadtxt(
-                os.path.join(_DATA_PATH, "kb5v_slits.csv"), delimiter=","
-            )
+            foils = np.loadtxt(os.path.join(_DATA_PATH, "kb5v_foils.csv"), delimiter=",")
+            slits = np.loadtxt(os.path.join(_DATA_PATH, "kb5v_slits.csv"), delimiter=",")
         elif camera_id == "KB5H":
-            foils = np.loadtxt(
-                os.path.join(_DATA_PATH, "kb5h_foils.csv"), delimiter=","
-            )
-            slits = np.loadtxt(
-                os.path.join(_DATA_PATH, "kb5h_slits.csv"), delimiter=","
-            )
+            foils = np.loadtxt(os.path.join(_DATA_PATH, "kb5h_foils.csv"), delimiter=",")
+            slits = np.loadtxt(os.path.join(_DATA_PATH, "kb5h_slits.csv"), delimiter=",")
         else:
             raise ValueError("Unrecognised bolometer camera_id '{}'.".format(camera_id))
 
@@ -475,9 +442,7 @@ class Bolometer(object):
                 (p1.y + p2.y + p3.y + p4.y) / 4,
                 (p1.z + p2.z + p3.z + p4.z) / 4,
             )
-            slit_objects[slit_id] = BolometerSlit(
-                slit_id, centre_point, basis_x, dx, basis_y, dy, parent=bolometer_camera
-            )
+            slit_objects[slit_id] = BolometerSlit(slit_id, centre_point, basis_x, dx, basis_y, dy, parent=bolometer_camera)
 
         for i in range(num_foils):
             foil_data = foils[i]
@@ -488,9 +453,7 @@ class Bolometer(object):
             p2 = Point3D(foil_data[5], foil_data[6], foil_data[7])
             p3 = Point3D(foil_data[8], foil_data[9], foil_data[10])
             p4 = Point3D(foil_data[11], foil_data[12], foil_data[13])
-            basis_x = p2.vector_to(
-                p1
-            ).normalise()  # switching orientation to ensure face orientation is correct
+            basis_x = p2.vector_to(p1).normalise()  # switching orientation to ensure face orientation is correct
             dx = p1.distance_to(p2)
             basis_y = p2.vector_to(p3).normalise()
             dy = p2.distance_to(p3)

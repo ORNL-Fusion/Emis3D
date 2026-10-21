@@ -11,7 +11,7 @@ to round-trip exactly, e.g. 225.
 import numpy as np
 import pytest
 
-from emis3d.Util import fieldline_key
+from emis3d.util import fieldline_key
 
 
 class TestFieldlineKey:
@@ -50,7 +50,7 @@ class TestTokamakRoundTrip:
 
     @pytest.fixture
     def fake_tracing(self, monkeypatch):
-        from emis3d.Tokamak import Tokamak
+        from emis3d.tokamak import Tokamak
 
         class FakeTracer:
             def __init__(self, StartR, StartZ, StartPhi, gfile, NumTor):
@@ -73,9 +73,7 @@ class TestTokamakRoundTrip:
         monkeypatch.setitem(
             g,
             "split_revolutions",
-            lambda x, y, z, phi, R, L: [
-                {"x": x, "y": y, "z": z, "phi": phi, "R": R, "L": L}
-            ],
+            lambda x, y, z, phi, R, L: [{"x": x, "y": y, "z": z, "phi": phi, "R": R, "L": L}],
         )
         return Tokamak
 

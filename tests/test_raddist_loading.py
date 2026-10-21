@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from emis3d.Emis3D import Emis3D
-from emis3d.Globals import RADDIST_FORMAT
+from emis3d.emis3D import Emis3D
+from emis3d.globals import RADDIST_FORMAT
 from emis3d.workspace import Workspace
 
 
@@ -23,7 +23,7 @@ def write_raddist(path, version=RADDIST_FORMAT, scalar_channels=False):
         "observed_phi_loc": {"ring": {"CAM": [[0.0], [0.0]]}},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    if scalar_channels:          # one number per channel, as radDists saved before segments
+    if scalar_channels:  # one number per channel, as radDists saved before segments
         data["Brightness"]["ring"]["CAM"] = [1.0, 2.0]
     info = {"units": "Brightness", "emissionNames": ["ring"]}
     if version is not None:
@@ -107,11 +107,14 @@ def test_no_folders_at_all_is_an_error(run):
         e._load_radDists()
 
 
-@pytest.mark.parametrize("kwargs, reason", [
-    ({"version": None}, "format None"),            # saved before format versions existed
-    ({"version": 1}, "format 1"),
-    ({"scalar_channels": True}, "not a list of toroidal segments"),
-])
+@pytest.mark.parametrize(
+    "kwargs, reason",
+    [
+        ({"version": None}, "format None"),  # saved before format versions existed
+        ({"version": 1}, "format 1"),
+        ({"scalar_channels": True}, "not a list of toroidal segments"),
+    ],
+)
 def test_old_radDists_are_rejected_with_a_message(run, kwargs, reason):
     e, base = run
     write_raddist(base / "ring/R_0.json", **kwargs)

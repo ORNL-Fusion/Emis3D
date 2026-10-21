@@ -15,10 +15,10 @@ import os
 import numpy as np
 import pytest
 
-from emis3d.Globals import RADDIST_FORMAT, SUPPORTED_TOKAMAKS
+from emis3d.globals import RADDIST_FORMAT, SUPPORTED_TOKAMAKS
 from emis3d.workspace import BUILTIN_MACHINES
 from emis3d.radDistFitting import RadDistFitting
-from emis3d.Util import find_max_nested_lists
+from emis3d.util import find_max_nested_lists
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -71,10 +71,7 @@ def _minimal_raddist_json(
         channel_order[bolo] = channel_tags
         power_data[bolo] = [[float(i + 1)] * n_segments for i in range(n_channels)]
         power_error[bolo] = [[0.1 * (i + 1)] * n_segments for i in range(n_channels)]
-        phi_loc[bolo] = [
-            [0.5 * (i + 1) + 0.1 * s for s in range(n_segments)]
-            for i in range(n_channels)
-        ]
+        phi_loc[bolo] = [[0.5 * (i + 1) + 0.1 * s for s in range(n_segments)] for i in range(n_channels)]
 
     data = {
         "info": {
@@ -154,9 +151,7 @@ class TestRadDistFitting:
 
     def test_prepare_for_fits_data_length(self, tmp_path):
         n_ch = 4
-        path, _, channel_tags, emission = _minimal_raddist_json(
-            tmp_path, n_channels=n_ch
-        )
+        path, _, channel_tags, emission = _minimal_raddist_json(tmp_path, n_channels=n_ch)
         rdf = RadDistFitting(radDistPath=path)
         channel_order = [channel_tags]
         rdf.prepare_for_fits(channel_order)
@@ -211,7 +206,7 @@ class TestRadDistFitting:
 # Emis3D error handling — exceptions replace error_free flag
 # ---------------------------------------------------------------------------
 
-from emis3d.Emis3D import Emis3D
+from emis3d.emis3D import Emis3D
 
 
 class TestEmis3DErrorHandling:
@@ -230,9 +225,7 @@ class TestEmis3DErrorHandling:
     def test_no_error_free_attribute(self):
         """error_free flag has been removed — Emis3D must not have it."""
         e = Emis3D(initialize=False)
-        assert not hasattr(
-            e, "error_free"
-        ), "error_free should be removed; use exceptions instead"
+        assert not hasattr(e, "error_free"), "error_free should be removed; use exceptions instead"
 
     def test_verbose_sets_debug_logging(self):
         """verbose=True must configure the 'main' logger to DEBUG."""
@@ -271,9 +264,7 @@ class TestSaveRadDistConsolidation:
         from emis3d.radDist import Helical, HelicalRing, ElongatedRing, SquareTube
 
         for cls in (Helical, HelicalRing, ElongatedRing, SquareTube):
-            assert (
-                "saveRadDist" not in cls.__dict__
-            ), f"{cls.__name__} still overrides saveRadDist — should use base class"
+            assert "saveRadDist" not in cls.__dict__, f"{cls.__name__} still overrides saveRadDist — should use base class"
 
     def test_helical_save_name_includes_sigma_kernel(self):
         """Helical radDists that differ only in sigmaKernel must not share a file."""

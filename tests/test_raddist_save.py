@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from emis3d.radDist import M3DC1, NIMROD, ElongatedRing, Helical, HelicalRing, SquareTube
-from emis3d.Util_radDist import shape_parameter_sets
+from emis3d.util_radDist import shape_parameter_sets
 from emis3d.workspace import Workspace, set_workspace
 
 
@@ -25,8 +25,7 @@ def bare(cls, **info):
 
 
 RING = dict(distType="elongatedRing", sigma_R=0.3, sigma_z=0.5, rotationAngle=30.0, startR=1.75, startZ=0.15)
-HELICAL = dict(distType="Helical", sigma_R=0.2, sigmaKernel=0.05, numTransists=1.0, numFieldLines=200,
-               startPhi=225.0, startR=1.75, startZ=0.15)
+HELICAL = dict(distType="Helical", sigma_R=0.2, sigmaKernel=0.05, numTransists=1.0, numFieldLines=200, startPhi=225.0, startR=1.75, startZ=0.15)
 HRING = dict(distType="HelicalRing", sigma_R=0.2, sigma_z=0.3, numTransists=1.0, startPhi=225.0, startR=1.75, startZ=0.15)
 TUBE = dict(distType="SquareTube", dR=0.1, dz=0.2, startR=1.75, startZ=0.15)
 
@@ -35,25 +34,32 @@ TUBE = dict(distType="SquareTube", dR=0.1, dz=0.2, startR=1.75, startZ=0.15)
 # Names
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("cls, info, folder", [
-    (ElongatedRing, RING, "elongatedRing_sigma_R_0.3_sigma_z_0.5_rot_30"),
-    (Helical, HELICAL, "Helical_sigma_R_0.2_kernel_0.05_transits_1_lines_200_phi_225"),
-    (HelicalRing, HRING, "HelicalRing_sigma_R_0.2_sigma_z_0.3_transits_1_phi_225"),
-    (SquareTube, TUBE, "SquareTube_dR_0.1_dz_0.2"),
-])
+
+@pytest.mark.parametrize(
+    "cls, info, folder",
+    [
+        (ElongatedRing, RING, "elongatedRing_sigma_R_0.3_sigma_z_0.5_rot_30"),
+        (Helical, HELICAL, "Helical_sigma_R_0.2_kernel_0.05_transits_1_lines_200_phi_225"),
+        (HelicalRing, HRING, "HelicalRing_sigma_R_0.2_sigma_z_0.3_transits_1_phi_225"),
+        (SquareTube, TUBE, "SquareTube_dR_0.1_dz_0.2"),
+    ],
+)
 def test_folder_and_file_names(cls, info, folder):
     assert bare(cls, **info)._save_names() == (folder, "R_1.7500_z_0.1500.json")
 
 
-@pytest.mark.parametrize("cls, info, key, other", [
-    (ElongatedRing, RING, "rotationAngle", 60.0),      # used to overwrite each other
-    (ElongatedRing, RING, "sigma_z", 0.6),
-    (Helical, HELICAL, "sigmaKernel", 0.08),            # used to overwrite each other
-    (Helical, HELICAL, "startPhi", 45.0),
-    (Helical, HELICAL, "numFieldLines", 400),
-    (HelicalRing, HRING, "numTransists", 2.0),
-    (SquareTube, TUBE, "dz", 0.3),
-])
+@pytest.mark.parametrize(
+    "cls, info, key, other",
+    [
+        (ElongatedRing, RING, "rotationAngle", 60.0),  # used to overwrite each other
+        (ElongatedRing, RING, "sigma_z", 0.6),
+        (Helical, HELICAL, "sigmaKernel", 0.08),  # used to overwrite each other
+        (Helical, HELICAL, "startPhi", 45.0),
+        (Helical, HELICAL, "numFieldLines", 400),
+        (HelicalRing, HRING, "numTransists", 2.0),
+        (SquareTube, TUBE, "dz", 0.3),
+    ],
+)
 def test_every_shape_parameter_changes_the_path(cls, info, key, other):
     a = bare(cls, **info)._save_names()
     b = bare(cls, **{**info, key: other})._save_names()
@@ -82,12 +88,12 @@ def test_simulation_names_use_file_and_timestep(cls):
 # Saving
 # ---------------------------------------------------------------------------
 
+
 def test_save_writes_atomically_into_the_workspace(tmp_path):
     set_workspace(Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml"))
     try:
         for angle in (30.0, 60.0):
-            obj = bare(ElongatedRing, **{**RING, "rotationAngle": angle},
-                       tokamakName="MOCK", saveRunsDirectoryName="lib")
+            obj = bare(ElongatedRing, **{**RING, "rotationAngle": angle}, tokamakName="MOCK", saveRunsDirectoryName="lib")
             obj.data = {"Brightness": {"x": np.arange(3.0)}}
             obj.saveRadDist()
     finally:
@@ -97,7 +103,7 @@ def test_save_writes_atomically_into_the_workspace(tmp_path):
     assert files == [
         "elongatedRing_sigma_R_0.3_sigma_z_0.5_rot_30/R_1.7500_z_0.1500.json",
         "elongatedRing_sigma_R_0.3_sigma_z_0.5_rot_60/R_1.7500_z_0.1500.json",
-    ]                                                            # no temporary files left behind
+    ]  # no temporary files left behind
     saved = json.loads((lib / files[1]).read_text())
     assert saved["info"]["rotationAngle"] == 60.0 and saved["data"]["Brightness"]["x"] == [0.0, 1.0, 2.0]
 
@@ -105,6 +111,7 @@ def test_save_writes_atomically_into_the_workspace(tmp_path):
 # ---------------------------------------------------------------------------
 # Distinct shapes for make_radDists
 # ---------------------------------------------------------------------------
+
 
 def triples(sets):
     return [(s["sigma_R"], s["sigma_z"], s["rotationAngle"]) for s in sets]
@@ -128,7 +135,6 @@ def test_angles_half_a_turn_apart_are_the_same_ellipse():
 
 
 def test_types_that_ignore_parameters_are_not_repeated():
-    assert shape_parameter_sets("Helical", [0.2, 0.3], [0.1, 0.2, 0.3], [0.0, 30.0]) == [
-        {"sigma_R": 0.2}, {"sigma_R": 0.3}]
+    assert shape_parameter_sets("Helical", [0.2, 0.3], [0.1, 0.2, 0.3], [0.0, 30.0]) == [{"sigma_R": 0.2}, {"sigma_R": 0.3}]
     assert len(shape_parameter_sets("HelicalRing", [0.2, 0.3], [0.1, 0.2], [0.0, 30.0, 60.0])) == 4
     assert shape_parameter_sets("SquareTube", [0.2, 0.3], [0.1], [0.0]) == [{}]

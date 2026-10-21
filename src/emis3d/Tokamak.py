@@ -30,8 +30,8 @@ from raysect.optical import AbsorbingSurface, NullMaterial  # type: ignore
 
 from raysect.primitive import Cylinder, import_stl, Subtract
 
-from emis3d.Diagnostic import Bolometer
-from emis3d.Fieldline_Tracer import Fieldline_Tracer
+from emis3d.diagnostic import Bolometer
+from emis3d.fieldline_tracer import Fieldline_Tracer
 from emis3d.workspace import Workspace, WorkspaceError, get_workspace
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ PHI_PROJECTION_TOLERANCE_DEG = 1.0e-6
 PHI_PROJECTION_NUM_POINTS = 64
 
 
-from emis3d.Util import (
+from emis3d.util import (
     chord_rz_projection,
     config_loader,
     fieldline_key,

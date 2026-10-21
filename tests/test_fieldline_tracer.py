@@ -18,7 +18,7 @@ import pytest
 from freeqdsk import geqdsk
 from scipy.optimize import brentq
 
-from emis3d.Fieldline_Tracer import Fieldline_Tracer
+from emis3d.fieldline_tracer import Fieldline_Tracer
 
 R0, A, B0, F0 = 1.70, 0.60, 1.0, 3.2
 
@@ -40,12 +40,31 @@ def make_gfile(eps=0.0, rcentr=1.60, n=129):
     fpol = F0 * (1 + eps * (1 - psin))
     th = np.linspace(0, 2 * np.pi, 65)
     d = dict(
-        nx=n, ny=n, rdim=Rg[-1] - Rg[0], zdim=Zg[-1] - Zg[0], rcentr=rcentr, rleft=Rg[0], zmid=0.0,
-        rmagx=R0, zmagx=0.0, simagx=0.0, sibdry=B0 * A**2 / 2.0, bcentr=fpol[-1] / rcentr, cpasma=1e6,
-        fpol=fpol, pres=np.zeros(n), ffprime=np.zeros(n), pprime=np.zeros(n),
-        psi=B0 * ((RR - R0) ** 2 + ZZ**2) / 2.0, qpsi=fpol / (B0 * np.sqrt(R0**2 - A**2 * psin)),
-        nbdry=65, nlim=65, rbdry=R0 + A * np.cos(th), zbdry=A * np.sin(th),
-        rlim=R0 + 0.7 * np.cos(th), zlim=0.7 * np.sin(th),
+        nx=n,
+        ny=n,
+        rdim=Rg[-1] - Rg[0],
+        zdim=Zg[-1] - Zg[0],
+        rcentr=rcentr,
+        rleft=Rg[0],
+        zmid=0.0,
+        rmagx=R0,
+        zmagx=0.0,
+        simagx=0.0,
+        sibdry=B0 * A**2 / 2.0,
+        bcentr=fpol[-1] / rcentr,
+        cpasma=1e6,
+        fpol=fpol,
+        pres=np.zeros(n),
+        ffprime=np.zeros(n),
+        pprime=np.zeros(n),
+        psi=B0 * ((RR - R0) ** 2 + ZZ**2) / 2.0,
+        qpsi=fpol / (B0 * np.sqrt(R0**2 - A**2 * psin)),
+        nbdry=65,
+        nlim=65,
+        rbdry=R0 + A * np.cos(th),
+        zbdry=A * np.sin(th),
+        rlim=R0 + 0.7 * np.cos(th),
+        zlim=0.7 * np.sin(th),
     )
     buf = io.StringIO()
     geqdsk.write(d, buf)
@@ -57,8 +76,7 @@ PHI0 = np.deg2rad(225.0)
 
 
 def trace(g, r, transits, n_per_transit=500, phi0=PHI0):
-    t = Fieldline_Tracer(StartR=R0 + r, StartZ=0.0, StartPhi=phi0, gfile=g,
-                         NumTor=int(n_per_transit * abs(transits)))
+    t = Fieldline_Tracer(StartR=R0 + r, StartZ=0.0, StartPhi=phi0, gfile=g, NumTor=int(n_per_transit * abs(transits)))
     t.trace(NumTransits=transits)
     return t
 
@@ -79,7 +97,7 @@ def test_q2_field_line_closes_after_two_transits(eps, direction):
     r2 = brentq(lambda r: q_exact(r, eps) - 2.0, 0.01, 0.59)
     t = trace(g, r2, direction)
     miss = np.hypot(t.data["R"][-1] - t.data["R"][0], t.data["z"][-1] - t.data["z"][0])
-    assert miss < 1e-4                                         # 0.1 mm
+    assert miss < 1e-4  # 0.1 mm
 
 
 @pytest.mark.parametrize("eps", [0.0, 0.05])

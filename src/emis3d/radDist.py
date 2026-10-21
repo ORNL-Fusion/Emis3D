@@ -21,13 +21,13 @@ from raysect.optical import VolumeTransform  # type: ignore
 from raysect.core.workflow import SerialEngine
 from raysect.core.math.random import seed as _raysect_seed
 
-import emis3d.Util_radDist as Util_radDist
+import emis3d.util_radDist as Util_radDist
 
 logger = logging.getLogger(__name__)
-from emis3d.Globals import RADDIST_FORMAT
+from emis3d.globals import RADDIST_FORMAT
 from emis3d.workspace import get_workspace
-from emis3d.Tokamak import Tokamak
-from emis3d.Util import (
+from emis3d.tokamak import Tokamak
+from emis3d.util import (
     XY_To_RPhi,
     convert_arrays_to_list,
     save_json,

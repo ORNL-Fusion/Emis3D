@@ -11,9 +11,9 @@ import numpy as np
 import scipy.constants
 from scipy.signal import savgol_filter
 from Util_SXR import filter_data
-from emis3d.Globals import *
+from emis3d.globals import *
 from emis3d.workspace import get_workspace
-from emis3d.Util import read_h5
+from emis3d.util import read_h5
 
 
 class SXRSignal:
@@ -129,9 +129,7 @@ class SXRSignal:
                 try:
                     temp_ = self.conn.get("_sig= \\" + arrayName + ":" + tag_).data()  # type: ignore
                 except:
-                    temp_ = self.conn.get(  # type: ignore
-                        ('_sig=ptdata2("' + tag_ + '",' + str(shotNumber) + ")")
-                    ).data()
+                    temp_ = self.conn.get(('_sig=ptdata2("' + tag_ + '",' + str(shotNumber) + ")")).data()  # type: ignore
 
                 temp_ = np.array(temp_)
 
@@ -147,9 +145,7 @@ class SXRSignal:
                 # --- Store the data, I don't know why we need to add +1 to the
                 # end range when you don't need to for time.
                 if "DATA" not in self.data:
-                    self.data["DATA"] = np.zeros(
-                        (self.info["numChannels"], temp_.shape[0])
-                    )
+                    self.data["DATA"] = np.zeros((self.info["numChannels"], temp_.shape[0]))
                 self.data["DATA"][ii - 1, :] = temp_
 
             except Exception as e:
@@ -173,9 +169,7 @@ class SXRSignal:
             if "PROCESSED_SIGNAL" in self.data:
                 self.data["PROCESSED_SIGNAL"][ii, :] = 0
                 self.data["PROCESSED_SIGNAL_SIGMA"][ii, :] = 0
-            print(
-                f"Signals set to zero for bad channel: {self.data['channelOrder'][ii]}"
-            )
+            print(f"Signals set to zero for bad channel: {self.data['channelOrder'][ii]}")
 
     def _correct_offset(self, offsetWindow=[]):
         """
@@ -604,36 +598,17 @@ class SXRSignal:
                 #                          / 1.95e3**2)
 
         else:
-            ap_area = (
-                0.25 * scipy.constants.pi * (self.info["PINHOLE_DIAMETER"] / 1.0e4) ** 2
-            )  # aperture area [cm^2]
+            ap_area = 0.25 * scipy.constants.pi * (self.info["PINHOLE_DIAMETER"] / 1.0e4) ** 2  # aperture area [cm^2]
 
-            dist_from_ctr = (
-                np.arange(-int(self.info["nchan"] / 2), int(self.info["nchan"] / 2))
-                + 0.5
-            ) * self.info[
-                "CENTER_CENTER_SPACING"
-            ]  # [cm]
+            dist_from_ctr = (np.arange(-int(self.info["nchan"] / 2), int(self.info["nchan"] / 2)) + 0.5) * self.info["CENTER_CENTER_SPACING"]  # [cm]
 
             tanpsi = dist_from_ctr / self.info["CENTER_TO_PINHOLE"]
 
             cos4 = (tanpsi**2 + 1.0) ** (-2.0)
 
-            thick_factor = (
-                abs(tanpsi)
-                * (-4.0 / scipy.constants.pi)
-                * (self.info["PINHOLE_THICKNESS"] / self.info["PINHOLE_DIAMETER"])
-                + 1.0
-            )
+            thick_factor = abs(tanpsi) * (-4.0 / scipy.constants.pi) * (self.info["PINHOLE_THICKNESS"] / self.info["PINHOLE_DIAMETER"]) + 1.0
 
-            entendue = (
-                cos4
-                * thick_factor
-                * self.info["ELEMENT_AREA"]
-                * ap_area
-                / self.info["CENTER_TO_PINHOLE"] ** 2
-                * 1.0e2
-            )  # units m2 sr
+            entendue = cos4 * thick_factor * self.info["ELEMENT_AREA"] * ap_area / self.info["CENTER_TO_PINHOLE"] ** 2 * 1.0e2  # units m2 sr
 
             if self.info["arrayName"] in ["SX90MF", "SX90PF", "DISRADU"]:
                 self.info["ENTENDUE"] = np.concatenate([entendue, np.flip(entendue)])
@@ -642,13 +617,7 @@ class SXRSignal:
                 active = [18, 17, 15, 13, 11, 10, 9, 8, 7, 6, 5, 3]
                 self.info["ENTENDUE"] = entendue[active]
 
-        self.info["CALIBRATION_FACTOR"] = (
-            1.0
-            / 0.5  # 50 Ohm termination divides by 2
-            / (self.info["Rc"] * self.info["GAIN"])
-            / effective_response
-            / self.info["ENTENDUE"]
-        )
+        self.info["CALIBRATION_FACTOR"] = 1.0 / 0.5 / (self.info["Rc"] * self.info["GAIN"]) / effective_response / self.info["ENTENDUE"]  # 50 Ohm termination divides by 2
 
         self.info["CALIBRATION_FACTOR_UNITS"] = "W / (m2 sr V)"
 
@@ -656,30 +625,20 @@ class SXRSignal:
         if "PROCESSED_SIGNAL" in self.data:
             print("Calibrating data")
             self.data["DATA_CALIBRATED"] = self.data["PROCESSED_SIGNAL"].copy()
-            self.data["DATA_CALIBRATED_ERROR"] = self.data[
-                "PROCESSED_SIGNAL_SIGMA"
-            ].copy()
+            self.data["DATA_CALIBRATED_ERROR"] = self.data["PROCESSED_SIGNAL_SIGMA"].copy()
 
             for ii in range(self.data["DATA_CALIBRATED"].shape[0]):
                 loc_ = ii
                 if self.info["arrayName"] == "DISRADU":
                     loc_ = ii + 1
-                self.data["DATA_CALIBRATED"][ii, :] *= self.info["CALIBRATION_FACTOR"][
-                    loc_
-                ]
-                self.data["DATA_CALIBRATED_ERROR"][ii, :] *= self.info[
-                    "CALIBRATION_FACTOR"
-                ][loc_]
+                self.data["DATA_CALIBRATED"][ii, :] *= self.info["CALIBRATION_FACTOR"][loc_]
+                self.data["DATA_CALIBRATED_ERROR"][ii, :] *= self.info["CALIBRATION_FACTOR"][loc_]
             self.data["DATA_CALIBRATED_UNITS"] = "W / (m2 sr)"
 
     def save_data(self):
         """Saves the data"""
         # <measurements>/{shot}/, the folder run configs' dataFileName is relative to
-        path = str(
-            get_workspace().path("measurements", tokamak="DIII-D")
-            / str(self.info["shotNumber"])
-        )
-
+        path = str(get_workspace().path("measurements", tokamak="DIII-D") / str(self.info["shotNumber"]))
 
         os.makedirs(path, exist_ok=True)
 
@@ -702,10 +661,7 @@ class SXRSignal:
 
     def load_data(self):
         """Loads the data"""
-        path = str(
-            get_workspace().path("measurements", tokamak="DIII-D")
-            / str(self.info["shotNumber"])
-        )
+        path = str(get_workspace().path("measurements", tokamak="DIII-D") / str(self.info["shotNumber"]))
 
         fileName = f"{self.info['shotNumber']}_{self.info['arrayName']}_PROCESSED.h5"
         pathFileName = os.path.join(path, fileName)

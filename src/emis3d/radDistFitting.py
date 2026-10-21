@@ -8,9 +8,9 @@ Written by JLH Aug. 2025
 
 import numpy as np
 from lmfit import Parameters
-from emis3d.Util import load_json, convert_arrays_to_list, find_max_nested_lists
-from emis3d.Util_emis3D import loc_tag
-from emis3d.Globals import RADDIST_FORMAT
+from emis3d.util import load_json, convert_arrays_to_list
+from emis3d.util_emis3D import loc_tag
+from emis3d.globals import RADDIST_FORMAT
 
 
 class RadDistFitting:
@@ -39,10 +39,7 @@ class RadDistFitting:
             temp = load_json(self.info["radDistPath"])
             version = temp["info"].get("radDistFormat")
             if version != RADDIST_FORMAT:
-                raise ValueError(
-                    f"saved in radDist format {version}, but this Emis3D reads format "
-                    f"{RADDIST_FORMAT}; regenerate it with make_radDists.py"
-                )
+                raise ValueError(f"saved in radDist format {version}, but this Emis3D reads format " f"{RADDIST_FORMAT}; regenerate it with make_radDists.py")
             self.data = temp["data"]
             self.info.update(temp["info"])
             self._load_ok = True
@@ -55,10 +52,7 @@ class RadDistFitting:
     def _as_segment_list(value) -> list:
         """A channel entry: the list of its toroidal segments."""
         if not isinstance(value, (list, tuple)):
-            raise ValueError(
-                f"radDist channel entry {value!r} is not a list of toroidal segments; "
-                "regenerate the radDist with the current Emis3D"
-            )
+            raise ValueError(f"radDist channel entry {value!r} is not a list of toroidal segments; " "regenerate the radDist with the current Emis3D")
         return list(value)
 
     def _map_signals(self) -> None:

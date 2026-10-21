@@ -18,17 +18,15 @@ os.environ["OMP_MAX_ACTIVE_LEVELS"] = "2"  # the modern equivalent setting
 import random
 import numpy as np
 import emis3d.radDist as radDist
-import emis3d.Util as Util
+import emis3d.util as Util
 import numba as nb
 import matplotlib.path
-from emis3d.Tokamak import Tokamak
+from emis3d.tokamak import Tokamak
 
 logger = logging.getLogger(__name__)
 
 
-def radDist_ElongatedRing_parallel(
-    args: tuple, return_result: bool = False
-):  # -> None | radDist.ElongatedRing:
+def radDist_ElongatedRing_parallel(args: tuple, return_result: bool = False):  # -> None | radDist.ElongatedRing:
     """
     Worker function for parallel computation of ElongatedRing radial distribution.
 
@@ -42,25 +40,17 @@ def radDist_ElongatedRing_parallel(
         config   : configuration object passed to radDist.ElongatedRing.
     """
     rzArray, config = args
-    elongatedRing = radDist.ElongatedRing(
-        startR=rzArray[0], startZ=rzArray[1], config=config
-    )
+    elongatedRing = radDist.ElongatedRing(startR=rzArray[0], startZ=rzArray[1], config=config)
     elongatedRing.build()
 
-    logger.info(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
-    print(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
+    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return elongatedRing
 
 
-def radDist_Helical_parallel(
-    args: tuple, return_result: bool = False
-):  # -> None | radDist.Helical:
+def radDist_Helical_parallel(args: tuple, return_result: bool = False):  # -> None | radDist.Helical:
     """
     Worker function for parallel computation of Helical radial distribution.
 
@@ -78,20 +68,14 @@ def radDist_Helical_parallel(
     helical = radDist.Helical(startR=rzArray[0], startZ=rzArray[1], config=config)
     helical.build()
 
-    logger.info(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
-    print(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
+    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return helical
 
 
-def radDist_HelicalRing_parallel(
-    args: tuple, return_result: bool = False
-):  # -> None | radDist.HelicalRing:
+def radDist_HelicalRing_parallel(args: tuple, return_result: bool = False):  # -> None | radDist.HelicalRing:
     """
     Worker function for parallel computation of Helical radial distribution.
 
@@ -109,20 +93,14 @@ def radDist_HelicalRing_parallel(
     helical = radDist.HelicalRing(startR=rzArray[0], startZ=rzArray[1], config=config)
     helical.build()
 
-    logger.info(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
-    print(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
+    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return helical
 
 
-def radDist_SquareTube_parallel(
-    args: tuple, return_result: bool = False
-):  # -> None | radDist.SquareTube:
+def radDist_SquareTube_parallel(args: tuple, return_result: bool = False):  # -> None | radDist.SquareTube:
     """
     Worker function for parallel computation of Square Tube radial distribution.
 
@@ -139,12 +117,8 @@ def radDist_SquareTube_parallel(
     squareTube = radDist.SquareTube(startR=rzArray[0], startZ=rzArray[1], config=config)
     squareTube.build()
 
-    logger.info(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
-    print(
-        f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}"
-    )
+    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return squareTube
@@ -334,9 +308,7 @@ def bivariate_normal_elongated(
 
     a = cos_t**2 / (2.0 * sigma_R**2) + sin_t**2 / (2.0 * sigma_z**2)
 
-    b = np.sin(2.0 * theta_rad) / (4.0 * sigma_R**2) - np.sin(2.0 * theta_rad) / (
-        4.0 * sigma_z**2
-    )
+    b = np.sin(2.0 * theta_rad) / (4.0 * sigma_R**2) - np.sin(2.0 * theta_rad) / (4.0 * sigma_z**2)
     c = sin_t**2 / (2.0 * sigma_R**2) + cos_t**2 / (2.0 * sigma_z**2)
 
     dR = R - R0
@@ -447,10 +419,7 @@ def bivariate_normal_isodensity_points(
     ValueError if sigma_kernel >= sigma_target (convolution can't shrink a Gaussian).
     """
     if sigma_kernel >= sigma_target:
-        raise ValueError(
-            f"sigma_kernel ({sigma_kernel}) must be strictly less than "
-            f"sigma_target ({sigma_target})."
-        )
+        raise ValueError(f"sigma_kernel ({sigma_kernel}) must be strictly less than " f"sigma_target ({sigma_target}).")
 
     sigma_source = np.sqrt(sigma_target**2 - sigma_kernel**2)
 

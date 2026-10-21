@@ -9,8 +9,6 @@ equilibria, measurements, radDists, runs, results and cache live. Use
 
 from __future__ import annotations
 
-import numpy as np
-
 # Machines with a known toroidal-angle convention. Any machine whose settings
 # file is found on the workspace machine path can be loaded; see emis3d.workspace.
 SUPPORTED_TOKAMAKS: list[str] = ["MOCK", "DIII-D", "SPARC", "SPARC_FDR", "JET"]

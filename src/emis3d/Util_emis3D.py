@@ -14,8 +14,7 @@ import logging
 import re
 import numpy as np
 
-from emis3d.Util import convert_arrays_to_list
-from scipy.special import i0
+from emis3d.util import convert_arrays_to_list
 from lmfit import minimize
 
 logger = logging.getLogger(__name__)
@@ -442,7 +441,6 @@ def residual(
 
         # --- Loop over each bolometer group
         for ii in range(len(synthetic_dict[emissionName]["data"])):
-
 
             # --- Per-channel lists of toroidal observation segments. Each
             # channel holds one phi and one synthetic value per segment

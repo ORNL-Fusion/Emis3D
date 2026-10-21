@@ -16,7 +16,7 @@ import yaml
 
 from emis3d import cli
 from emis3d.calibration import camera_amplitude, cross_calibrate, parse_times
-from emis3d.Globals import RADDIST_FORMAT
+from emis3d.globals import RADDIST_FORMAT
 from emis3d.run_config import RunConfig
 from emis3d.workspace import BUILTIN_MACHINES
 
@@ -46,17 +46,19 @@ def write_workspace(root, miscal=MISCAL, drift=None, scaling=None, loc_dependent
     rd_dir.mkdir(parents=True)
     for i in range(3):
         phi = np.linspace(0, 2 * np.pi, 100, endpoint=False)
-        data = {"Brightness": {"channelOrder": {}, "elongatedRing": {}},
-                "Brightness_error": {"elongatedRing": {}}, "observed_phi_loc": {"elongatedRing": {}},
-                "toroidalRadiatedPower": {"elongatedRing": {"phi_array": phi.tolist(), "P_pol": [1.0] * 100}}}
+        data = {
+            "Brightness": {"channelOrder": {}, "elongatedRing": {}},
+            "Brightness_error": {"elongatedRing": {}},
+            "observed_phi_loc": {"elongatedRing": {}},
+            "toroidalRadiatedPower": {"elongatedRing": {"phi_array": phi.tolist(), "P_pol": [1.0] * 100}},
+        }
         for g, cam in enumerate(CAMS):
             tags, phi = cam_info(cam)
             data["Brightness"]["channelOrder"][cam] = tags
             data["Brightness"]["elongatedRing"][cam] = [[float(v)] for v in shape(i, g, len(tags))]
             data["Brightness_error"]["elongatedRing"][cam] = [[0.0]] * len(tags)
             data["observed_phi_loc"]["elongatedRing"][cam] = [[float(phi)]] * len(tags)
-        info = {"radDistFormat": RADDIST_FORMAT, "units": "Brightness", "emissionNames": ["elongatedRing"],
-                "injectionLocation": 0.0, "distType": "elongatedRing", "tokamakName": "MOCK"}
+        info = {"radDistFormat": RADDIST_FORMAT, "units": "Brightness", "emissionNames": ["elongatedRing"], "injectionLocation": 0.0, "distType": "elongatedRing", "tokamakName": "MOCK"}
         (rd_dir / f"R_{i}.json").write_text(json.dumps({"info": info, "data": data}))
 
     rng = np.random.default_rng(0)
@@ -75,19 +77,28 @@ def write_workspace(root, miscal=MISCAL, drift=None, scaling=None, loc_dependent
 
     run = root / "runs" / "cal" / "run.yaml"
     run.parent.mkdir(parents=True)
-    run.write_text(yaml.safe_dump({
-        "tokamakName": "MOCK", "shot": 1, "dt": 0.05,
-        "radDistDirectories_LocIndependent": ["ring"],
-        "radDistDirectories_LocDependent": ["ring"] if loc_dependent else [],
-        "scale_def": "constant", "error_definition": "constant", "enable_dphi_scaling": False,
-        "BOLOMETERS": {c: {"dataFileName": f"1/{c}.h5", "scalingFactor": (scaling or {}).get(c, 1.0)} for c in CAMS},
-    }))
+    run.write_text(
+        yaml.safe_dump(
+            {
+                "tokamakName": "MOCK",
+                "shot": 1,
+                "dt": 0.05,
+                "radDistDirectories_LocIndependent": ["ring"],
+                "radDistDirectories_LocDependent": ["ring"] if loc_dependent else [],
+                "scale_def": "constant",
+                "error_definition": "constant",
+                "enable_dphi_scaling": False,
+                "BOLOMETERS": {c: {"dataFileName": f"1/{c}.h5", "scalingFactor": (scaling or {}).get(c, 1.0)} for c in CAMS},
+            }
+        )
+    )
     return run
 
 
 # ---------------------------------------------------------------------------
 # The calibration
 # ---------------------------------------------------------------------------
+
 
 def test_recovers_known_factors_against_a_chosen_reference(tmp_path):
     run = write_workspace(tmp_path)
@@ -100,7 +111,7 @@ def test_recovers_known_factors_against_a_chosen_reference(tmp_path):
 def test_default_reference_is_the_largest_amplitude(tmp_path):
     run = write_workspace(tmp_path)
     res = cross_calibrate(run, [10.0])
-    assert res.reference == "POL_C"                      # reads 1.25x, the highest
+    assert res.reference == "POL_C"  # reads 1.25x, the highest
     for cam in CAMS:
         assert res.factor[cam] == pytest.approx(MISCAL["POL_C"] / MISCAL[cam], rel=0.01), cam
 
@@ -163,14 +174,15 @@ def test_cli_calibrate_writes_the_block(tmp_path, capsys):
 # Pieces
 # ---------------------------------------------------------------------------
 
+
 def test_camera_amplitude_is_exact_and_skips_dead_channels():
     s = np.array([1.0, 2.0, 3.0, 4.0])
     d = 2.5 * s
     d_dead = d.copy()
-    d_dead[1] = 0.0                                          # non-positive: left out
+    d_dead[1] = 0.0  # non-positive: left out
     e = np.full(4, 0.1)
     e_dead = e.copy()
-    e_dead[3] = 1.0e8                                        # DEAD_CHANNEL_ERROR: left out
+    e_dead[3] = 1.0e8  # DEAD_CHANNEL_ERROR: left out
     c, sc, chi2, n = camera_amplitude(d, e, s)
     assert c == pytest.approx(2.5) and chi2 == pytest.approx(0.0) and n == 4
     c, _, _, n = camera_amplitude(d_dead, e_dead, s)
@@ -192,7 +204,7 @@ def test_crosscalib_flag_is_gone():
 
 
 def test_residual_rejects_the_old_bolometer_names_argument():
-    import emis3d.Util_emis3D as U
+    import emis3d.util_emis3D as U
 
     with pytest.raises(TypeError, match="cross_calibrate"):
         U.residual(None, None, {"emissionNames": []}, "constant", ["POL_A"])

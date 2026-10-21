@@ -14,9 +14,9 @@ NOTE: run with:  python -m pytest tests/
 
 import numpy as np
 import pytest
-from lmfit import Parameters, minimize
+from lmfit import Parameters
 
-import emis3d.Util_emis3D as U
+import emis3d.util_emis3D as U
 
 NAMES = ["counterClock_rev0", "clockwise_rev0"]
 MU_DEG = 90.0
@@ -75,9 +75,7 @@ class TestEmissionPairs:
 class TestEndpointPenalty:
     def test_weight_zero_disables(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
-        assert (
-            U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 0.0) == []
-        )
+        assert U.helical_endpoint_penalty(_params(1, 2, 2), sd, "exponential", 0.0) == []
 
     def test_missing_P_pol_is_an_error(self):
         """Every current radDist stores its toroidal power profile; a missing one is a bug."""
@@ -112,9 +110,7 @@ class TestEndpointPenalty:
         ppol_ccw = [1.0] * 36
         ppol_ccw[idx] = 0.4
         sd = _synthetic_dict([1.0] * 36, ppol_ccw)
-        pen = U.helical_endpoint_penalty(
-            _params(1.0, 0.005, 0.005), sd, "exponential", 1.0
-        )
+        pen = U.helical_endpoint_penalty(_params(1.0, 0.005, 0.005), sd, "exponential", 1.0)
         assert abs(pen[0]) > 1e-3
 
     def test_no_shared_amplitude_no_penalty(self):
@@ -129,12 +125,8 @@ class TestResidualIntegration:
     def test_residual_appends_one_penalty_element(self):
         sd = _synthetic_dict([1.0] * 36, [1.0] * 36, with_fit_data=True)
         data = {"observed": {0: [1.0] * 4}, "observed_error": {0: [0.1] * 4}}
-        res_off = U.residual(
-            _params(1.0, 1.0, 3.0), data, sd, "exponential", None, True, 0.0
-        )
-        res_on = U.residual(
-            _params(1.0, 1.0, 3.0), data, sd, "exponential", None, True, 1.0
-        )
+        res_off = U.residual(_params(1.0, 1.0, 3.0), data, sd, "exponential", None, True, 0.0)
+        res_on = U.residual(_params(1.0, 1.0, 3.0), data, sd, "exponential", None, True, 1.0)
         assert len(res_on) == len(res_off) + 1
 
     '''
