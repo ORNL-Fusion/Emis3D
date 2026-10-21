@@ -97,6 +97,27 @@ class CalibrationResult:
         lines.append(f"best radDist(s): {', '.join(best)}")
         return "\n".join(lines)
 
+    def relative_uncertainty(self) -> dict:
+        """
+        Relative 1-sigma calibration uncertainty per camera: the spread of its
+        factor over the times and its statistical error, combined. Relative to
+        the reference camera, which is 0; the TPF depends only on these
+        relative values.
+        """
+        out = {}
+        for c in self.cameras:
+            spread = self.spread[c] if np.isfinite(self.spread[c]) else 0.0
+            stat = self.statistical_error[c] if np.isfinite(self.statistical_error[c]) else 0.0
+            out[c] = float(np.hypot(spread, stat))
+        return out
+
+    def uncertainty_block(self) -> str:
+        """An `uncertainty:` block for run configs, so the TPF ranges include calibration."""
+        out = [f"# Calibration uncertainty relative to {self.reference}, from this cross-calibration", "uncertainty:", "  calibration:"]
+        for c, v in self.relative_uncertainty().items():
+            out.append(f"    {c}: {v:.3g}")
+        return "\n".join(out) + "\n"
+
     def yaml_block(self) -> str:
         """A BOLOMETERS block with the new scaling factors, ready to paste into run configs."""
         out = [

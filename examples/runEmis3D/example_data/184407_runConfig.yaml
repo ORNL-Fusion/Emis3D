@@ -31,4 +31,12 @@ BOLOMETERS:
   #  dataFileName: '184407/184407_SX45F_PROCESSED.h5'
   #  scalingFactor: 1.0 
 
-
+# Ranges for TPF and the other derived quantities (all keys optional; on by default).
+# calibration: relative 1-sigma uncertainty per camera, e.g. from `emis3d calibrate`
+# uncertainty:
+#   n_samples: 2000
+#   max_candidates: 25
+#   calibration:
+#     SX90PF: 0.10
+#     DISRADU: 0.10
+#   n_calibration: 20

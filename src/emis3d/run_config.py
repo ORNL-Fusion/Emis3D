@@ -32,6 +32,8 @@ class RunConfig:
     helical_endpoint_weight: float = 1.0
     numProcessorsFitting: int = 1
     paths: dict = field(default_factory=dict)
+    # Ranges for TPF and other derived quantities (emis3d.uncertainty.UncertaintyConfig)
+    uncertainty: dict = field(default_factory=dict)
 
     def __post_init__(self):
         # Check for valid scale definitions
@@ -40,7 +42,11 @@ class RunConfig:
         # Check for valid error definitions
         # (case-insensitive, like Util_emis3D.signal_error)
         if self.error_definition.lower() not in ERROR_DEFINITIONS:
-            raise ValueError(f"Unknown error_definition: {self.error_definition!r}")
+            hint = {
+                "inverse": "use 'constant': it has the same shape, and the overall error scale changes neither the fit nor its ranking",
+                "inverse square": "it is now called 'poisson'",
+            }.get(self.error_definition.lower(), f"choose from {ERROR_DEFINITIONS}")
+            raise ValueError(f"Unknown error_definition {self.error_definition!r}: {hint}")
         if self.fit_method not in FIT_METHODS:
             raise ValueError(f"Unknown fit_method: {self.fit_method!r}; choose from {FIT_METHODS}")
         if self.error_floor < 0 or self.error_relative < 0:
@@ -53,6 +59,13 @@ class RunConfig:
             bad = (bolo or {}).get("badChannels", [])
             if not isinstance(bad, list):
                 raise ValueError(f"BOLOMETERS.{name}.badChannels must be a list of channel names")
+        # --- Uncertainty block: known options, calibration for configured cameras only
+        from emis3d.uncertainty import UncertaintyConfig
+
+        unc = UncertaintyConfig.from_info({"uncertainty": self.uncertainty})
+        unknown_cams = set(unc.calibration) - set(self.BOLOMETERS)
+        if unknown_cams:
+            raise ValueError(f"uncertainty.calibration lists cameras not in BOLOMETERS: {sorted(unknown_cams)}")
         # Check if the radDist directories are listed
         if not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
             raise ValueError("No radDist directories configured")

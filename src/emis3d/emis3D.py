@@ -86,9 +86,9 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 from lmfit import minimize, report_fit
-from scipy.integrate import simpson
 
 import emis3d.util_emis3D as Util_emis3D
+import emis3d.uncertainty as uncertainty
 
 logger = logging.getLogger(__name__)
 from dataclasses import asdict
@@ -196,6 +196,7 @@ class Emis3D:
 
         self._post_process_bolo_locations(evalTime=evalTime)
         self._post_process_calculations(evalTime=evalTime)
+        self._post_process_uncertainty(evalTime=evalTime)
         logger.info(f"→ Done with fit post-processing step 2 out of 2 in {time.time() - t_start:.2f} seconds")
 
     # ------------------------------------------------------------------
@@ -800,17 +801,6 @@ class Emis3D:
     # Post-processing
     # ------------------------------------------------------------------
 
-    def _bestFit_radDist_parameters(self, evalTime: float, emissionName: str) -> tuple[np.ndarray, np.ndarray]:
-        """Finds the starting and ending phi for a given radDist"""
-        phi = self.bestFits[evalTime]["radDist"].data["toroidalRadiatedPower"][emissionName]["phi_array"]
-        P_pol = self.bestFits[evalTime]["radDist"].data["toroidalRadiatedPower"][emissionName]["P_pol"]
-        return np.array(phi), np.array(P_pol)
-
-    def _bestFit_radDist_scaling(self, evalTime: float, emissionName: str) -> float:
-        """Returns the pre-fit synthetic / data normalization factor"""
-        norm_factor = self.bestFits[evalTime]["synthetic_dict"][emissionName]["scaleSynth"]
-        return norm_factor
-
     def _rebuild_radDist(
         self,
         evalTime: float,
@@ -952,11 +942,12 @@ class Emis3D:
 
         # --- Extract bolometer phi locations
         bolo_phi = []
-        chan_list = [chan for sublist in self.channel_order["channel_list"] for chan in sublist]
+        chan_list = {chan for sublist in self.channel_order["channel_list"] for chan in sublist}
         for bolo_ in self.bestFits[evalTime]["radDist"].tokamak.bolometers:
-            # First check to see if the name is in the master channel order
-            bolo_name = bolo_.info["NAME"]
-            if bolo_name in chan_list:
+            # A camera is used if any of its channels is in the fit. (This used to
+            # compare the camera NAME with channel names, which never matched, so
+            # the list was always empty.)
+            if chan_list & set(bolo_.info.get("CHANNEL_TAGS", [])):
                 bolo_phi.append(bolo_.info["CAMERA_POSITION_R_Z_PHI"][2])
 
         if not self.info:
@@ -971,95 +962,82 @@ class Emis3D:
 
     def _post_process_calculations(self, evalTime: float) -> None:
         """
-        Rebuild radDist, calculate powerPerBin, and compute the toroidal
-        peaking factor (TPF).
+        Toroidal radiated-power profile and peaking factor (TPF) of the best fit.
+
+        Uses uncertainty.toroidal_profile, the same function that produces the
+        uncertainty ranges, so the best-fit numbers and the ranges agree. The
+        profile is evaluated at the fitted peak location itself (as in the fit's
+        residual), no grid sample is removed, and the toroidal mean is the mean
+        over the uniform periodic grid (review issue 5).
         """
 
-        # --- Only run if self._post_process_fit_arrangement() has been run
-        if not hasattr(self, "bestFits"):
-            logger.info("Please run self._post_process_fit_arrangement() before " "self._post_process_calculations()")
+        if not hasattr(self, "bestFits") or evalTime not in self.bestFits:
+            raise RuntimeError("Run _post_process_fit_arrangement() before _post_process_calculations()")
+
+        best = self.bestFits[evalTime]
+        params = best["fit"].params.valuesdict()
+        synth = best["synthetic_dict"]
+        scale_def = self.info["scale_def"]
+        bolo_phi_locs = best.get("bolometer_phi_locations")
+
+        prof = uncertainty.toroidal_profile(params, synth, scale_def, bolo_phi_locs)
+        quantities, _ = uncertainty.derived_quantities(
+            params,
+            synth,
+            scale_def,
+            bolo_phi_locs,
+            window_deg=uncertainty.UncertaintyConfig.from_info(self.info).window_deg,
+        )
+
+        rad_distribution = {
+            "phi": prof["phi"],
+            "total_power": prof["total_power"],
+            "peak_emission": prof["mu"],
+            "toroidal_peaking_factor": quantities["tpf"],
+            "quantities": quantities,
+        }
+        for name, comp in prof["per_emission"].items():
+            rad_distribution[name] = {
+                "phi": prof["phi"],
+                "multiplication_factor": comp["multiplication_factor"],
+                "total_power": comp["power"],
+            }
+        best["radiation_distribution"] = rad_distribution
+
+    def _post_process_uncertainty(self, evalTime: float) -> None:
+        """
+        Ranges for TPF, total power, peak location and the other quantities in
+        uncertainty.QUANTITIES, from parameter covariance, near-equivalent
+        radDists and (optionally) camera calibration. Must run before
+        _cleanup_fits, which deletes the other candidate fits.
+
+        Stores bestFits[evalTime]['ranges'] (see UncertaintyResult.as_dict).
+        """
+        cfg = uncertainty.UncertaintyConfig.from_info(self.info)
+        if not cfg.enabled:
             return
 
-        if not self.info:
-            raise AttributeError("Self.info should not be none!")
+        fits_t = self.fits[evalTime]
+        scores = np.asarray(fits_t["scores"], dtype=float)
+        order = [int(i) for i in np.argsort(scores) if np.isfinite(scores[i]) and "fit" in fits_t.get(int(i), {})]
+        if not order:
+            raise RuntimeError(f"No successful fits at t={evalTime}; cannot compute ranges")
 
-        # --- Create an empty dictionary
-        self.bestFits[evalTime]["radiation_distribution"] = {}
-        rad_distribution = self.bestFits[evalTime]["radiation_distribution"]
-        emissionNames = self.bestFits[evalTime]["synthetic_dict"]["emissionNames"]
+        candidates = [(i, fits_t[i]["fit"], fits_t[i]["synthetic_dict"]) for i in order[: cfg.max_candidates]]
 
-        scale_def = self.info["scale_def"]
-        params = self.bestFits[evalTime]["fit"].params.valuesdict()
-
-        # --- Check to see if the peak radiation location can be varied
-        mu = self.bestFits[evalTime]["synthetic_dict"]["injectionLocation_rad"]
-        if "peak_rad_loc" in params:
-            mu = float(params["peak_rad_loc"])
-
-        # Value at the end of each tag in params
-        inj_loc_tag = Util_emis3D.loc_tag(self.bestFits[evalTime]["synthetic_dict"]["injectionLocation"])
-        mu_grid = None
-
-        for emissionName in emissionNames:
-            rad_distribution[emissionName] = {}
-
-            # Find the phi limits that the radDist was created with
-            rD_phi, rD_P_pol = self._bestFit_radDist_parameters(evalTime, emissionName)
-            rD_scale = self._bestFit_radDist_scaling(evalTime, emissionName)
-
-            # Create total power arrays
-            if "phi" not in rad_distribution:
-                rad_distribution["phi"] = rD_phi
-                rad_distribution["total_power"] = np.zeros(rD_phi.shape)
-            else:
-                # Checker to make sure that phi arrays match when doing helical distributions
-                # (or more than one injection location). Use array_equal because
-                # 'rD_phi != stored' is an element-wise array, which is ambiguous
-                # in a boolean context and would raise a ValueError.
-                if not np.array_equal(rD_phi, rad_distribution["phi"]):
-                    raise ValueError("Error! PHI arrays do not match in _post_process_calculations")
-
-            # dphi already accounts for _rev1, _rev2, etc. for helical distributions
-            # Snap mu to the phi grid, so mu is zero at the injection location
-            ang = (rD_phi - mu + np.pi) % (2.0 * np.pi) - np.pi
-            mu_grid = float(rD_phi[int(np.argmin(np.abs(ang)))])
-            dphi = Util_emis3D.find_dphi(rD_phi, mu_grid, emissionName=emissionName)
-
-            # Both directions share amplitude 'a'; their individual decay constant
-            # 'b' controls how fast each falls off away from the injection location.
-            a = params[f"a_{inj_loc_tag}"]
-            b = params[f"b_{emissionName}_{inj_loc_tag}"]
-
-            scale_ = Util_emis3D.scale_wrapper(
-                a=a,
-                b=b,
-                phi=rD_phi,
-                dphi=dphi,
-                mu=mu_grid,
-                scale_def=scale_def,
-                emissionName=emissionName,
-                bolo_phi_locs=self.bestFits[evalTime]["bolometer_phi_locations"],
-            )
-
-            # --- Now calculate the radiation around the vessel due to the radDist
-            rD_power = rD_P_pol * scale_ * rD_scale
-
-            rad_distribution[emissionName]["phi"] = np.asarray(rD_phi)
-            rad_distribution[emissionName]["multiplication_factor"] = np.asarray(scale_)
-            rad_distribution[emissionName]["total_power"] = np.asarray(rD_power)
-            rad_distribution["total_power"] += rD_power
-
-        rad_distribution["peak_emission"] = mu
-
-        # --- Remove the spot at the injection location, since it is double-counted
-        if mu_grid is not None:
-            loc = np.abs(rad_distribution["phi"] - mu_grid).argmin()
-            rad_distribution["total_power"] = np.delete(rad_distribution["total_power"], loc)
-            rad_distribution["phi"] = np.delete(rad_distribution["phi"], loc)
-
-        tp = rad_distribution["total_power"]
-        tpf = np.max(tp) / (simpson(tp, x=rad_distribution["phi"]) / (2.0 * np.pi))
-        rad_distribution["toroidal_peaking_factor"] = tpf
+        result = uncertainty.propagate(
+            candidates,
+            self.fitData[evalTime],
+            self.info["scale_def"],
+            self.channel_order["bolometer_order"],
+            cfg,
+            bolo_phi_locs=self.bestFits[evalTime].get("bolometer_phi_locations"),
+            helical_endpoint_weight=self.info["helical_endpoint_weight"],
+        )
+        self.bestFits[evalTime]["ranges"] = result.as_dict()
+        logger.info("Ranges at t=%s (total):\n%s", evalTime, uncertainty.format_summary(result))
+        for cid, fl in result.flags.items():
+            logger.warning("Fit %s: %s", cid, "; ".join(fl))
 
     # ------------------------------------------------------------------
     # Cleanup / persistence
@@ -1227,6 +1205,8 @@ class Emis3D:
                 out_path = img_dir / filename
                 plt.savefig(out_path, dpi=100, format="png")
                 logger.debug(f"→ Figure saved to {out_path}")
+            # --- Saved figures are closed, so long runs do not accumulate them (S2)
+            plt.close(f)
 
         else:
             plt.show()
@@ -1319,44 +1299,43 @@ class Emis3D:
             ax.legend(fontsize=8)
 
     def _plot_tpf_panel(self, ax, evalTime: float) -> None:
-        """Plots the toroidal radiation distribution and peaking factor"""
+        """Toroidal radiation profile with its uncertainty band and the TPF range."""
 
-        rad_distribution = self.bestFits[evalTime]["radiation_distribution"]
+        best = self.bestFits[evalTime]
+        rad = best["radiation_distribution"]
+        ranges = best.get("ranges")
 
-        y_data = rad_distribution["total_power"]
-        y_max = np.nanmax(y_data)
-        scale = np.floor(np.log10(y_max))
-        y_scaled = y_data / 10**scale
+        phi_deg = np.rad2deg(rad["phi"])
+        y = np.asarray(rad["total_power"], dtype=float)
+        y_max = np.nanmax(y)
+        if ranges is not None:
+            y_max = max(y_max, np.nanmax(ranges["profile_band"]["95%"][1]))
+        scale = np.floor(np.log10(y_max)) if np.isfinite(y_max) and y_max > 0 else 0.0
+        norm = 10.0**scale
 
-        ax.plot(
-            np.rad2deg(rad_distribution["phi"]),
-            y_scaled,
-            color="black",
-            linewidth=2.0,
-        )
-        ax.set_ylim(
-            np.floor(np.nanmin(y_scaled)),
-            np.ceil(np.nanmax(y_scaled)),
-        )
-        ax.axvline(
-            np.rad2deg(rad_distribution["peak_emission"]),
-            np.floor(np.nanmin(y_scaled)),
-            np.ceil(np.nanmax(y_scaled)),
-            linestyle="dashed",
-            color="tab:red",
-        )
-        ax.text(
-            np.rad2deg(rad_distribution["peak_emission"]),
-            np.floor(np.nanmin(y_scaled)) * 1.1,
-            "Peak\nradiation",
-            ha="center",
-            va="bottom",
-            size=10,
-        )
+        if ranges is not None:
+            band = ranges["profile_band"]
+            ax.fill_between(phi_deg, band["95%"][0] / norm, band["95%"][1] / norm, color="0.85", lw=0, label="95%")
+            ax.fill_between(phi_deg, band["68%"][0] / norm, band["68%"][1] / norm, color="0.65", lw=0, label="68%")
+        ax.plot(phi_deg, y / norm, color="black", linewidth=2.0, label="best fit")
 
+        # --- Peak marker spans the whole axis (axvline's ymin/ymax are axis fractions)
+        x_peak = np.rad2deg(rad["peak_emission"]) % 360.0
+        ax.axvline(x_peak, linestyle="dashed", color="tab:red")
+        ax.text(x_peak, 0.02, "Peak\nradiation", ha="center", va="bottom", size=10, transform=ax.get_xaxis_transform())
+
+        ax.set_xlim(0, 360)
+        ax.set_ylim(bottom=0)
         ax.set_xlabel("phi [degrees]")
         ax.set_ylabel(f"radiation [$10^{{{int(scale)}}}$ arb]")
-        ax.set_title(f"time = {evalTime:.4f} ms, " f"TPF: {rad_distribution['toroidal_peaking_factor']:.2f}")
+
+        title = f"time = {evalTime:.4f} ms\nTPF {rad['toroidal_peaking_factor']:.2f}"
+        if ranges is not None and "tpf" in ranges["total"]:
+            lo, hi = ranges["total"]["tpf"]["68%"]
+            title += f" (68%: {lo:.2f}\u2013{hi:.2f})"
+        ax.set_title(title, fontsize=10)
+        if ranges is not None:
+            ax.legend(fontsize=8, loc="upper right")
 
     def _channel_numbers(self, boloName: str) -> np.ndarray:
         """

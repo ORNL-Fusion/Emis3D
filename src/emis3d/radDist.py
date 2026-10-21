@@ -306,8 +306,10 @@ class RadDist(ABC):
             inner = simpson(emis_grid, x=z_vals, axis=1)  # (n_poloidal,)
             P_pol[i] = simpson(inner, x=R_vals)
 
-        # ── 4. Total power assuming toroidal symmetry ─────────────────────────────
-        P_total = simpson(P_pol, x=phi_array)
+        # --- Total power: phi_array is a uniform periodic grid, so the integral
+        # over the full turn is the mean times 2 pi (a Simpson rule over
+        # phi_array would miss the interval from the last sample back to 2 pi)
+        P_total = float(np.mean(P_pol) * 2.0 * np.pi)
 
         return {
             "phi_array": phi_array,

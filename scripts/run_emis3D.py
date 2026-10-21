@@ -117,6 +117,7 @@ if __name__ == "__main__":
         t._post_process_fit_arrangement(evalTime=evalTime)
         t._post_process_bolo_locations(evalTime=evalTime)
         t._post_process_calculations(evalTime=evalTime)
+        t._post_process_uncertainty(evalTime=evalTime)  # before _cleanup_fits
         print(f"→ Done with postprocessing in {time.time() - start_time:.2f} seconds")
         start_time = time.time()
         t._cleanup_fits(evalTime=evalTime)  # to save memory

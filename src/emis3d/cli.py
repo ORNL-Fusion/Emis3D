@@ -161,6 +161,7 @@ def cmd_calibrate(args) -> int:
     block = result.yaml_block()
     print()
     print(block)
+    print(result.uncertainty_block())
     if args.output:
         Path(args.output).expanduser().write_text(block)
         print(f"Written to {args.output}")

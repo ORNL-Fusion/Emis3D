@@ -8,6 +8,7 @@ No cherab or raysect required.
 """
 
 import numpy as np
+import pytest
 
 from emis3d.util_emis3D import (
     find_dphi,
@@ -16,8 +17,8 @@ from emis3d.util_emis3D import (
     scale_constant,
     scale_wrapper,
     error_exponential,
-    error_inverse,
-    error_inv_sqrt,
+    error_poisson,
+    signal_error,
 )
 
 TWO_PI = 2 * np.pi
@@ -205,29 +206,30 @@ class TestErrorModels:
         err_zero = error_exponential(np.array([0.0]), max_signal=1.0)
         assert np.isclose(err[0], err_zero[0])
 
-    def test_error_inverse_at_peak(self):
-        """At signal=max_signal, error = scale_factor."""
-        err = error_inverse(np.array([1.0]), max_signal=1.0, scale_factor=3.0)
-        assert np.isclose(err[0], 3.0)
-
-    def test_error_inverse_increasing(self):
-        """Larger signal → smaller error (inverse relationship)."""
-        s = np.array([0.5, 1.0, 2.0])
-        err = error_inverse(s, max_signal=2.0)
-        assert np.all(np.diff(err) < 0)
-
-    def test_error_inv_sqrt_at_peak(self):
+    def test_error_poisson_at_peak(self):
         """At signal = max_signal, error = scale_factor * sqrt(1) = scale_factor."""
-        err = error_inv_sqrt(np.array([5.0]), max_signal=5.0, scale_factor=2.0)
+        err = error_poisson(np.array([5.0]), max_signal=5.0, scale_factor=2.0)
         assert np.isclose(err[0], 2.0)
 
-    def test_error_inv_sqrt_positive(self):
+    def test_error_poisson_positive(self):
         """Errors should always be positive."""
         s = np.array([0.1, 1.0, 10.0])
-        assert np.all(error_inv_sqrt(s, max_signal=10.0) > 0)
+        assert np.all(error_poisson(s, max_signal=10.0) > 0)
+
+    def test_poisson_absolute_error_grows_as_sqrt(self):
+        s = np.array([1.0, 4.0, 16.0])
+        absolute = s * error_poisson(s, max_signal=16.0)
+        assert np.allclose(absolute / np.sqrt(s), absolute[0])
+
+    def test_unknown_error_model_is_an_error(self):
+        with pytest.raises(ValueError, match="Unknown error model"):
+            signal_error("inverse", np.array([1.0]), 1.0)
+
+    def test_error_model_names_are_case_insensitive(self):
+        assert np.allclose(signal_error("CONSTANT", np.array([2.0]), 4.0), signal_error("constant", np.array([2.0]), 4.0))
 
     def test_all_error_models_return_ndarray(self):
         s = np.array([0.5, 1.0])
-        for fn in (error_exponential, error_inverse, error_inv_sqrt):
+        for fn in (error_exponential, error_poisson):
             result = fn(s, max_signal=1.0)
             assert isinstance(result, np.ndarray), f"{fn.__name__} should return ndarray"

@@ -1,0 +1,1527 @@
+From 41d6ffea35375be4923a9fa021da9c54024d63a8 Mon Sep 17 00:00:00 2001
+From: Claude review <review@example.com>
+Date: Wed, 21 Oct 2026 16:56:39 +0000
+Subject: [PATCH] TPF and derived-quantity ranges; shared toroidal profile;
+ error-model cleanup
+
+Review issue 5 and Phase 6 (the uncertainty patch, ported to the current
+code), S1, S2, S6, and the camera-location lookup.
+
+Toroidal profile and TPF (issue 5)
+- _post_process_calculations uses uncertainty.toroidal_profile, the same
+  function as the ranges: evaluated at the fitted peak location itself (no
+  snapping to the grid), no sample deleted, mean over the periodic grid
+- radDist total power: mean x 2 pi over the uniform periodic grid; the
+  Simpson rule missed the interval from the last sample back to 2 pi
+- _bestFit_radDist_parameters/_scaling, now unused, are removed
+
+Ranges (new emis3d/uncertainty.py)
+- Median and 68%/95% ranges for TPF, total power, peak location, peak power,
+  power fraction near the peak, amplitude and decay lengths, combining
+  parameter covariance, near-equivalent radDists (Akaike weights from the
+  same AIC that ranks the fits) and optional per-camera calibration draws
+- Samples recompute derived parameters, so a fitted peak location
+  (peak_rad_loc from peak_shift) gets a real range
+- Refits use the shared Util_emis3D.fit_radDist
+- Emis3D._post_process_uncertainty stores bestFits[t]["ranges"]; called by
+  _perform_fits and scripts/run_emis3D.py before _cleanup_fits
+- RunConfig gains an `uncertainty:` block (validated; calibration only for
+  configured cameras); on by default, `enabled: false` turns it off
+- `emis3d calibrate` also prints an `uncertainty: calibration:` block from
+  each camera's measured spread
+
+Plots
+- TPF panel: profile with 68%/95% bands and the TPF range in the title; the
+  peak marker spans the axis (S1: axvline's ymin/ymax were given data values)
+- Saved figures are closed (S2)
+
+Error models (S6)
+- signal_error raises on an unknown name instead of returning None
+- "inverse" removed: the same shape as "constant", and the overall error
+  scale changes neither the fit nor its ranking
+- "inverse square" renamed "poisson" (fractional error ~ 1/sqrt(signal));
+  RunConfig explains both changes
+
+Camera locations
+- _post_process_bolo_locations compared camera names with channel names and
+  never matched, so the step scale's locations were always empty; cameras
+  are now matched by their channels
+
+Tests: tests/test_uncertainty.py (14, including interval coverage over 120
+noisy datasets) and tests/test_results.py (5) through Emis3D on fabricated
+MOCK data; error-model tests updated.
+---
+ .../example_data/184407_runConfig.yaml        |  10 +-
+ scripts/run_emis3D.py                         |   1 +
+ src/emis3d/calibration.py                     |  21 +
+ src/emis3d/cli.py                             |   1 +
+ src/emis3d/emis3D.py                          | 241 ++++-----
+ src/emis3d/globals.py                         |   2 +-
+ src/emis3d/radDist.py                         |   6 +-
+ src/emis3d/run_config.py                      |  15 +-
+ src/emis3d/uncertainty.py                     | 495 ++++++++++++++++++
+ src/emis3d/util_emis3D.py                     |  51 +-
+ tests/test_results.py                         |  87 +++
+ tests/test_uncertainty.py                     | 245 +++++++++
+ tests/test_util_emis3d.py                     |  38 +-
+ 13 files changed, 1031 insertions(+), 182 deletions(-)
+ create mode 100644 src/emis3d/uncertainty.py
+ create mode 100644 tests/test_results.py
+ create mode 100644 tests/test_uncertainty.py
+
+diff --git a/examples/runEmis3D/example_data/184407_runConfig.yaml b/examples/runEmis3D/example_data/184407_runConfig.yaml
+index 6e99f95..ed4f3da 100644
+--- a/examples/runEmis3D/example_data/184407_runConfig.yaml
++++ b/examples/runEmis3D/example_data/184407_runConfig.yaml
+@@ -31,4 +31,12 @@ BOLOMETERS:
+   #  dataFileName: '184407/184407_SX45F_PROCESSED.h5'
+   #  scalingFactor: 1.0 
+ 
+-
++# Ranges for TPF and the other derived quantities (all keys optional; on by default).
++# calibration: relative 1-sigma uncertainty per camera, e.g. from `emis3d calibrate`
++# uncertainty:
++#   n_samples: 2000
++#   max_candidates: 25
++#   calibration:
++#     SX90PF: 0.10
++#     DISRADU: 0.10
++#   n_calibration: 20
+diff --git a/scripts/run_emis3D.py b/scripts/run_emis3D.py
+index 8f31379..4deca7d 100644
+--- a/scripts/run_emis3D.py
++++ b/scripts/run_emis3D.py
+@@ -117,6 +117,7 @@ if __name__ == "__main__":
+         t._post_process_fit_arrangement(evalTime=evalTime)
+         t._post_process_bolo_locations(evalTime=evalTime)
+         t._post_process_calculations(evalTime=evalTime)
++        t._post_process_uncertainty(evalTime=evalTime)  # before _cleanup_fits
+         print(f"→ Done with postprocessing in {time.time() - start_time:.2f} seconds")
+         start_time = time.time()
+         t._cleanup_fits(evalTime=evalTime)  # to save memory
+diff --git a/src/emis3d/calibration.py b/src/emis3d/calibration.py
+index c667dec..52f5e9a 100644
+--- a/src/emis3d/calibration.py
++++ b/src/emis3d/calibration.py
+@@ -97,6 +97,27 @@ class CalibrationResult:
+         lines.append(f"best radDist(s): {', '.join(best)}")
+         return "\n".join(lines)
+ 
++    def relative_uncertainty(self) -> dict:
++        """
++        Relative 1-sigma calibration uncertainty per camera: the spread of its
++        factor over the times and its statistical error, combined. Relative to
++        the reference camera, which is 0; the TPF depends only on these
++        relative values.
++        """
++        out = {}
++        for c in self.cameras:
++            spread = self.spread[c] if np.isfinite(self.spread[c]) else 0.0
++            stat = self.statistical_error[c] if np.isfinite(self.statistical_error[c]) else 0.0
++            out[c] = float(np.hypot(spread, stat))
++        return out
++
++    def uncertainty_block(self) -> str:
++        """An `uncertainty:` block for run configs, so the TPF ranges include calibration."""
++        out = [f"# Calibration uncertainty relative to {self.reference}, from this cross-calibration", "uncertainty:", "  calibration:"]
++        for c, v in self.relative_uncertainty().items():
++            out.append(f"    {c}: {v:.3g}")
++        return "\n".join(out) + "\n"
++
+     def yaml_block(self) -> str:
+         """A BOLOMETERS block with the new scaling factors, ready to paste into run configs."""
+         out = [
+diff --git a/src/emis3d/cli.py b/src/emis3d/cli.py
+index 90d077a..9aae63d 100644
+--- a/src/emis3d/cli.py
++++ b/src/emis3d/cli.py
+@@ -161,6 +161,7 @@ def cmd_calibrate(args) -> int:
+     block = result.yaml_block()
+     print()
+     print(block)
++    print(result.uncertainty_block())
+     if args.output:
+         Path(args.output).expanduser().write_text(block)
+         print(f"Written to {args.output}")
+diff --git a/src/emis3d/emis3D.py b/src/emis3d/emis3D.py
+index 70bc094..2c6facc 100644
+--- a/src/emis3d/emis3D.py
++++ b/src/emis3d/emis3D.py
+@@ -86,9 +86,9 @@ import yaml
+ import numpy as np
+ import matplotlib.pyplot as plt
+ from lmfit import minimize, report_fit
+-from scipy.integrate import simpson
+ 
+ import emis3d.util_emis3D as Util_emis3D
++import emis3d.uncertainty as uncertainty
+ 
+ logger = logging.getLogger(__name__)
+ from dataclasses import asdict
+@@ -196,6 +196,7 @@ class Emis3D:
+ 
+         self._post_process_bolo_locations(evalTime=evalTime)
+         self._post_process_calculations(evalTime=evalTime)
++        self._post_process_uncertainty(evalTime=evalTime)
+         logger.info(f"→ Done with fit post-processing step 2 out of 2 in {time.time() - t_start:.2f} seconds")
+ 
+     # ------------------------------------------------------------------
+@@ -800,17 +801,6 @@ class Emis3D:
+     # Post-processing
+     # ------------------------------------------------------------------
+ 
+-    def _bestFit_radDist_parameters(self, evalTime: float, emissionName: str) -> tuple[np.ndarray, np.ndarray]:
+-        """Finds the starting and ending phi for a given radDist"""
+-        phi = self.bestFits[evalTime]["radDist"].data["toroidalRadiatedPower"][emissionName]["phi_array"]
+-        P_pol = self.bestFits[evalTime]["radDist"].data["toroidalRadiatedPower"][emissionName]["P_pol"]
+-        return np.array(phi), np.array(P_pol)
+-
+-    def _bestFit_radDist_scaling(self, evalTime: float, emissionName: str) -> float:
+-        """Returns the pre-fit synthetic / data normalization factor"""
+-        norm_factor = self.bestFits[evalTime]["synthetic_dict"][emissionName]["scaleSynth"]
+-        return norm_factor
+-
+     def _rebuild_radDist(
+         self,
+         evalTime: float,
+@@ -952,11 +942,12 @@ class Emis3D:
+ 
+         # --- Extract bolometer phi locations
+         bolo_phi = []
+-        chan_list = [chan for sublist in self.channel_order["channel_list"] for chan in sublist]
++        chan_list = {chan for sublist in self.channel_order["channel_list"] for chan in sublist}
+         for bolo_ in self.bestFits[evalTime]["radDist"].tokamak.bolometers:
+-            # First check to see if the name is in the master channel order
+-            bolo_name = bolo_.info["NAME"]
+-            if bolo_name in chan_list:
++            # A camera is used if any of its channels is in the fit. (This used to
++            # compare the camera NAME with channel names, which never matched, so
++            # the list was always empty.)
++            if chan_list & set(bolo_.info.get("CHANNEL_TAGS", [])):
+                 bolo_phi.append(bolo_.info["CAMERA_POSITION_R_Z_PHI"][2])
+ 
+         if not self.info:
+@@ -971,95 +962,82 @@ class Emis3D:
+ 
+     def _post_process_calculations(self, evalTime: float) -> None:
+         """
+-        Rebuild radDist, calculate powerPerBin, and compute the toroidal
+-        peaking factor (TPF).
+-        """
++        Toroidal radiated-power profile and peaking factor (TPF) of the best fit.
+ 
+-        # --- Only run if self._post_process_fit_arrangement() has been run
+-        if not hasattr(self, "bestFits"):
+-            logger.info("Please run self._post_process_fit_arrangement() before " "self._post_process_calculations()")
+-            return
+-
+-        if not self.info:
+-            raise AttributeError("Self.info should not be none!")
++        Uses uncertainty.toroidal_profile, the same function that produces the
++        uncertainty ranges, so the best-fit numbers and the ranges agree. The
++        profile is evaluated at the fitted peak location itself (as in the fit's
++        residual), no grid sample is removed, and the toroidal mean is the mean
++        over the uniform periodic grid (review issue 5).
++        """
+ 
+-        # --- Create an empty dictionary
+-        self.bestFits[evalTime]["radiation_distribution"] = {}
+-        rad_distribution = self.bestFits[evalTime]["radiation_distribution"]
+-        emissionNames = self.bestFits[evalTime]["synthetic_dict"]["emissionNames"]
++        if not hasattr(self, "bestFits") or evalTime not in self.bestFits:
++            raise RuntimeError("Run _post_process_fit_arrangement() before _post_process_calculations()")
+ 
++        best = self.bestFits[evalTime]
++        params = best["fit"].params.valuesdict()
++        synth = best["synthetic_dict"]
+         scale_def = self.info["scale_def"]
+-        params = self.bestFits[evalTime]["fit"].params.valuesdict()
+-
+-        # --- Check to see if the peak radiation location can be varied
+-        mu = self.bestFits[evalTime]["synthetic_dict"]["injectionLocation_rad"]
+-        if "peak_rad_loc" in params:
+-            mu = float(params["peak_rad_loc"])
+-
+-        # Value at the end of each tag in params
+-        inj_loc_tag = Util_emis3D.loc_tag(self.bestFits[evalTime]["synthetic_dict"]["injectionLocation"])
+-        mu_grid = None
+-
+-        for emissionName in emissionNames:
+-            rad_distribution[emissionName] = {}
+-
+-            # Find the phi limits that the radDist was created with
+-            rD_phi, rD_P_pol = self._bestFit_radDist_parameters(evalTime, emissionName)
+-            rD_scale = self._bestFit_radDist_scaling(evalTime, emissionName)
++        bolo_phi_locs = best.get("bolometer_phi_locations")
++
++        prof = uncertainty.toroidal_profile(params, synth, scale_def, bolo_phi_locs)
++        quantities, _ = uncertainty.derived_quantities(
++            params,
++            synth,
++            scale_def,
++            bolo_phi_locs,
++            window_deg=uncertainty.UncertaintyConfig.from_info(self.info).window_deg,
++        )
+ 
+-            # Create total power arrays
+-            if "phi" not in rad_distribution:
+-                rad_distribution["phi"] = rD_phi
+-                rad_distribution["total_power"] = np.zeros(rD_phi.shape)
+-            else:
+-                # Checker to make sure that phi arrays match when doing helical distributions
+-                # (or more than one injection location). Use array_equal because
+-                # 'rD_phi != stored' is an element-wise array, which is ambiguous
+-                # in a boolean context and would raise a ValueError.
+-                if not np.array_equal(rD_phi, rad_distribution["phi"]):
+-                    raise ValueError("Error! PHI arrays do not match in _post_process_calculations")
+-
+-            # dphi already accounts for _rev1, _rev2, etc. for helical distributions
+-            # Snap mu to the phi grid, so mu is zero at the injection location
+-            ang = (rD_phi - mu + np.pi) % (2.0 * np.pi) - np.pi
+-            mu_grid = float(rD_phi[int(np.argmin(np.abs(ang)))])
+-            dphi = Util_emis3D.find_dphi(rD_phi, mu_grid, emissionName=emissionName)
+-
+-            # Both directions share amplitude 'a'; their individual decay constant
+-            # 'b' controls how fast each falls off away from the injection location.
+-            a = params[f"a_{inj_loc_tag}"]
+-            b = params[f"b_{emissionName}_{inj_loc_tag}"]
+-
+-            scale_ = Util_emis3D.scale_wrapper(
+-                a=a,
+-                b=b,
+-                phi=rD_phi,
+-                dphi=dphi,
+-                mu=mu_grid,
+-                scale_def=scale_def,
+-                emissionName=emissionName,
+-                bolo_phi_locs=self.bestFits[evalTime]["bolometer_phi_locations"],
+-            )
++        rad_distribution = {
++            "phi": prof["phi"],
++            "total_power": prof["total_power"],
++            "peak_emission": prof["mu"],
++            "toroidal_peaking_factor": quantities["tpf"],
++            "quantities": quantities,
++        }
++        for name, comp in prof["per_emission"].items():
++            rad_distribution[name] = {
++                "phi": prof["phi"],
++                "multiplication_factor": comp["multiplication_factor"],
++                "total_power": comp["power"],
++            }
++        best["radiation_distribution"] = rad_distribution
+ 
+-            # --- Now calculate the radiation around the vessel due to the radDist
+-            rD_power = rD_P_pol * scale_ * rD_scale
++    def _post_process_uncertainty(self, evalTime: float) -> None:
++        """
++        Ranges for TPF, total power, peak location and the other quantities in
++        uncertainty.QUANTITIES, from parameter covariance, near-equivalent
++        radDists and (optionally) camera calibration. Must run before
++        _cleanup_fits, which deletes the other candidate fits.
+ 
+-            rad_distribution[emissionName]["phi"] = np.asarray(rD_phi)
+-            rad_distribution[emissionName]["multiplication_factor"] = np.asarray(scale_)
+-            rad_distribution[emissionName]["total_power"] = np.asarray(rD_power)
+-            rad_distribution["total_power"] += rD_power
++        Stores bestFits[evalTime]['ranges'] (see UncertaintyResult.as_dict).
++        """
++        cfg = uncertainty.UncertaintyConfig.from_info(self.info)
++        if not cfg.enabled:
++            return
+ 
+-        rad_distribution["peak_emission"] = mu
++        fits_t = self.fits[evalTime]
++        scores = np.asarray(fits_t["scores"], dtype=float)
++        order = [int(i) for i in np.argsort(scores) if np.isfinite(scores[i]) and "fit" in fits_t.get(int(i), {})]
++        if not order:
++            raise RuntimeError(f"No successful fits at t={evalTime}; cannot compute ranges")
+ 
+-        # --- Remove the spot at the injection location, since it is double-counted
+-        if mu_grid is not None:
+-            loc = np.abs(rad_distribution["phi"] - mu_grid).argmin()
+-            rad_distribution["total_power"] = np.delete(rad_distribution["total_power"], loc)
+-            rad_distribution["phi"] = np.delete(rad_distribution["phi"], loc)
++        candidates = [(i, fits_t[i]["fit"], fits_t[i]["synthetic_dict"]) for i in order[: cfg.max_candidates]]
+ 
+-        tp = rad_distribution["total_power"]
+-        tpf = np.max(tp) / (simpson(tp, x=rad_distribution["phi"]) / (2.0 * np.pi))
+-        rad_distribution["toroidal_peaking_factor"] = tpf
++        result = uncertainty.propagate(
++            candidates,
++            self.fitData[evalTime],
++            self.info["scale_def"],
++            self.channel_order["bolometer_order"],
++            cfg,
++            bolo_phi_locs=self.bestFits[evalTime].get("bolometer_phi_locations"),
++            helical_endpoint_weight=self.info["helical_endpoint_weight"],
++        )
++        self.bestFits[evalTime]["ranges"] = result.as_dict()
++        logger.info("Ranges at t=%s (total):\n%s", evalTime, uncertainty.format_summary(result))
++        for cid, fl in result.flags.items():
++            logger.warning("Fit %s: %s", cid, "; ".join(fl))
+ 
+     # ------------------------------------------------------------------
+     # Cleanup / persistence
+@@ -1227,6 +1205,8 @@ class Emis3D:
+                 out_path = img_dir / filename
+                 plt.savefig(out_path, dpi=100, format="png")
+                 logger.debug(f"→ Figure saved to {out_path}")
++            # --- Saved figures are closed, so long runs do not accumulate them (S2)
++            plt.close(f)
+ 
+         else:
+             plt.show()
+@@ -1319,44 +1299,43 @@ class Emis3D:
+             ax.legend(fontsize=8)
+ 
+     def _plot_tpf_panel(self, ax, evalTime: float) -> None:
+-        """Plots the toroidal radiation distribution and peaking factor"""
+-
+-        rad_distribution = self.bestFits[evalTime]["radiation_distribution"]
+-
+-        y_data = rad_distribution["total_power"]
+-        y_max = np.nanmax(y_data)
+-        scale = np.floor(np.log10(y_max))
+-        y_scaled = y_data / 10**scale
+-
+-        ax.plot(
+-            np.rad2deg(rad_distribution["phi"]),
+-            y_scaled,
+-            color="black",
+-            linewidth=2.0,
+-        )
+-        ax.set_ylim(
+-            np.floor(np.nanmin(y_scaled)),
+-            np.ceil(np.nanmax(y_scaled)),
+-        )
+-        ax.axvline(
+-            np.rad2deg(rad_distribution["peak_emission"]),
+-            np.floor(np.nanmin(y_scaled)),
+-            np.ceil(np.nanmax(y_scaled)),
+-            linestyle="dashed",
+-            color="tab:red",
+-        )
+-        ax.text(
+-            np.rad2deg(rad_distribution["peak_emission"]),
+-            np.floor(np.nanmin(y_scaled)) * 1.1,
+-            "Peak\nradiation",
+-            ha="center",
+-            va="bottom",
+-            size=10,
+-        )
+-
++        """Toroidal radiation profile with its uncertainty band and the TPF range."""
++
++        best = self.bestFits[evalTime]
++        rad = best["radiation_distribution"]
++        ranges = best.get("ranges")
++
++        phi_deg = np.rad2deg(rad["phi"])
++        y = np.asarray(rad["total_power"], dtype=float)
++        y_max = np.nanmax(y)
++        if ranges is not None:
++            y_max = max(y_max, np.nanmax(ranges["profile_band"]["95%"][1]))
++        scale = np.floor(np.log10(y_max)) if np.isfinite(y_max) and y_max > 0 else 0.0
++        norm = 10.0**scale
++
++        if ranges is not None:
++            band = ranges["profile_band"]
++            ax.fill_between(phi_deg, band["95%"][0] / norm, band["95%"][1] / norm, color="0.85", lw=0, label="95%")
++            ax.fill_between(phi_deg, band["68%"][0] / norm, band["68%"][1] / norm, color="0.65", lw=0, label="68%")
++        ax.plot(phi_deg, y / norm, color="black", linewidth=2.0, label="best fit")
++
++        # --- Peak marker spans the whole axis (axvline's ymin/ymax are axis fractions)
++        x_peak = np.rad2deg(rad["peak_emission"]) % 360.0
++        ax.axvline(x_peak, linestyle="dashed", color="tab:red")
++        ax.text(x_peak, 0.02, "Peak\nradiation", ha="center", va="bottom", size=10, transform=ax.get_xaxis_transform())
++
++        ax.set_xlim(0, 360)
++        ax.set_ylim(bottom=0)
+         ax.set_xlabel("phi [degrees]")
+         ax.set_ylabel(f"radiation [$10^{{{int(scale)}}}$ arb]")
+-        ax.set_title(f"time = {evalTime:.4f} ms, " f"TPF: {rad_distribution['toroidal_peaking_factor']:.2f}")
++
++        title = f"time = {evalTime:.4f} ms\nTPF {rad['toroidal_peaking_factor']:.2f}"
++        if ranges is not None and "tpf" in ranges["total"]:
++            lo, hi = ranges["total"]["tpf"]["68%"]
++            title += f" (68%: {lo:.2f}\u2013{hi:.2f})"
++        ax.set_title(title, fontsize=10)
++        if ranges is not None:
++            ax.legend(fontsize=8, loc="upper right")
+ 
+     def _channel_numbers(self, boloName: str) -> np.ndarray:
+         """
+diff --git a/src/emis3d/globals.py b/src/emis3d/globals.py
+index f77ddee..5384b94 100644
+--- a/src/emis3d/globals.py
++++ b/src/emis3d/globals.py
+@@ -18,7 +18,7 @@ SUPPORTED_TOKAMAKS: list[str] = ["MOCK", "DIII-D", "SPARC", "SPARC_FDR", "JET"]
+ SCALE_DEFINITIONS: list[str] = ["linear", "exponential", "constant", "step"]
+ 
+ # Availble error definitions for the data
+-ERROR_DEFINITIONS: list[str] = ["floor_relative", "exponential", "inverse", "inverse square", "constant"]
++ERROR_DEFINITIONS: list[str] = ["floor_relative", "constant", "poisson", "exponential"]
+ 
+ # Minimizers a run config can choose (fit_method)
+ FIT_METHODS: list[str] = ["least_squares", "differential_evolution"]
+diff --git a/src/emis3d/radDist.py b/src/emis3d/radDist.py
+index e2f7a8b..f2488fd 100644
+--- a/src/emis3d/radDist.py
++++ b/src/emis3d/radDist.py
+@@ -306,8 +306,10 @@ class RadDist(ABC):
+             inner = simpson(emis_grid, x=z_vals, axis=1)  # (n_poloidal,)
+             P_pol[i] = simpson(inner, x=R_vals)
+ 
+-        # ── 4. Total power assuming toroidal symmetry ─────────────────────────────
+-        P_total = simpson(P_pol, x=phi_array)
++        # --- Total power: phi_array is a uniform periodic grid, so the integral
++        # over the full turn is the mean times 2 pi (a Simpson rule over
++        # phi_array would miss the interval from the last sample back to 2 pi)
++        P_total = float(np.mean(P_pol) * 2.0 * np.pi)
+ 
+         return {
+             "phi_array": phi_array,
+diff --git a/src/emis3d/run_config.py b/src/emis3d/run_config.py
+index f58c133..d529d82 100644
+--- a/src/emis3d/run_config.py
++++ b/src/emis3d/run_config.py
+@@ -32,6 +32,8 @@ class RunConfig:
+     helical_endpoint_weight: float = 1.0
+     numProcessorsFitting: int = 1
+     paths: dict = field(default_factory=dict)
++    # Ranges for TPF and other derived quantities (emis3d.uncertainty.UncertaintyConfig)
++    uncertainty: dict = field(default_factory=dict)
+ 
+     def __post_init__(self):
+         # Check for valid scale definitions
+@@ -40,7 +42,11 @@ class RunConfig:
+         # Check for valid error definitions
+         # (case-insensitive, like Util_emis3D.signal_error)
+         if self.error_definition.lower() not in ERROR_DEFINITIONS:
+-            raise ValueError(f"Unknown error_definition: {self.error_definition!r}")
++            hint = {
++                "inverse": "use 'constant': it has the same shape, and the overall error scale changes neither the fit nor its ranking",
++                "inverse square": "it is now called 'poisson'",
++            }.get(self.error_definition.lower(), f"choose from {ERROR_DEFINITIONS}")
++            raise ValueError(f"Unknown error_definition {self.error_definition!r}: {hint}")
+         if self.fit_method not in FIT_METHODS:
+             raise ValueError(f"Unknown fit_method: {self.fit_method!r}; choose from {FIT_METHODS}")
+         if self.error_floor < 0 or self.error_relative < 0:
+@@ -53,6 +59,13 @@ class RunConfig:
+             bad = (bolo or {}).get("badChannels", [])
+             if not isinstance(bad, list):
+                 raise ValueError(f"BOLOMETERS.{name}.badChannels must be a list of channel names")
++        # --- Uncertainty block: known options, calibration for configured cameras only
++        from emis3d.uncertainty import UncertaintyConfig
++
++        unc = UncertaintyConfig.from_info({"uncertainty": self.uncertainty})
++        unknown_cams = set(unc.calibration) - set(self.BOLOMETERS)
++        if unknown_cams:
++            raise ValueError(f"uncertainty.calibration lists cameras not in BOLOMETERS: {sorted(unknown_cams)}")
+         # Check if the radDist directories are listed
+         if not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
+             raise ValueError("No radDist directories configured")
+diff --git a/src/emis3d/uncertainty.py b/src/emis3d/uncertainty.py
+new file mode 100644
+index 0000000..e32e439
+--- /dev/null
++++ b/src/emis3d/uncertainty.py
+@@ -0,0 +1,495 @@
++# uncertainty.py
++"""
++Uncertainty ranges for quantities derived from an Emis3D fit: toroidal peaking
++factor (TPF), total radiated power, peak location, peak power, power fraction
++near the peak, amplitude and toroidal decay lengths.
++
++Three sources are combined, and each can be reported on its own:
++
++1. statistical  - parameter covariance of the best-fit radDist
++2. model        - other radDists that fit almost as well, weighted by Akaike
++                  weights from the same score that ranks the fits
++                  (Util_emis3D.fit_score, lmfit's AIC)
++3. calibration  - relative calibration uncertainty per bolometer group; each
++                  draw rescales the data and refits the candidate radDists
++
++The toroidal profile is computed by ``toroidal_profile``, which
++Emis3D._post_process_calculations also uses, so the best-fit numbers and the
++ranges always come from the same code.
++
++The per-camera calibration uncertainties can be taken from
++`emis3d calibrate`, which prints a ready-made block.
++
++Run-config block (all keys optional):
++
++    uncertainty:
++      enabled: true
++      n_samples: 2000          # parameter samples, pooled over all sources
++      max_candidates: 25       # radDists considered for the model term
++      min_weight: 1.0e-3       # drop candidates below this relative weight
++      calibration:             # relative 1-sigma calibration error per group
++        SX90PF: 0.10
++        DISRADU: 0.10
++      n_calibration: 20        # calibration draws (0 disables the term)
++      window_deg: 45.0         # half-width for the power-fraction quantity
++      seed: 0
++"""
++
++from __future__ import annotations
++
++import copy
++import logging
++from dataclasses import dataclass, field
++
++import numpy as np
++import emis3d.util_emis3D as Util_emis3D
++
++logger = logging.getLogger(__name__)
++
++TWO_PI = 2.0 * np.pi
++
++# Quantities reported for every sample; units in QUANTITY_UNITS
++QUANTITIES = (
++    "tpf",
++    "total_power",
++    "peak_phi_deg",
++    "peak_power",
++    "power_fraction_window",
++    "amplitude",
++)
++QUANTITY_UNITS = {
++    "tpf": "",
++    "total_power": "P_pol units x scaleSynth",
++    "peak_phi_deg": "deg",
++    "peak_power": "P_pol units x scaleSynth per rad",
++    "power_fraction_window": "",
++    "amplitude": "",
++    "decay_length_deg": "deg",
++}
++
++
++# ----------------------------------------------------------------------------
++# Configuration
++# ----------------------------------------------------------------------------
++
++
++@dataclass
++class UncertaintyConfig:
++    enabled: bool = True
++    n_samples: int = 2000
++    max_candidates: int = 25
++    min_weight: float = 1.0e-3
++    calibration: dict = field(default_factory=dict)
++    n_calibration: int = 0
++    window_deg: float = 45.0
++    seed: int | None = 0
++    intervals: tuple = (0.68, 0.95)
++
++    @classmethod
++    def from_info(cls, info: dict | None) -> "UncertaintyConfig":
++        block = dict((info or {}).get("uncertainty", {}) or {})
++        known = {f for f in cls.__dataclass_fields__}
++        unknown = set(block) - known
++        if unknown:
++            raise ValueError(f"Unknown uncertainty options: {sorted(unknown)}")
++        cfg = cls(**block)
++        if cfg.calibration and cfg.n_calibration == 0:
++            cfg.n_calibration = 20
++        return cfg
++
++
++# ----------------------------------------------------------------------------
++# Toroidal profile and derived quantities
++# ----------------------------------------------------------------------------
++
++
++def _peak_location(synth: dict, params: dict) -> float:
++    mu = float(synth["injectionLocation_rad"])
++    if "peak_rad_loc" in params:
++        mu = float(params["peak_rad_loc"])
++    return mu
++
++
++def toroidal_profile(
++    params: dict,
++    synth: dict,
++    scale_def: str,
++    bolo_phi_locs: np.ndarray | None = None,
++) -> dict:
++    """
++    Radiated power per radian around the torus for one parameter set.
++
++    P(phi) = sum_e  P_pol_e(phi) * scale_e(phi) * scaleSynth_e
++
++    Uses the raw peak location (not snapped to the grid) so it matches the
++    residual used in the fit. Requires 'phi_array' and 'P_pol' for every
++    emission (threaded into synthetic_dict by Emis3D._build_synthetic_dict).
++    """
++    tag = Util_emis3D.loc_tag(synth["injectionLocation"])
++    mu = _peak_location(synth, params)
++    a = float(params[f"a_{tag}"])
++
++    phi = None
++    total = None
++    per_emission = {}
++    for name in synth["emissionNames"]:
++        sub = synth[name]
++        phi_e = np.asarray(sub["phi_array"], dtype=float)
++        P_pol = np.asarray(sub["P_pol"], dtype=float)
++        if phi is None:
++            phi = phi_e
++        elif not np.allclose(phi_e, phi):
++            raise ValueError("phi_array differs between emission components")
++
++        b = float(params.get(f"b_{name}_{tag}", 0.0))
++        dphi = Util_emis3D.find_dphi(phi, mu, emissionName=name)
++        scale = Util_emis3D.scale_wrapper(
++            a=a,
++            b=b,
++            phi=phi,
++            dphi=dphi,
++            mu=mu,
++            scale_def=scale_def,
++            emissionName=name,
++            bolo_phi_locs=bolo_phi_locs,
++        )
++        P_e = P_pol * np.asarray(scale, dtype=float) * float(sub["scaleSynth"])
++        per_emission[name] = {"multiplication_factor": np.asarray(scale), "power": P_e}
++        total = P_e if total is None else total + P_e
++
++    return {"phi": phi, "total_power": total, "per_emission": per_emission, "mu": mu}
++
++
++def _decay_length_deg(scale_def: str, a: float, b: float) -> float:
++    """Toroidal distance (deg) over which the scale factor falls by 1/e (or to 0)."""
++    if scale_def == "exponential":
++        return float(np.rad2deg(1.0 / np.sqrt(b))) if b > 0 else np.inf
++    if scale_def == "linear":
++        return float(np.rad2deg(a / abs(b))) if b != 0 else np.inf
++    return np.inf
++
++
++def derived_quantities(
++    params: dict,
++    synth: dict,
++    scale_def: str,
++    bolo_phi_locs: np.ndarray | None = None,
++    window_deg: float = 45.0,
++) -> tuple[dict, np.ndarray]:
++    """Scalar summaries of the toroidal profile, plus the profile itself."""
++    prof = toroidal_profile(params, synth, scale_def, bolo_phi_locs)
++    phi, P = prof["phi"], prof["total_power"]
++    dphi_grid = TWO_PI / phi.size  # uniform periodic grid from linspace(endpoint=False)
++
++    mean = float(np.mean(P))
++    k = int(np.argmax(P))
++    # sub-grid peak location: parabola through the maximum and its periodic neighbours
++    y0, y1, y2 = P[k - 1], P[k], P[(k + 1) % P.size]
++    denom = y0 - 2.0 * y1 + y2
++    shift = 0.5 * (y0 - y2) / denom if denom < 0 else 0.0
++    peak_phi = phi[k] + float(np.clip(shift, -0.5, 0.5)) * dphi_grid
++    dist = np.abs((phi - phi[k] + np.pi) % TWO_PI - np.pi)
++    in_window = dist <= np.deg2rad(window_deg)
++
++    tag = Util_emis3D.loc_tag(synth["injectionLocation"])
++    out = {
++        "tpf": float(P[k] / mean) if mean > 0 else np.nan,
++        "total_power": float(P.sum() * dphi_grid),
++        "peak_phi_deg": float(np.rad2deg(peak_phi) % 360.0),
++        "peak_power": float(P[k]),
++        "power_fraction_window": float(P[in_window].sum() / P.sum()) if P.sum() > 0 else np.nan,
++        "amplitude": float(params[f"a_{tag}"]),
++    }
++    for name in synth["emissionNames"]:
++        b = float(params.get(f"b_{name}_{tag}", 0.0))
++        out[f"decay_length_deg[{name}]"] = _decay_length_deg(scale_def, out["amplitude"], b)
++    return out, P
++
++
++# ----------------------------------------------------------------------------
++# Parameter sampling
++# ----------------------------------------------------------------------------
++
++
++def ensure_covariance(fit, data_dict: dict, synth: dict, scale_def: str, helical_endpoint_weight: float = 0.0):
++    """
++    Return a fit with a usable covariance matrix. If the fit has none (for
++    example differential evolution without numdifftools), refit locally with
++    least_squares from the best-fit values. The refit is only accepted if it
++    is at least as good.
++    """
++    covar = getattr(fit, "covar", None)
++    if covar is not None and np.all(np.isfinite(covar)):
++        return fit, "ok"
++    try:
++        refit = Util_emis3D.fit_radDist(fit.params, data_dict, synth, scale_def, helical_endpoint_weight, method="least_squares")
++    except Exception as e:  # pragma: no cover - defensive
++        logger.warning("Covariance refit failed: %s", e)
++        return fit, "no covariance"
++    refit_covar = getattr(refit, "covar", None)
++    if refit_covar is not None and np.all(np.isfinite(refit_covar)) and refit.chisqr <= fit.chisqr * (1 + 1e-6):
++        return refit, "refit"
++    return fit, "no covariance"
++
++
++def sample_parameters(fit, n: int, rng: np.random.Generator, max_batches: int = 50):
++    """
++    Draw parameter sets from the fit's (redchi-scaled) covariance, truncated to
++    the parameter bounds by rejection. Returns (list of value dicts, flags).
++    """
++    base = fit.params.valuesdict()
++    flags = set()
++    names = list(fit.var_names or [])
++    covar = getattr(fit, "covar", None)
++
++    for nm in names:
++        p = fit.params[nm]
++        span = (p.max - p.min) if np.isfinite(p.max - p.min) else np.inf
++        tol = 1e-3 * span if np.isfinite(span) else 1e-9
++        if np.isfinite(p.min) and p.value - p.min <= tol:
++            flags.add(f"{nm} at lower bound")
++        if np.isfinite(p.max) and p.max - p.value <= tol:
++            flags.add(f"{nm} at upper bound")
++
++    if n <= 0:
++        return [], flags
++    if not names or covar is None or not np.all(np.isfinite(covar)):
++        flags.add("no covariance: statistical spread not included")
++        return [dict(base) for _ in range(n)], flags
++
++    mean = np.array([fit.params[nm].value for nm in names])
++    lo = np.array([fit.params[nm].min for nm in names])
++    hi = np.array([fit.params[nm].max for nm in names])
++    cov = 0.5 * (covar + covar.T)
++
++    accepted = []
++    drawn = 0
++    for _ in range(max_batches):
++        x = rng.multivariate_normal(mean, cov, size=max(n, 64), method="svd")
++        drawn += x.shape[0]
++        ok = np.all((x >= lo) & (x <= hi), axis=1)
++        accepted.extend(x[ok])
++        if len(accepted) >= n:
++            break
++    if len(accepted) < n:
++        flags.add("bounds truncate the covariance strongly; remaining samples clipped")
++        x = np.clip(rng.multivariate_normal(mean, cov, size=n - len(accepted), method="svd"), lo, hi)
++        accepted.extend(x)
++    if drawn and len(accepted) / drawn < 0.5:
++        flags.add(f"{100 * (1 - min(1.0, len(accepted) / drawn)):.0f}% of draws fell outside bounds")
++
++    # Set the varied parameters on a copy so lmfit recomputes the derived ones
++    # (peak_rad_loc = (injector_phi + peak_shift) % 2pi), which would otherwise
++    # stay at their best-fit values and collapse the peak location's range
++    work = fit.params.copy()
++    samples = []
++    for row in accepted[:n]:
++        for nm, v in zip(names, row, strict=True):
++            work[nm].value = float(v)
++        samples.append(dict(work.valuesdict()))
++    return samples, flags
++
++
++# ----------------------------------------------------------------------------
++# Candidate weighting and calibration perturbation
++# ----------------------------------------------------------------------------
++
++
++def candidate_weights(fits: list) -> tuple[np.ndarray, float]:
++    """
++    Akaike weights from the score that ranks the fits (Util_emis3D.fit_score,
++    lmfit's AIC = N ln(chi2/N) + 2k, independent of the error model's scale):
++
++        w_i ~ exp(-(AIC_i - AIC_min) / 2)
++
++    Returns (weights, best score).
++    """
++    score = np.array([Util_emis3D.fit_score(f) for f in fits], dtype=float)
++    if not np.any(np.isfinite(score)):
++        raise RuntimeError("No candidate fit has a finite score")
++    best = float(np.min(score[np.isfinite(score)]))
++    w = np.where(np.isfinite(score), np.exp(-0.5 * (score - best)), 0.0)
++    return w / w.sum(), best
++
++
++def perturb_calibration(data_dict: dict, bolometer_order: list, calibration: dict, rng) -> tuple[dict, dict]:
++    """Scale each bolometer group's data and error by an independent log-normal factor."""
++    new = copy.deepcopy(data_dict)
++    factors = {}
++    for ii, bolo in enumerate(bolometer_order):
++        sigma = float(calibration.get(bolo, 0.0))
++        f = float(np.exp(rng.normal(0.0, sigma))) if sigma > 0 else 1.0
++        factors[bolo] = f
++        new["observed"][ii] = [v * f for v in new["observed"][ii]]
++        new["observed_error"][ii] = [e * f for e in new["observed_error"][ii]]
++    return new, factors
++
++
++# ----------------------------------------------------------------------------
++# Propagation
++# ----------------------------------------------------------------------------
++
++
++@dataclass
++class UncertaintyResult:
++    samples: dict              # quantity -> array over pooled samples
++    source: np.ndarray         # 0 best fit only, 1 nominal mixture, 2 calibration draws
++    candidate: np.ndarray      # candidate index of each sample
++    phi: np.ndarray
++    profiles: np.ndarray       # (n_samples, n_phi) toroidal profiles
++    weights: np.ndarray        # nominal candidate weights
++    candidate_ids: list
++    best_score: float          # AIC of the best candidate
++    flags: dict                # candidate id -> sorted list of flags
++    calibration_factors: list = field(default_factory=list)
++    config: UncertaintyConfig | None = None
++
++    def summary(self, which: str = "total") -> dict:
++        """Median and central intervals per quantity for 'total', 'statistical' or 'model'."""
++        mask = {
++            "statistical": self.source == 0,          # best radDist, parameter covariance
++            "model": self.source == 1,                # + other radDists that fit nearly as well
++            "total": self.source >= 1,                # + calibration draws, if configured
++        }[which]
++        out = {}
++        for q, vals in self.samples.items():
++            v = np.asarray(vals)[mask]
++            v = v[np.isfinite(v)]
++            if v.size == 0:
++                continue
++            entry = {"median": float(np.median(v)), "n": int(v.size)}
++            for c in (self.config or UncertaintyConfig()).intervals:
++                lo, hi = np.percentile(v, [50 * (1 - c), 50 * (1 + c)])
++                entry[f"{int(round(100 * c))}%"] = (float(lo), float(hi))
++            out[q] = entry
++        return out
++
++    def profile_band(self, levels=(0.68, 0.95)) -> dict:
++        prof = self.profiles[self.source >= 1]
++        band: dict = {"phi": self.phi, "median": np.median(prof, axis=0)}
++        for c in levels:
++            lo, hi = np.percentile(prof, [50 * (1 - c), 50 * (1 + c)], axis=0)
++            band[f"{int(round(100 * c))}%"] = (lo, hi)
++        return band
++
++    def as_dict(self) -> dict:
++        """Compact, pickle-friendly record for bestFits."""
++        return {
++            "total": self.summary("total"),
++            "statistical": self.summary("statistical"),
++            "model": self.summary("model"),
++            "profile_band": self.profile_band(),
++            "candidates": [
++                {"fit_id": cid, "weight": float(w), "flags": self.flags.get(cid, [])}
++                for cid, w in zip(self.candidate_ids, self.weights, strict=True)
++            ],
++            "best_score": self.best_score,
++            "calibration_factors": self.calibration_factors,
++            "units": QUANTITY_UNITS,
++        }
++
++
++def propagate(
++    candidates: list,
++    data_dict: dict,
++    scale_def: str,
++    bolometer_order: list,
++    cfg: UncertaintyConfig,
++    bolo_phi_locs: np.ndarray | None = None,
++    helical_endpoint_weight: float = 0.0,
++) -> UncertaintyResult:
++    """
++    candidates : list of (fit_id, lmfit MinimizerResult, synthetic_dict), best first
++    data_dict  : Emis3D.fitData[evalTime] (needs 'observed' and 'observed_error')
++    """
++    rng = np.random.default_rng(cfg.seed)
++    n_real = 1 + (cfg.n_calibration if cfg.calibration else 0)
++    per_real = max(1, cfg.n_samples // n_real)
++
++    # --- nominal fits with covariance
++    nominal = []
++    flags = {}
++    for cid, fit, synth in candidates:
++        fit2, status = ensure_covariance(fit, data_dict, synth, scale_def, helical_endpoint_weight)
++        if status == "no covariance":
++            flags.setdefault(cid, set()).add("no covariance: statistical spread not included")
++        nominal.append((cid, fit2, synth))
++
++    weights, best_score = candidate_weights([f for _, f, _ in nominal])
++    keep = weights >= cfg.min_weight * weights.max()
++    nominal = [c for c, k in zip(nominal, keep, strict=True) if k]
++    weights = weights[keep] / weights[keep].sum()
++
++    phi_ref = None
++    rows, profiles, source, cand_idx = [], [], [], []
++    cal_factors = []
++
++    def add_samples(fit_list, counts, src):
++        nonlocal phi_ref
++        for j, ((cid, fit, synth), n_j) in enumerate(zip(fit_list, counts, strict=True)):
++            if n_j == 0:
++                continue
++            samples, fl = sample_parameters(fit, int(n_j), rng)
++            if fl:
++                flags.setdefault(cid, set()).update(fl)
++            for pv in samples:
++                q, P = derived_quantities(pv, synth, scale_def, bolo_phi_locs, cfg.window_deg)
++                rows.append(q)
++                profiles.append(P)
++                source.append(src)
++                cand_idx.append(j)
++            if phi_ref is None:
++                phi_ref = np.asarray(synth[synth["emissionNames"][0]]["phi_array"], dtype=float)
++
++    # --- source 0: best candidate only (statistical term)
++    best = int(np.argmax(weights))
++    counts = np.zeros(len(nominal), int)
++    counts[best] = per_real
++    add_samples(nominal, counts, 0)
++
++    # --- source 1: nominal data, all candidates by weight (statistical + model)
++    add_samples(nominal, rng.multinomial(per_real, weights), 1)
++
++    # --- source 2: calibration draws, refit and reweighted each time
++    for _ in range(n_real - 1):
++        dd, factors = perturb_calibration(data_dict, bolometer_order, cfg.calibration, rng)
++        cal_factors.append(factors)
++        fits_r = []
++        for cid, fit, synth in nominal:
++            try:
++                refit = Util_emis3D.fit_radDist(fit.params, dd, synth, scale_def, helical_endpoint_weight, method="least_squares")
++            except Exception as e:
++                logger.warning("Calibration refit failed for fit %s: %s", cid, e)
++                refit = fit
++            fits_r.append((cid, refit, synth))
++        w_r, _ = candidate_weights([f for _, f, _ in fits_r])
++        add_samples(fits_r, rng.multinomial(per_real, w_r), 2)
++
++    if phi_ref is None:
++        raise RuntimeError("No parameter samples were drawn; check n_samples and the candidate weights")
++    keys = sorted({k for row in rows for k in row})
++    samples = {k: np.array([row.get(k, np.nan) for row in rows]) for k in keys}
++
++    return UncertaintyResult(
++        samples=samples,
++        source=np.array(source),
++        candidate=np.array(cand_idx),
++        phi=phi_ref,
++        profiles=np.array(profiles),
++        weights=weights,
++        candidate_ids=[cid for cid, _, _ in nominal],
++        best_score=best_score,
++        flags={cid: sorted(v) for cid, v in flags.items()},
++        calibration_factors=cal_factors,
++        config=cfg,
++    )
++
++
++def format_summary(result: UncertaintyResult, which: str = "total") -> str:
++    """Human-readable table for logs and reports."""
++    lines = [f"{'quantity':34s} {'median':>12s} {'68% interval':>27s} {'95% interval':>27s}"]
++    for q, e in result.summary(which).items():
++        lo68, hi68 = e["68%"]
++        lo95, hi95 = e["95%"]
++        lines.append(f"{q:34s} {e['median']:12.4g} [{lo68:11.4g}, {hi68:11.4g}] [{lo95:11.4g}, {hi95:11.4g}]")
++    return "\n".join(lines)
+diff --git a/src/emis3d/util_emis3D.py b/src/emis3d/util_emis3D.py
+index 2a0a8b6..c9260d9 100644
+--- a/src/emis3d/util_emis3D.py
++++ b/src/emis3d/util_emis3D.py
+@@ -549,7 +549,7 @@ def channel_error(
+         terms and cannot dominate the fit; the relative term is the calibration
+         uncertainty, so strong channels are fitted to about that fraction. If
+         noise is given (per channel, same units), the floor is raised to it.
+-    Other definitions (exponential, inverse, inverse square, constant) keep
++    Other definitions (constant, poisson, exponential) keep
+         their fractional form, sigma = signal * signal_error(...). They are not
+         defined for signal <= 0, so those channels get an infinite error and are
+         left out of the fit.
+@@ -574,18 +574,25 @@ def signal_error(
+     max_signal: float,
+     scale_factor: float = 1.0,
+ ):
+-    """Wrapper for the error function"""
++    """
++    Fractional error (error / signal) of a channel for the named error model.
++    Names are case-insensitive; an unknown name raises ValueError.
+ 
+-    type_ = type.upper()
++        constant     10% of the peak, the same for every channel
++        poisson      grows as sqrt(signal), like shot noise
++        exponential  large near zero, small at the peak
+ 
+-    if type_ == "EXPONENTIAL":
+-        return error_exponential(signal, max_signal, scale_factor)
+-    elif type_ == "INVERSE":
+-        return error_inverse(signal, max_signal, scale_factor)
+-    elif type_ == "INVERSE SQUARE":
+-        return error_inv_sqrt(signal, max_signal, scale_factor)
+-    elif type_ == "CONSTANT":
+-        return error_constant(signal, max_signal)
++    floor_relative, the default, is computed in channel_error instead.
++    """
++    models = {
++        "constant": lambda: error_constant(signal, max_signal),
++        "poisson": lambda: error_poisson(signal, max_signal, scale_factor),
++        "exponential": lambda: error_exponential(signal, max_signal, scale_factor),
++    }
++    name = type.lower()
++    if name not in models:
++        raise ValueError(f"Unknown error model {type!r}; choose from {sorted(models)} or 'floor_relative'")
++    return models[name]()
+ 
+ 
+ def error_constant(
+@@ -617,30 +624,18 @@ def error_exponential(
+     return scale_factor * np.exp(-decay * signal / max_signal)
+ 
+ 
+-def error_inverse(
+-    signal: np.ndarray,
+-    max_signal: float,
+-    scale_factor: float = 1.0,
+-    _floor: float = 1.0e-12,
+-) -> np.ndarray:
+-    """
+-    Hyperbolic error model: error = scale_factor * (max_signal / signal).
+-    """
+-    signal = np.clip(signal, _floor, None)
+-    return scale_factor * (max_signal / signal)
+-
+-
+-def error_inv_sqrt(
++def error_poisson(
+     signal: np.ndarray,
+     max_signal: float,
+     scale_factor: float = 1.0,
+     _floor: float = 1.0e-12,
+ ) -> np.ndarray:
+     """
+-    Inverse square-root (Poisson / shot-noise) error model.
++    Poisson (shot-noise) error model: the fractional error falls as
++    1/sqrt(signal), so the absolute error grows as sqrt(signal).
+ 
+-    error = scale_factor * sqrt(max_signal / signal)
+-    error = 1.0 at peak signal.
++    error / signal = scale_factor * sqrt(max_signal / signal), 1.0 at the peak.
++    (Previously named "inverse square", which it is not.)
+     """
+     signal = np.clip(signal, _floor, None)
+     return scale_factor * np.sqrt(max_signal / signal)
+diff --git a/tests/test_results.py b/tests/test_results.py
+new file mode 100644
+index 0000000..fe82654
+--- /dev/null
++++ b/tests/test_results.py
+@@ -0,0 +1,87 @@
++"""
++tests/test_results.py
++
++Post-processing through Emis3D on fabricated MOCK data (no ray tracing):
++the toroidal profile and TPF (review issue 5), the uncertainty ranges
++(Phase 6), the camera locations used by the step scale, and the TPF panel
++(S1).
++"""
++
++import types
++
++import matplotlib
++
++matplotlib.use("Agg")
++import matplotlib.pyplot as plt
++import numpy as np
++import pytest
++
++from emis3d.emis3D import Emis3D
++from emis3d.tokamak import Tokamak
++from test_calibration import CAMS, write_workspace
++
++T = 10.0
++FIT = {"error_definition": "floor_relative", "scale_def": "exponential", "enable_dphi_scaling": True,
++       "uncertainty": {"n_samples": 300, "max_candidates": 3}}
++
++
++@pytest.fixture(scope="module")
++def fitted(tmp_path_factory):
++    run = write_workspace(tmp_path_factory.mktemp("ws"), miscal={c: 1.0 for c in CAMS}, **FIT)
++    e = Emis3D(runConfigName=str(run))
++    e._prepare_fits(evalTime=T)
++    e._minimize_radDists(evalTime=T)
++    best = int(np.argmin(e.fits[T]["scores"]))
++    # what _post_process_fit_arrangement stores, without rebuilding the (fabricated) radDist
++    e.bestFits = {T: {"fit": e.fits[T][best]["fit"], "synthetic_dict": e.fits[T][best]["synthetic_dict"]}}
++    e._post_process_calculations(evalTime=T)
++    e._post_process_uncertainty(evalTime=T)
++    return e
++
++
++def test_profile_keeps_every_sample_and_tpf_is_peak_over_mean(fitted):
++    rad = fitted.bestFits[T]["radiation_distribution"]
++    assert len(rad["phi"]) == len(rad["total_power"]) == 100          # no sample deleted
++    P = np.asarray(rad["total_power"])
++    assert rad["toroidal_peaking_factor"] == pytest.approx(P.max() / P.mean())
++
++
++def test_ranges_are_stored_and_contain_the_best_fit(fitted):
++    ranges = fitted.bestFits[T]["ranges"]
++    tpf = fitted.bestFits[T]["radiation_distribution"]["toroidal_peaking_factor"]
++    lo, hi = ranges["total"]["tpf"]["95%"]
++    assert lo <= tpf <= hi
++    for q in ("total_power", "peak_phi_deg", "peak_power", "amplitude"):
++        assert q in ranges["total"]
++    assert set(ranges["profile_band"]) >= {"phi", "median", "68%", "95%"}
++
++
++def test_ranges_can_be_switched_off(tmp_path):
++    run = write_workspace(tmp_path, miscal={c: 1.0 for c in CAMS}, **{**FIT, "uncertainty": {"enabled": False}})
++    e = Emis3D(runConfigName=str(run))
++    e._prepare_fits(evalTime=T)
++    e._minimize_radDists(evalTime=T)
++    e.bestFits = {T: {}}
++    e._post_process_uncertainty(evalTime=T)
++    assert "ranges" not in e.bestFits[T]
++
++
++def test_camera_locations_are_found_by_channel_name(fitted):
++    """This compared camera names with channel names, so it always found none."""
++    tok = Tokamak(tokamakName="MOCK", mode="Analysis", loadBolometers=True, workspace=fitted.ws)
++    fitted.bestFits[T]["radDist"] = types.SimpleNamespace(tokamak=tok)
++    fitted._post_process_bolo_locations(evalTime=T)
++    found = sorted(np.rad2deg(fitted.bestFits[T]["bolometer_phi_locations"]).round(6))
++    assert found == [20.0, 45.0, 165.0, 285.0]                    # SKEW shares 165 with POL_B
++
++
++def test_tpf_panel_draws_the_band_and_a_full_height_peak_marker(fitted):
++    f, ax = plt.subplots()
++    try:
++        fitted._plot_tpf_panel(ax, T)
++        marker = [ln for ln in ax.get_lines() if ln.get_linestyle() == "--"][0]
++        assert list(marker.get_ydata()) == [0, 1]                  # axes fraction: bottom to top
++        assert "68%" in ax.get_title()
++        assert len(ax.collections) == 2                            # 68% and 95% bands
++    finally:
++        plt.close(f)
+diff --git a/tests/test_uncertainty.py b/tests/test_uncertainty.py
+new file mode 100644
+index 0000000..49268b6
+--- /dev/null
++++ b/tests/test_uncertainty.py
+@@ -0,0 +1,245 @@
++"""
++Tests for emis3d.uncertainty (review issue 5 / Phase 6).
++
++Fake radDists are built through the real RadDistFitting class (no ray tracing):
++each bolometer group views one toroidal plane, and the emissivity's toroidal
++shape comes only from the fitted scale function, so the true TPF is known.
++"""
++
++import numpy as np
++import pytest
++import yaml
++
++import emis3d.util_emis3D as Util_emis3D
++from emis3d import uncertainty as U
++from emis3d.radDistFitting import RadDistFitting
++from emis3d.run_config import RunConfig
++
++INJ_DEG = 225.0
++GROUPS = {"CAM_A": 135.0, "CAM_B": 270.0, "CAM_C": 315.0}   # camera phi [deg]
++N_CH = 12
++N_PHI = 100
++
++
++def poloidal_shape(kind: str, n=N_CH):
++    x = np.linspace(-1, 1, n)
++    if kind == "narrow":
++        return np.exp(-x**2 / (2 * 0.3**2)) + 0.05
++    if kind == "wide":
++        return np.exp(-x**2 / (2 * 0.8**2)) + 0.05
++    if kind == "shifted":
++        return np.exp(-(x - 0.4)**2 / (2 * 0.4**2)) + 0.05
++    raise ValueError(kind)
++
++
++def fake_raddist(kind="narrow", groups=GROUPS, P_pol=None):
++    """A RadDistFitting object with the same structure as a loaded radDist JSON."""
++    rd = RadDistFitting()
++    shape = poloidal_shape(kind)
++    phi = np.linspace(0, 2 * np.pi, N_PHI, endpoint=False)
++    rd.info.update({"units": "Brightness", "emissionNames": ["elongatedRing"],
++                    "injectionLocation": INJ_DEG, "distType": "elongatedRing"})
++    data = {"Brightness": {"channelOrder": {}, "elongatedRing": {}},
++            "Brightness_error": {"elongatedRing": {}},
++            "observed_phi_loc": {"elongatedRing": {}},
++            "toroidalRadiatedPower": {"elongatedRing": {
++                "phi_array": phi, "P_pol": np.ones(N_PHI) if P_pol is None else P_pol}}}
++    for g, phi_deg in groups.items():
++        chans = [f"{g}{i}" for i in range(N_CH)]
++        data["Brightness"]["channelOrder"][g] = chans
++        data["Brightness"]["elongatedRing"][g] = [[v] for v in shape]
++        data["Brightness_error"]["elongatedRing"][g] = [[0.0] for _ in shape]
++        data["observed_phi_loc"]["elongatedRing"][g] = [[np.deg2rad(phi_deg)] for _ in shape]
++    rd.data = data
++    rd._load_ok = True
++    rd._map_signals()
++    return rd
++
++
++def truth_params(b):
++    return {"a_225": 1.0, "b_elongatedRing_225": b}
++
++
++def make_data(rd_truth, b_true, amp=1000.0, noise=0.03, rng=None, cal=None):
++    """Observed data and errors in Emis3D's nested-list format."""
++    rng = rng or np.random.default_rng(0)
++    mu = np.deg2rad(INJ_DEG)
++    obs, err = [], []
++    for g, phi_deg in GROUPS.items():
++        shape = np.array([rd_truth.data_maps["elongatedRing"]["data"][f"{g}{i}"][0] for i in range(N_CH)])
++        dphi = Util_emis3D.find_dphi(np.array([np.deg2rad(phi_deg)]), mu, "elongatedRing")[0]
++        clean = amp * np.exp(-b_true * dphi**2) * shape * (1.0 if cal is None else cal[g])
++        sig = noise * clean
++        obs.append(list(clean + rng.normal(0, sig)))
++        err.append(list(sig))
++    return {"observed": obs, "observed_error": err}
++
++
++def prepared_candidate(rd, data_dict, fit_id=0, scale_def="exponential", vary_peak=False, method="least_squares"):
++    channel_list = [[f"{g}{i}" for i in range(N_CH)] for g in GROUPS]
++    data_max = max(max(v) for v in data_dict["observed"])
++    rd.prepare_for_fits(channel_list, data_max=data_max)
++    rd.create_parameters(enable_dphi_scaling=True, vary_peak_rad_location=vary_peak, scale_def=scale_def)
++    synth = {
++        "info": rd.info,
++        "injectionLocation": INJ_DEG,
++        "injectionLocation_rad": np.deg2rad(INJ_DEG),
++        "emissionNames": rd.info["emissionNames"],
++    }
++    for e in rd.info["emissionNames"]:
++        synth[e] = dict(rd.fitSynthetic[e])
++        synth[e]["phi_array"] = rd.data["toroidalRadiatedPower"][e]["phi_array"]
++        synth[e]["P_pol"] = rd.data["toroidalRadiatedPower"][e]["P_pol"]
++    fit = Util_emis3D.fit_radDist(rd.fitSynthetic["params"]["params"], data_dict, synth, scale_def, 0.0, method=method)
++    return (fit_id, fit, synth)
++
++
++def true_tpf(b, P_pol=None):
++    synth = {"injectionLocation": INJ_DEG, "injectionLocation_rad": np.deg2rad(INJ_DEG),
++             "emissionNames": ["elongatedRing"],
++             "elongatedRing": {"phi_array": np.linspace(0, 2 * np.pi, N_PHI, endpoint=False),
++                               "P_pol": np.ones(N_PHI) if P_pol is None else P_pol, "scaleSynth": 1.0}}
++    q, _ = U.derived_quantities(truth_params(b), synth, "exponential")
++    return q["tpf"]
++
++
++# ---------------------------------------------------------------------------
++# Profile and derived quantities
++# ---------------------------------------------------------------------------
++
++def test_constant_scale_gives_tpf_one():
++    synth = {"injectionLocation": INJ_DEG, "injectionLocation_rad": np.deg2rad(INJ_DEG),
++             "emissionNames": ["elongatedRing"],
++             "elongatedRing": {"phi_array": np.linspace(0, 2 * np.pi, N_PHI, endpoint=False),
++                               "P_pol": np.full(N_PHI, 3.0), "scaleSynth": 2.0}}
++    q, P = U.derived_quantities({"a_225": 1.5, "b_elongatedRing_225": 0.0}, synth, "constant")
++    assert q["tpf"] == pytest.approx(1.0)
++    assert q["total_power"] == pytest.approx(2 * np.pi * 3.0 * 2.0 * 1.5)   # periodic sum, no missing interval
++
++
++def test_peak_is_kept_and_located_at_injection():
++    tpf = true_tpf(2.0)
++    assert tpf > 1.5
++    rd = fake_raddist()
++    synth = {"injectionLocation": INJ_DEG, "injectionLocation_rad": np.deg2rad(INJ_DEG),
++             "emissionNames": ["elongatedRing"],
++             "elongatedRing": {"phi_array": rd.data["toroidalRadiatedPower"]["elongatedRing"]["phi_array"],
++                               "P_pol": np.ones(N_PHI), "scaleSynth": 1.0}}
++    q, _ = U.derived_quantities(truth_params(2.0), synth, "exponential")
++    assert abs(q["peak_phi_deg"] - INJ_DEG) <= 360 / N_PHI
++
++
++def test_unknown_uncertainty_option_rejected():
++    with pytest.raises(ValueError):
++        U.UncertaintyConfig.from_info({"uncertainty": {"n_sample": 10}})
++
++
++# ---------------------------------------------------------------------------
++# Propagation
++# ---------------------------------------------------------------------------
++
++def test_statistical_interval_covers_truth_at_nominal_rate():
++    """Over many noisy datasets the 68% / 95% TPF intervals should contain the truth ~68% / ~95% of the time."""
++    b_true = 2.0
++    t = true_tpf(b_true)
++    rng = np.random.default_rng(42)
++    cfg = U.UncertaintyConfig(n_samples=400, seed=1)
++    hits68 = hits95 = 0
++    n_trials = 120
++    for _ in range(n_trials):
++        dd = make_data(fake_raddist(), b_true, rng=rng)
++        cand = prepared_candidate(fake_raddist(), dd)
++        res = U.propagate([cand], dd, "exponential", list(GROUPS), cfg)
++        s = res.summary("statistical")["tpf"]
++        hits68 += s["68%"][0] <= t <= s["68%"][1]
++        hits95 += s["95%"][0] <= t <= s["95%"][1]
++    assert 0.56 <= hits68 / n_trials <= 0.80
++    assert 0.88 <= hits95 / n_trials <= 1.0
++
++
++def test_model_term_weights_the_right_raddist():
++    dd = make_data(fake_raddist("narrow"), 2.0, rng=np.random.default_rng(3))
++    cands = [prepared_candidate(fake_raddist(k), dd, fit_id=i)
++             for i, k in enumerate(["narrow", "wide", "shifted"])]
++    res = U.propagate(cands, dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=300, min_weight=0.0))
++    assert res.candidate_ids[int(np.argmax(res.weights))] == 0
++    assert res.weights[0] > 0.99
++
++
++def test_calibration_term_widens_the_range():
++    dd = make_data(fake_raddist(), 2.0, rng=np.random.default_rng(5))
++    cand = prepared_candidate(fake_raddist(), dd)
++    base = U.propagate([cand], dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=600))
++    cal = U.propagate([cand], dd, "exponential", list(GROUPS),
++                      U.UncertaintyConfig(n_samples=600, calibration={g: 0.15 for g in GROUPS}, n_calibration=20))
++    w_base = np.diff(base.summary("total")["tpf"]["68%"])[0]
++    w_cal = np.diff(cal.summary("total")["tpf"]["68%"])[0]
++    assert w_cal > 1.5 * w_base
++
++
++def test_flags_parameter_at_bound():
++    # Toroidally uniform data drives b to its lower bound of 0
++    dd = make_data(fake_raddist(), 0.0, rng=np.random.default_rng(7))
++    cand = prepared_candidate(fake_raddist(), dd)
++    res = U.propagate([cand], dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=200))
++    assert any("at lower bound" in f for f in res.flags.get(0, []))
++    assert res.summary("statistical")["tpf"]["68%"][0] >= 1.0
++
++
++def test_differential_evolution_fit_gets_covariance():
++    dd = make_data(fake_raddist(), 2.0, rng=np.random.default_rng(9))
++    cand = prepared_candidate(fake_raddist(), dd, method="differential_evolution")
++    res = U.propagate([cand], dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=200))
++    s = res.summary("statistical")["tpf"]
++    assert s["68%"][1] > s["68%"][0]          # non-zero width, so a covariance was obtained
++
++
++def test_fitted_peak_location_gets_a_range():
++    """peak_rad_loc is derived from peak_shift; samples must recompute it, or its range is a single value."""
++    dd = make_data(fake_raddist(), 2.0, rng=np.random.default_rng(11))
++    cand = prepared_candidate(fake_raddist(), dd, vary_peak=True)
++    assert "peak_shift" in cand[1].var_names and cand[1].params["peak_rad_loc"].expr
++    res = U.propagate([cand], dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=400))
++    lo, hi = res.summary("statistical")["peak_phi_deg"]["95%"]
++    assert hi - lo > 0.1 and lo <= INJ_DEG <= hi
++
++
++def test_model_weights_follow_the_ranking_score():
++    dd = make_data(fake_raddist("narrow"), 2.0, rng=np.random.default_rng(3))
++    cands = [prepared_candidate(fake_raddist(k), dd, fit_id=i) for i, k in enumerate(["narrow", "wide"])]
++    w, best = U.candidate_weights([c[1] for c in cands])
++    scores = [Util_emis3D.fit_score(c[1]) for c in cands]
++    assert best == min(scores)
++    assert w[1] / w[0] == pytest.approx(np.exp(-0.5 * (scores[1] - scores[0])))
++
++
++# ---------------------------------------------------------------------------
++# Run config and calibration
++# ---------------------------------------------------------------------------
++
++BASE = {"BOLOMETERS": {"CAM_A": {"dataFileName": "a.h5"}}, "shot": 1, "radDistDirectories_LocIndependent": ["x"]}
++
++
++def test_run_config_checks_the_uncertainty_block():
++    assert RunConfig.from_dict({**BASE, "uncertainty": {"n_samples": 100, "calibration": {"CAM_A": 0.1}}})
++    with pytest.raises(ValueError, match="Unknown uncertainty options"):
++        RunConfig.from_dict({**BASE, "uncertainty": {"n_sample": 100}})
++    with pytest.raises(ValueError, match="not in BOLOMETERS"):
++        RunConfig.from_dict({**BASE, "uncertainty": {"calibration": {"CAM_Z": 0.1}}})
++
++
++@pytest.mark.parametrize("old, hint", [("inverse", "constant"), ("inverse square", "poisson")])
++def test_renamed_error_models_explain_themselves(old, hint):
++    with pytest.raises(ValueError, match=hint):
++        RunConfig.from_dict({**BASE, "error_definition": old})
++
++
++def test_calibration_prints_an_uncertainty_block():
++    from emis3d.calibration import CalibrationResult
++
++    f = np.array([[1.0, 0.8], [1.0, 0.84], [1.0, 0.76]])
++    res = CalibrationResult(cameras=["A", "B"], times=[1, 2, 3], reference="A", amplitudes=1 / f,
++                            amplitude_errors=0.01 / f, factors=f, factor_errors=0.01 * f * np.array([0.0, 1.0]),
++                            best_raddist=["r"] * 3, chi2=[1.0] * 3)
++    block = yaml.safe_load(res.uncertainty_block())["uncertainty"]["calibration"]
++    assert block["A"] == 0.0 and block["B"] == pytest.approx(np.hypot(res.spread["B"], res.statistical_error["B"]), rel=1e-2)
+diff --git a/tests/test_util_emis3d.py b/tests/test_util_emis3d.py
+index ea0dee4..593d946 100644
+--- a/tests/test_util_emis3d.py
++++ b/tests/test_util_emis3d.py
+@@ -8,6 +8,7 @@ No cherab or raysect required.
+ """
+ 
+ import numpy as np
++import pytest
+ 
+ from emis3d.util_emis3D import (
+     find_dphi,
+@@ -16,8 +17,8 @@ from emis3d.util_emis3D import (
+     scale_constant,
+     scale_wrapper,
+     error_exponential,
+-    error_inverse,
+-    error_inv_sqrt,
++    error_poisson,
++    signal_error,
+ )
+ 
+ TWO_PI = 2 * np.pi
+@@ -205,29 +206,30 @@ class TestErrorModels:
+         err_zero = error_exponential(np.array([0.0]), max_signal=1.0)
+         assert np.isclose(err[0], err_zero[0])
+ 
+-    def test_error_inverse_at_peak(self):
+-        """At signal=max_signal, error = scale_factor."""
+-        err = error_inverse(np.array([1.0]), max_signal=1.0, scale_factor=3.0)
+-        assert np.isclose(err[0], 3.0)
+-
+-    def test_error_inverse_increasing(self):
+-        """Larger signal → smaller error (inverse relationship)."""
+-        s = np.array([0.5, 1.0, 2.0])
+-        err = error_inverse(s, max_signal=2.0)
+-        assert np.all(np.diff(err) < 0)
+-
+-    def test_error_inv_sqrt_at_peak(self):
++    def test_error_poisson_at_peak(self):
+         """At signal = max_signal, error = scale_factor * sqrt(1) = scale_factor."""
+-        err = error_inv_sqrt(np.array([5.0]), max_signal=5.0, scale_factor=2.0)
++        err = error_poisson(np.array([5.0]), max_signal=5.0, scale_factor=2.0)
+         assert np.isclose(err[0], 2.0)
+ 
+-    def test_error_inv_sqrt_positive(self):
++    def test_error_poisson_positive(self):
+         """Errors should always be positive."""
+         s = np.array([0.1, 1.0, 10.0])
+-        assert np.all(error_inv_sqrt(s, max_signal=10.0) > 0)
++        assert np.all(error_poisson(s, max_signal=10.0) > 0)
++
++    def test_poisson_absolute_error_grows_as_sqrt(self):
++        s = np.array([1.0, 4.0, 16.0])
++        absolute = s * error_poisson(s, max_signal=16.0)
++        assert np.allclose(absolute / np.sqrt(s), absolute[0])
++
++    def test_unknown_error_model_is_an_error(self):
++        with pytest.raises(ValueError, match="Unknown error model"):
++            signal_error("inverse", np.array([1.0]), 1.0)
++
++    def test_error_model_names_are_case_insensitive(self):
++        assert np.allclose(signal_error("CONSTANT", np.array([2.0]), 4.0), signal_error("constant", np.array([2.0]), 4.0))
+ 
+     def test_all_error_models_return_ndarray(self):
+         s = np.array([0.5, 1.0])
+-        for fn in (error_exponential, error_inverse, error_inv_sqrt):
++        for fn in (error_exponential, error_poisson):
+             result = fn(s, max_signal=1.0)
+             assert isinstance(result, np.ndarray), f"{fn.__name__} should return ndarray"
+-- 
+2.43.0
+

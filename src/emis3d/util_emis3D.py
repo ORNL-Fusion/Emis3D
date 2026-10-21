@@ -549,7 +549,7 @@ def channel_error(
         terms and cannot dominate the fit; the relative term is the calibration
         uncertainty, so strong channels are fitted to about that fraction. If
         noise is given (per channel, same units), the floor is raised to it.
-    Other definitions (exponential, inverse, inverse square, constant) keep
+    Other definitions (constant, poisson, exponential) keep
         their fractional form, sigma = signal * signal_error(...). They are not
         defined for signal <= 0, so those channels get an infinite error and are
         left out of the fit.
@@ -574,18 +574,25 @@ def signal_error(
     max_signal: float,
     scale_factor: float = 1.0,
 ):
-    """Wrapper for the error function"""
+    """
+    Fractional error (error / signal) of a channel for the named error model.
+    Names are case-insensitive; an unknown name raises ValueError.
 
-    type_ = type.upper()
+        constant     10% of the peak, the same for every channel
+        poisson      grows as sqrt(signal), like shot noise
+        exponential  large near zero, small at the peak
 
-    if type_ == "EXPONENTIAL":
-        return error_exponential(signal, max_signal, scale_factor)
-    elif type_ == "INVERSE":
-        return error_inverse(signal, max_signal, scale_factor)
-    elif type_ == "INVERSE SQUARE":
-        return error_inv_sqrt(signal, max_signal, scale_factor)
-    elif type_ == "CONSTANT":
-        return error_constant(signal, max_signal)
+    floor_relative, the default, is computed in channel_error instead.
+    """
+    models = {
+        "constant": lambda: error_constant(signal, max_signal),
+        "poisson": lambda: error_poisson(signal, max_signal, scale_factor),
+        "exponential": lambda: error_exponential(signal, max_signal, scale_factor),
+    }
+    name = type.lower()
+    if name not in models:
+        raise ValueError(f"Unknown error model {type!r}; choose from {sorted(models)} or 'floor_relative'")
+    return models[name]()
 
 
 def error_constant(
@@ -617,30 +624,18 @@ def error_exponential(
     return scale_factor * np.exp(-decay * signal / max_signal)
 
 
-def error_inverse(
+def error_poisson(
     signal: np.ndarray,
     max_signal: float,
     scale_factor: float = 1.0,
     _floor: float = 1.0e-12,
 ) -> np.ndarray:
     """
-    Hyperbolic error model: error = scale_factor * (max_signal / signal).
-    """
-    signal = np.clip(signal, _floor, None)
-    return scale_factor * (max_signal / signal)
+    Poisson (shot-noise) error model: the fractional error falls as
+    1/sqrt(signal), so the absolute error grows as sqrt(signal).
 
-
-def error_inv_sqrt(
-    signal: np.ndarray,
-    max_signal: float,
-    scale_factor: float = 1.0,
-    _floor: float = 1.0e-12,
-) -> np.ndarray:
-    """
-    Inverse square-root (Poisson / shot-noise) error model.
-
-    error = scale_factor * sqrt(max_signal / signal)
-    error = 1.0 at peak signal.
+    error / signal = scale_factor * sqrt(max_signal / signal), 1.0 at the peak.
+    (Previously named "inverse square", which it is not.)
     """
     signal = np.clip(signal, _floor, None)
     return scale_factor * np.sqrt(max_signal / signal)

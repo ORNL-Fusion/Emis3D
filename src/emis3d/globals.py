@@ -18,7 +18,7 @@ SUPPORTED_TOKAMAKS: list[str] = ["MOCK", "DIII-D", "SPARC", "SPARC_FDR", "JET"]
 SCALE_DEFINITIONS: list[str] = ["linear", "exponential", "constant", "step"]
 
 # Availble error definitions for the data
-ERROR_DEFINITIONS: list[str] = ["floor_relative", "exponential", "inverse", "inverse square", "constant"]
+ERROR_DEFINITIONS: list[str] = ["floor_relative", "constant", "poisson", "exponential"]
 
 # Minimizers a run config can choose (fit_method)
 FIT_METHODS: list[str] = ["least_squares", "differential_evolution"]
