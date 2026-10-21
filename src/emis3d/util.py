@@ -572,22 +572,28 @@ def fit_line_to_rz(
 
 def split_revolutions(x, y, z, phi, R, L) -> list:
     """
-    Split field line coordinates into revolutions around the torus,
-    keeping phi in original coordinates normalized to [0, 2π).
+    Split field line coordinates into revolutions around the torus, in the
+    order they are travelled, with phi normalized to [0, 2pi).
+
+    Revolutions are numbered by the toroidal distance travelled,
+    |phi - phi[0]| // 2pi, so clockwise lines (phi decreasing) split the same
+    way as counterclockwise ones: each revolution starts with its own start
+    sample, and the sample one full turn later begins the next revolution.
+    (Numbering by (phi - phi[0]) // 2pi put clockwise revolutions in reverse
+    order and moved every boundary sample into the wrong revolution.)
     """
 
     x, y = map(np.asarray, (x, y))
     z, phi = map(np.asarray, (z, phi))
     R, L = map(np.asarray, (R, L))
 
-    # Shift phi only for indexing revolutions
-    phi_shifted = phi - phi[0]
-
-    # Integer revolution index for each point
-    rev_index = (phi_shifted // (2 * np.pi)).astype(int)
+    # Distance travelled, in whole turns (a tiny tolerance keeps a sample that
+    # lands on k * 2pi up to rounding at the start of revolution k)
+    travelled = np.abs(phi - phi[0])
+    rev_index = np.floor(travelled / (2 * np.pi) + 1e-9).astype(int)
 
     revolutions = []
-    for i in range(rev_index.min(), rev_index.max() + 1):
+    for i in range(rev_index.max() + 1):
         mask = rev_index == i
         if np.any(mask):
             revolutions.append(
@@ -601,8 +607,8 @@ def split_revolutions(x, y, z, phi, R, L) -> list:
                 }
             )
 
-    # Filter out signle-point tail revolutions, occurs when phi[-1] equals
-    # N * 2pi, e.g. np.linspace(..., endpoint=True)
+    # Filter out single-point tail revolutions, which occur when the line ends
+    # exactly N full turns from its start (np.linspace(..., endpoint=True))
     revolutions = [r for r in revolutions if len(r["phi"]) > 1]
 
     return revolutions

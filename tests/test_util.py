@@ -282,6 +282,29 @@ class TestSplitRevolutions:
         for key in ("x", "y", "z", "R", "L", "phi"):
             assert key in revs[0]
 
+    @staticmethod
+    def _traced(n_revs, direction, n_per_rev=100, phi0=np.deg2rad(225.0)):
+        """Like the tracer's output: endpoint included, phi increasing or decreasing."""
+        phi = phi0 + direction * np.linspace(0, n_revs * 2 * np.pi, n_revs * n_per_rev + 1)
+        L = np.linspace(0, 1, phi.size)                      # distance along the line, from the start
+        return np.cos(phi), np.sin(phi), np.zeros(phi.size), phi, np.ones(phi.size), L
+
+    @pytest.mark.parametrize("direction", [+1, -1])
+    def test_both_directions_split_the_same_way(self, direction):
+        """Each revolution starts with its own start sample, in travel order (also clockwise)."""
+        revs = split_revolutions(*self._traced(3, direction))
+        assert [len(r["L"]) for r in revs] == [100, 100, 100]
+        for k, r in enumerate(revs):
+            assert r["L"][0] == pytest.approx(k / 3)        # starts k turns along the line
+            assert np.isclose(r["phi"][0], np.deg2rad(225.0))  # at the start angle
+        assert np.all(np.diff(np.concatenate([r["L"] for r in revs])) > 0)
+
+    def test_clockwise_first_revolution_holds_the_start(self):
+        """It used to drop the start sample and hold the end of the line instead."""
+        revs = split_revolutions(*self._traced(10, -1))
+        assert len(revs) == 10
+        assert revs[0]["L"][0] == 0.0 and revs[-1]["L"][-1] < 1.0
+
 
 # ---------------------------------------------------------------------------
 # save_json / load_json

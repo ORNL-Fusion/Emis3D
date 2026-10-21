@@ -164,28 +164,40 @@ class Tokamak(object):
 
     def _load_eqFile(self) -> None:
         """
-        Definition loads the equilibrium file, then uses the wall information, if it is there
+        Load the equilibrium (g-file) named eqFileName: from the workspace's
+        equilibria location first, then from the machine's own
+        inputs/equilibria folder (where a built-in machine such as MOCK keeps
+        its equilibrium). If it has a limiter (rlim, zlim), that becomes the
+        wall (see _load_first_wall).
         """
-        pathFileName = ""
         if self.info is None:
             logger.error("No tokamak information loaded, cannot continue!")
             return
 
+        name = self.info["eqFileName"]
+        candidates = []
         try:
-            pathFileName = self.ws.path("equilibria", tokamak=self.info["tokamakName"]) / self.info["eqFileName"]
+            candidates.append(self.ws.path("equilibria", tokamak=self.info["tokamakName"]) / name)
+        except WorkspaceError:
+            pass  # no workspace configured: only the machine folder can supply it
+        machine_copy = self.ws.machine_file(self.info["tokamakName"], "inputs", "equilibria", name, required=False)
+        if machine_copy is not None:
+            candidates.append(machine_copy)
 
-            if os.path.isfile(pathFileName):
+        for pathFileName in candidates:
+            if not os.path.isfile(pathFileName):
+                continue
+            try:
                 with open(pathFileName) as f:
                     self.gfile = geqdsk.read(f)
                 if self.verbose:
                     logger.debug(f"Loaded equilibrium file: {pathFileName}")
-            else:
-                logger.debug(f"Equilibrium file not found: {pathFileName}")
-        except WorkspaceError as e:
-            logger.error(f"Could not locate the equilibrium file: {e}")
-        except Exception as e:
-            logger.error(f"Could not read the equilibrium file, error: {e}")
-            logger.debug(f"Tried to read it here: {pathFileName}")
+                return
+            except Exception as e:
+                logger.error(f"Could not read the equilibrium file {pathFileName}: {e}")
+                return
+
+        logger.debug(f"Equilibrium file {name} not found; looked in: {[str(c) for c in candidates]}")
 
     def _load_first_wall(self) -> None:
         """
@@ -1008,8 +1020,10 @@ class Tokamak(object):
         if numTransists <= 0:
             raise ValueError(f"numTransists must be positive, got {numTransists}")
         # 500 output points per transit, so the nearest-angle lookup along a
-        # field line keeps the same resolution however many transits are traced
-        numTor = int(500 * np.ceil(numTransists))
+        # field line keeps the same resolution however many transits are traced.
+        # The +1 includes the end point, so the spacing is exactly 2pi/500 and
+        # every revolution starts exactly at the start angle.
+        numTor = int(np.ceil(500 * numTransists)) + 1
 
         startPhideg = fieldline_key(startPhi, degrees=False)
 
