@@ -106,12 +106,43 @@ class TestEndpointPenalty:
     """
 
     def test_asymmetric_Ppol_active(self):
-        idx = int(np.argmin(np.abs(np.array(PHI_ARRAY) - np.deg2rad(MU_DEG))))
+        """A mismatch where counterClock finishes its revolution (just before mu) is penalized."""
+        i_end_ccw = int(np.argmax(U.find_dphi(np.array(PHI_ARRAY), np.deg2rad(MU_DEG), "counterClock_rev0")))
+        assert np.isclose(np.rad2deg(PHI_ARRAY[i_end_ccw]), MU_DEG - 10.0)   # 80 deg: last sample before mu
         ppol_ccw = [1.0] * 36
-        ppol_ccw[idx] = 0.4
+        ppol_ccw[i_end_ccw] = 0.4
         sd = _synthetic_dict([1.0] * 36, ppol_ccw)
         pen = U.helical_endpoint_penalty(_params(1.0, 0.005, 0.005), sd, "exponential", 1.0)
         assert abs(pen[0]) > 1e-3
+
+    def test_each_direction_is_sampled_at_its_own_endpoint(self):
+        """counterClock ends just before mu and clockwise just after; mu itself is where
+        counterClock starts, so a change there is not an endpoint mismatch."""
+        mu = np.deg2rad(MU_DEG)
+        phi = np.array(PHI_ARRAY)
+        i_end_cw = int(np.argmax(U.find_dphi(phi, mu, "clockwise_rev0")))
+        assert np.isclose(np.rad2deg(phi[i_end_cw]), MU_DEG + 10.0)          # 100 deg
+        at_mu = int(np.argmin(np.abs(phi - mu)))
+        ppol_ccw = [1.0] * 36
+        ppol_ccw[at_mu] = 0.4                    # counterClock's start, not its end
+        sd = _synthetic_dict([1.0] * 36, ppol_ccw)
+        pen = U.helical_endpoint_penalty(_params(1.0, 0.005, 0.005), sd, "exponential", 1.0)
+        assert abs(pen[0]) < 1e-12
+
+    def test_later_revolutions_use_their_own_distance(self):
+        """For rev1 the endpoint is two full turns along the helix."""
+        names = ["counterClock_rev1", "clockwise_rev1"]
+        sd = _synthetic_dict([1.0] * 36, [1.0] * 36)
+        sd["emissionNames"] = names
+        sd["counterClock_rev1"] = sd.pop("counterClock_rev0")
+        sd["clockwise_rev1"] = sd.pop("clockwise_rev0")
+        p = Parameters()
+        p.add("a_90", value=1.0, min=0)
+        p.add("b_clockwise_rev1_90", value=0.0, min=0, max=15)
+        p.add("b_counterClock_rev1_90", value=0.02, min=0, max=15)
+        pen = U.helical_endpoint_penalty(p, sd, "exponential", 1.0)
+        end = np.deg2rad(710.0)                  # 350 deg + one full turn
+        assert pen[0] == pytest.approx(1.0 - np.exp(-0.02 * end**2), rel=1e-6)
 
     def test_no_shared_amplitude_no_penalty(self):
         # no a_<tag> -> nothing to tie together

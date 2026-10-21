@@ -997,8 +997,11 @@ class Tokamak(object):
         this vectorized format should be faster than storing them in a different manner.
         """
 
-        if numTransists > 1:
-            raise ValueError(f"ERROR! Code currently does not support more than 1 toroidal transit of the field lines!")
+        if numTransists <= 0:
+            raise ValueError(f"numTransists must be positive, got {numTransists}")
+        # 500 output points per transit, so the nearest-angle lookup along a
+        # field line keeps the same resolution however many transits are traced
+        numTor = int(500 * np.ceil(numTransists))
 
         startPhideg = fieldline_key(startPhi, degrees=False)
 
@@ -1025,7 +1028,7 @@ class Tokamak(object):
                     StartZ=startZ[jj],
                     StartPhi=startPhi,
                     gfile=self.gfile,
-                    NumTor=500,
+                    NumTor=numTor,
                 )
                 # --- Trace the field line in the given direction
                 tracer.trace(NumTransits=numTrans[ii])
@@ -1034,8 +1037,8 @@ class Tokamak(object):
                 d_ = tracer.data
                 rev = split_revolutions(d_["x"], d_["y"], d_["z"], d_["phi"], d_["R"], d_["L"])
 
-                # --- Initialize the arrays
-                for kk in range(int(numTransists)):
+                # --- One entry per revolution (a fractional last transit is kept)
+                for kk in range(len(rev)):
                     direction = f"{direction_prefix}_rev{kk}"
 
                     if direction not in self.fieldLines[startPhideg]:

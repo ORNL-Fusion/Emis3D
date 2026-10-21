@@ -49,23 +49,21 @@ class TestFindDphi:
         # ccw = (2 - 1) % 2pi = 1; result = +1
         assert np.isclose(result[0], np.deg2rad(30))
 
-    def test_phi_modulo_2pi(self):
-        """
-        find_dphi uses `add_2pi = phi_ > 2π` to flag values above one full
-        revolution, then increments the computed ccw/cw distances.  This means
-        phi = 0.5 and phi = 0.5 + 2π give *different* results by design:
-        the extra revolution is deliberately preserved for multi-revolution
-        helical distributions.
+    def test_angles_are_physical(self):
+        """phi and phi + 2 pi are the same place: the distance does not change."""
+        for name in ("", "counterClock_rev0", "clockwise_rev0"):
+            d1 = find_dphi(np.array([0.5]), mu=0.0, emissionName=name)
+            d2 = find_dphi(np.array([0.5 + 2 * np.pi]), mu=0.0, emissionName=name)
+            d3 = find_dphi(np.array([0.5 - 4 * np.pi]), mu=0.0, emissionName=name)
+            assert np.allclose(d1, d2) and np.allclose(d1, d3), name
 
-        For standard (non-helical) use the caller is expected to pass phi
-        already reduced to [0, 2π).
-        """
-        phi_normal = np.array([0.5])
-        phi_extra = np.array([0.5 + 2 * np.pi])
-        d1 = find_dphi(phi_normal, mu=0.0)
-        d2 = find_dphi(phi_extra, mu=0.0)
-        # Results are intentionally different; document the gap
-        assert not np.isclose(d1[0], d2[0]), "find_dphi should treat phi > 2π differently (multi-revolution intent)"
+    def test_revolution_comes_from_the_emission_name(self):
+        phi, mu = np.array([np.deg2rad(275.0)]), np.deg2rad(260.0)
+        for k in range(4):
+            ccw = find_dphi(phi, mu, emissionName=f"counterClock_rev{k}")[0]
+            cw = find_dphi(phi, mu, emissionName=f"clockwise_rev{k}")[0]
+            assert np.isclose(np.rad2deg(ccw), 15.0 + 360.0 * k)
+            assert np.isclose(np.rad2deg(cw), 345.0 + 360.0 * k)
 
     def test_returns_ndarray(self):
         result = find_dphi(np.array([1.0, 2.0]), mu=0.5)
@@ -115,6 +113,14 @@ class TestScaleLinear:
         dphi = np.array([0.0, 1.0, 2.0])
         result = scale_linear(2.0, 1.0, dphi)  # y = 2*dphi + 1
         assert np.allclose(result, [2.0, 1.0, 0.0])
+
+    def test_stays_at_zero_past_the_end(self):
+        """It used to take abs(), so the profile rose again: 2 - 1 * 5 gave 3."""
+        result = scale_linear(2.0, 1.0, np.array([2.0, 3.0, 5.0, 50.0]))
+        assert np.allclose(result, 0.0)
+
+    def test_sign_of_slope_does_not_matter(self):
+        assert np.allclose(scale_linear(2.0, -1.0, np.array([0.5, 4.0])), [1.5, 0.0])
 
 
 # ---------------------------------------------------------------------------

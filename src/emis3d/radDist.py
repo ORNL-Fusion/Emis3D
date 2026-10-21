@@ -921,11 +921,12 @@ class Helical(RadDist):
 
         self.info["weights"] = weights
 
+        num_transits = float(self.info.get("numTransists", 1.0))
         self.tokamak.set_fieldlines(
             startR=points[:, 0],
             startZ=points[:, 1],
             startPhi=start_phi,
-            numTransists=1.0,
+            numTransists=num_transits,
         )
 
         startPhideg = fieldline_key(start_phi, degrees=False)
@@ -934,7 +935,7 @@ class Helical(RadDist):
             raise RuntimeError(f"startPhiRad={start_phi:.4f} rad ({startPhideg}°) not found in " f"traced field lines. Available: " f"{self.tokamak.get_fieldLines_startPhis()}")
 
         self.info["emissionNames"] = self.tokamak.fieldLines[startPhideg]["directionNames"]
-        self.info["numTransists"] = 1.0
+        self.info["numTransists"] = num_transits
 
     def _evaluate(
         self,
@@ -1042,7 +1043,7 @@ class HelicalRing(RadDist):
         """
         Traces the field line based on the startR and startZ
         """
-        numTransists = 1.0
+        numTransists = float(self.info.get("numTransists", 1.0))
 
         self.tokamak.set_fieldlines(
             startR=[self.info["startR"]],

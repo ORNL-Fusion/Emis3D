@@ -54,11 +54,11 @@ def scale_linear(
     dphi: np.ndarray,
 ) -> np.ndarray:
     """
-    Triangular profile centered at mu.
-
-    Peak = A at dphi = 0. Should not be negative.
+    Triangular profile centered at mu: A at dphi = 0, falling linearly with
+    slope |B| and staying at zero beyond A / |B|. (It used to take abs(),
+    which made the profile rise again far along a field line.)
     """
-    return np.abs(A - np.abs(B) * dphi)
+    return np.maximum(A - np.abs(B) * np.asarray(dphi, dtype=float), 0.0)
 
 
 def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
@@ -153,33 +153,28 @@ def find_dphi(
     emissionName: str = "",
 ) -> np.ndarray:
     """
-    Finds the change in toroidal angle between phi and mu.
+    Toroidal distance from mu to phi, in radians.
 
-    Always returns the minimum distance for non-Helical distributions
+    phi and mu are physical angles (any value; only phi mod 2*pi matters).
+    For helical emissions the distance is measured along the helix direction
+    and the revolution comes from the emission name: '<direction>_revN' adds
+    N full turns. For anything else it is the shorter way round.
 
-    Examples
+    Examples (degrees)
     --------
         phi = 220, mu = 100
-        dphi = 120 for counterClock and non-Helical distributions
-        dphi = 240 for clockwise Helical distributions
+        dphi = 120 for counterClock and non-helical emissions
+        dphi = 240 for clockwise helical emissions
 
-        phi = -370, mu = 30
-        dphi = 40 + 360 = 400 for counterClock Helical and non-Helical distributions
-        dphi = 320 + 360 = 680 for clockwise Helical distributions
-
-        phi = 275, mu = 260
-        dphi = 345 for counterClock Helical
-        dphi = 15 for clockwise Helical and non-Helical distributions
-
+        phi = 275, mu = 260, counterClock_rev1
+        dphi = 15 + 360 = 375
 
     Parameters
     ----------
-    phi           : Toroidal locations of the bolometers (radians)
-    mu            : Injection location (radians)
-    emissionName  : 'clockwise', 'counterClock', or anything else for minimum
-                    angular distance
-    scale         : Whether to scale helical dphi into [-pi, pi]
-    numRevolutions: Total revolutions of the helical distribution
+    phi           : toroidal angles of the observations (radians)
+    mu            : injection location (radians)
+    emissionName  : e.g. 'clockwise_rev0', 'counterClock_rev2', or anything
+                    else for the shortest angular distance
 
     Returns
     -------
@@ -194,28 +189,12 @@ def find_dphi(
 
     two_pi = 2.0 * np.pi
 
-    # Number of full revolutions represented by phi
-    n_wraps = np.floor(np.abs(phi) / two_pi).astype(int)
-
-    # exact multiples of 360 should not count the final wrap
-    n_wraps = np.where(
-        (np.abs(phi) > 0) & (np.mod(np.abs(phi), two_pi) == 0),
-        n_wraps - 1,
-        n_wraps,
-    )
-
-    wraps = n_wraps * two_pi
-
     phi_mod = phi % two_pi
     mu_mod = mu % two_pi
 
     # Positive directional distances
     ccw = (phi_mod - mu_mod) % two_pi
     cw = (mu_mod - phi_mod) % two_pi
-
-    # Add back complete revolutions
-    ccw += wraps
-    cw += wraps
 
     # --- Account for 2nd or more revolutions around the tokamak
     rev_match = re.search(r"_rev(\d+)", emissionName)
@@ -275,24 +254,26 @@ def helical_endpoint_penalty(
 
     The peak (dphi = 0) of the two directions is already tied together because
     both share the universal amplitude ``a_<tag>``. What is *not* tied is the
-    endpoint, i.e. the point reached after one full toroidal transit, which sits
-    back at the injection toroidal angle (phi = injectionLocation mod 2*pi).
-    This function adds that missing condition.
+    endpoint: where each direction finishes its revolution, back at the
+    injection angle after travelling (k + 1) full turns for revolution k.
+    This function adds that missing condition, once per revolution pair.
 
-    For a direction d the endpoint radiated power is::
+    Each direction is sampled within its own revolution: the endpoint is the
+    sample with the largest toroidal distance along that direction, and the
+    start is the one with the smallest. (The grid point nearest the injector
+    is the endpoint for one direction but the start for the other, which is
+    what this used to sample for both.)
 
-        P_end_d = scale_d(dphi_end) * P_pol_d(phi = mu mod 2*pi) * scaleSynth
+        P_end_d   = scale_d(dphi_end_d) * P_pol_d(end) * scaleSynth
+        P_start_d = P_pol_d(start) * scaleSynth
 
-    where ``dphi_end = 2*pi * numTransists`` is the winding distance back to the
-    injection toroidal angle.
+    The penalty, in the ``(data - model) / error`` units LMFIT minimizes, is::
 
-    ``(data - model) / error`` residuals that LMFIT already minimizes::
+        weight * (P_end_cw - P_end_ccw) / (P_ref + eps)
 
-        weight * (P_end_cw - P_end_ccw) / (P_peak + eps)
+        P_ref = a * 0.5 * (P_start_cw + P_start_ccw)
 
-        P_peak = a * scaleSynth * 0.5*(P_pol_cw(mu) + P_pol_ccw(mu))
-
-    Normalising by the peak keeps it unitless.
+    Normalising by the start of the revolution keeps it unitless.
 
     Returns an empty list (no constraint) when:
       * ``weight == 0``,
@@ -342,27 +323,29 @@ def helical_endpoint_penalty(
 
             b = params.get(f"b_{name}_{tag}", 0.0)
 
-            # Scale evaluated at the endpoint winding distance (NOT at phi = mu,
-            # which would return the dphi = 0 peak).
-            scale_end = scale_wrapper(
+            # Distance along this direction for every sample of its revolution
+            dphi = find_dphi(phi_arr, mu, name)
+            i_end = int(np.argmax(dphi))
+            i_start = int(np.argmin(dphi))
+
+            scale = scale_wrapper(
                 a=a,
                 b=b,
                 phi=phi_arr,
                 mu=mu,
+                dphi=dphi,
                 scale_def=scale_def,
                 emissionName=name,
             )
 
-            if scale_end is None:
+            if scale is None:
                 usable = False
                 break
 
-            # P_pol sampled at the injection toroidal location (mod 2*pi)
-            idx = int(np.argmin(np.abs(phi_arr - mu)))
             scaleSynth = float(sub.get("scaleSynth", 1.0))
 
-            endpoint_power[name] = scale_end[idx] * P_pol[idx] * scaleSynth
-            peak_Ppol[name] = P_pol[idx] * scaleSynth
+            endpoint_power[name] = scale[i_end] * P_pol[i_end] * scaleSynth
+            peak_Ppol[name] = P_pol[i_start] * scaleSynth
 
         if not usable:
             continue
