@@ -116,8 +116,6 @@ class Bolometer(object):
         if self.info is not None and "BUILD_TYPE" in self.info:
             if self.info["BUILD_TYPE"] == "FROM PRIMITIVES":
                 self._build_from_primitives()
-            elif self.info["BUILD_TYPE"] == "KB5V":
-                self.load_kb5_camera(camera_id="KB5V", parent=self.world)
             else:
                 print(f"Build type of {self.info['BUILD_TYPE']} not yet supported!")
         else:
@@ -389,107 +387,6 @@ class Bolometer(object):
         """
 
         self.bolometer_camera.parent = value
-
-    def load_kb5_camera(self, camera_id, parent=None) -> None:
-        """
-        Loads the KB5 camera configuration from the locally stored csv file. The csv file can
-        be found here: https://github.com/cherab/jet/tree/master/cherab/jet/bolometry/kb5
-
-        Add DATA_PATH to the bolometer configuration file to specify the location of the csv files.
-
-        Also, change the BUILD_TYPE to "KB5V" in the configuration file
-        """
-
-        if not self.info:
-            raise ValueError("No info loaded for KB5 camera.")
-
-        if "DATA_PATH" not in self.info:
-            raise ValueError("No DATA_PATH in info for KB5 camera.")
-
-        # A relative DATA_PATH is relative to the camera's configuration file
-        _DATA_PATH = os.path.expanduser(str(self.info["DATA_PATH"]))
-        if not os.path.isabs(_DATA_PATH) and self.config_path is not None:
-            _DATA_PATH = os.path.join(os.path.dirname(self.config_path), _DATA_PATH)
-
-        if camera_id == "KB5V":
-            foils = np.loadtxt(os.path.join(_DATA_PATH, "kb5v_foils.csv"), delimiter=",")
-            slits = np.loadtxt(os.path.join(_DATA_PATH, "kb5v_slits.csv"), delimiter=",")
-        elif camera_id == "KB5H":
-            foils = np.loadtxt(os.path.join(_DATA_PATH, "kb5h_foils.csv"), delimiter=",")
-            slits = np.loadtxt(os.path.join(_DATA_PATH, "kb5h_slits.csv"), delimiter=",")
-        else:
-            raise ValueError("Unrecognised bolometer camera_id '{}'.".format(camera_id))
-
-        num_slits = slits.shape[0]
-        num_foils = foils.shape[0]
-
-        bolometer_camera = BolometerCamera(name=camera_id, parent=parent)
-
-        slit_objects = {}
-        for i in range(num_slits):
-            slit_data = slits[i]
-            slit_id = "{}_Slit_#{}".format(camera_id, str(int(slit_data[0])))
-            p1 = Point3D(slit_data[1], slit_data[2], slit_data[3])
-            p2 = Point3D(slit_data[4], slit_data[5], slit_data[6])
-            p3 = Point3D(slit_data[7], slit_data[8], slit_data[9])
-            p4 = Point3D(slit_data[10], slit_data[11], slit_data[12])
-            basis_x = p1.vector_to(p2).normalise()
-            dx = p1.distance_to(p2)
-            basis_y = p2.vector_to(p3).normalise()
-            dy = p2.distance_to(p3)
-            centre_point = Point3D(
-                (p1.x + p2.x + p3.x + p4.x) / 4,
-                (p1.y + p2.y + p3.y + p4.y) / 4,
-                (p1.z + p2.z + p3.z + p4.z) / 4,
-            )
-            slit_objects[slit_id] = BolometerSlit(slit_id, centre_point, basis_x, dx, basis_y, dy, parent=bolometer_camera)
-
-        for i in range(num_foils):
-            foil_data = foils[i]
-            foil_id = "{}_CH{}_Foil".format(camera_id, str(int(foil_data[0])))
-            slit_id = "{}_Slit_#{}".format(camera_id, str(int(foil_data[1])))
-
-            p1 = Point3D(foil_data[2], foil_data[3], foil_data[4])
-            p2 = Point3D(foil_data[5], foil_data[6], foil_data[7])
-            p3 = Point3D(foil_data[8], foil_data[9], foil_data[10])
-            p4 = Point3D(foil_data[11], foil_data[12], foil_data[13])
-            basis_x = p2.vector_to(p1).normalise()  # switching orientation to ensure face orientation is correct
-            dx = p1.distance_to(p2)
-            basis_y = p2.vector_to(p3).normalise()
-            dy = p2.distance_to(p3)
-            centre_point = Point3D(
-                (p1.x + p2.x + p3.x + p4.x) / 4,
-                (p1.y + p2.y + p3.y + p4.y) / 4,
-                (p1.z + p2.z + p3.z + p4.z) / 4,
-            )
-
-            # Shift backwards 3mm for all foils except those explicitly measured on back plate
-            if camera_id == "KB5V":
-                if i not in (9 - 1, 25 - 1, 32 - 1):
-                    basis_z = basis_x.cross(basis_y).normalise()
-                    centre_point = centre_point - basis_z * 0.0032
-                # if i == 9 - 1:
-                #     centre_point = centre_point + basis_x * 0.001
-                if i == 31 - 1:
-                    centre_point = centre_point - basis_x * 0.001
-            else:
-                basis_z = basis_x.cross(basis_y).normalise()
-                centre_point = centre_point - basis_z * 0.0032
-
-            foil = BolometerFoil(
-                foil_id,
-                centre_point,
-                basis_x,
-                dx,
-                basis_y,
-                dy,
-                slit_objects[slit_id],
-                parent=bolometer_camera,
-            )
-
-            bolometer_camera.add_foil_detector(foil)
-
-        self.bolometer_camera = bolometer_camera
 
     def change_camera_material(self, material=""):
         """
