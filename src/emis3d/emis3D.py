@@ -348,7 +348,7 @@ class Emis3D:
                 if not rd._load_ok:
                     raise ValueError(rd.load_error or "could not be read")
                 loaded.append(rd)
-            except Exception as e:
+            except (OSError, ValueError, KeyError, TypeError) as e:
                 failures.append(f"{file_}: {e}")
                 warnings.warn(f"Skipping radDist {file_}: {e}", stacklevel=2)
                 logger.warning("Skipping radDist %s: %s", file_, e)

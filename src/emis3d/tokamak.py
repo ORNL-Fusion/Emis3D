@@ -93,6 +93,7 @@ class Tokamak(object):
         """
 
         self.verbose = verbose
+        self.gfile = None  # the equilibrium, once one is loaded (_load_eqFile)
         self.ws = workspace if workspace is not None else get_workspace()
 
         if not tokamakName or not self.ws.has_machine(tokamakName):
@@ -193,9 +194,9 @@ class Tokamak(object):
                 if self.verbose:
                     logger.debug(f"Loaded equilibrium file: {pathFileName}")
                 return
-            except Exception as e:
-                logger.error(f"Could not read the equilibrium file {pathFileName}: {e}")
-                return
+            except (OSError, ValueError) as e:
+                # A g-file that exists but cannot be read is an error, not a missing equilibrium
+                raise RuntimeError(f"Could not read the equilibrium file {pathFileName}: {e}") from e
 
         logger.debug(f"Equilibrium file {name} not found; looked in: {[str(c) for c in candidates]}")
 
@@ -214,12 +215,10 @@ class Tokamak(object):
         rzarray = None
 
         # --- Default to the one from the eqFile, if it exists
-        if hasattr(self, "gfile"):
-            if hasattr(self.gfile, "rlim") and hasattr(self.gfile, "zlim"):
-                if self.gfile.rlim is not None and self.gfile.zlim is not None:
-                    rzarray = np.vstack((self.gfile.rlim, self.gfile.zlim)).T
-                else:
-                    rzarray = None
+        rlim = getattr(self.gfile, "rlim", None)
+        zlim = getattr(self.gfile, "zlim", None)
+        if rlim is not None and zlim is not None:
+            rzarray = np.vstack((rlim, zlim)).T
 
         # --- Fall back to the wall text file if the eqFile had no limiter data
         if rzarray is None and "wallFileName" in self.info["MACHINE"]:
@@ -351,9 +350,9 @@ class Tokamak(object):
                     if self.info["reflections"] == False:
                         for child in self.world.children:
                             child.material = AbsorbingSurface()
-            except Exception as e:
-                logger.warning(f"Could not load the CAD tokamak file: {PFC_STL_PATH}")
-                logger.error(f"Error: {e}")
+            except (OSError, ValueError) as e:
+                # The CAD wall was asked for; carrying on without it would change the geometry silently
+                raise RuntimeError(f"Could not load the CAD tokamak file {PFC_STL_PATH}: {e}") from e
 
         else:
             logger.error("Building the tokamak failed")
@@ -644,7 +643,7 @@ class Tokamak(object):
         ax,
         boloGroupName,
         plot_chord_info=False,
-        plot_etendue=[],
+        plot_etendue=None,
         legend=False,
         label_every: int = 1,
     ) -> None:
@@ -659,6 +658,8 @@ class Tokamak(object):
         """
 
         # --- Change the inner wall to an absorbing surface, so the chords have something intersect with
+        if plot_etendue is None:
+            plot_etendue = []
         self._change_World_surface_material(AbsorbingSurface(), name="Tokamak Wall")
 
         # --- Make sure self.info is initiated
@@ -813,7 +814,7 @@ class Tokamak(object):
                             if int(foil.name[-2:]):
                                 ch = int(foil.name[-2:])
                         # For JET foils
-                        except Exception:
+                        except (ValueError, IndexError):
                             n = foil.name.split("_")[1]
                             ch = n[2:]
 
@@ -1012,42 +1013,10 @@ class Tokamak(object):
         ax.plot(y * (-1), r * (-1), z, "black")
 
         if hasattr(self, "bolometers"):
-
             if self.info["mode"] != "Build":
-                logger.debug(f"→ Building the tokamak! We need this to trace the chords for the bolometers")
+                logger.debug("→ Building the tokamak to trace the bolometer chords")
                 self._build_tokamak()
-            try:
-                # --- Remove each bolometer from the world
-                for bolo in self.bolometers:
-                    bolo._change_parent(value=None)
-
-                for bolo in self.bolometers:
-                    bolo._change_parent(value=self.world)
-                    for foil in bolo.bolometer_camera:
-                        slit_centre = foil.slit.centre_point
-                        ax.plot(slit_centre[0], slit_centre[1], slit_centre[2], "ko")
-                        origin, hit, _ = foil.trace_sightline()
-                        ax.plot(
-                            foil.centre_point[0],
-                            foil.centre_point[1],
-                            foil.centre_point[2],
-                            "kx",
-                        )
-                        ax.plot(
-                            [origin[0], hit[0]],
-                            [origin[1], hit[1]],
-                            [origin[2], hit[2]],
-                            "k",
-                        )
-                        ax.text(hit[0], hit[1], hit[2], foil.name)
-                    bolo._change_parent(value=None)
-
-                # --- Add back each bolometer to the world
-                for bolo in self.bolometers:
-                    bolo._change_parent(value=self.world)
-            except Exception as e:
-                logger.error(f"Could not plot the bolometer chords, error: {e}")
-                logger.debug(f"Ensure that the tokamak is built before plotting the bolometers, currently in mode: {self.info['mode']}")
+            self.plot3d_chords(ax, color_by="camera", legend=False)
 
         # --- Plot the given field line
         if hasattr(self, "fieldLines"):
@@ -1086,7 +1055,7 @@ class Tokamak(object):
         else:
             plt.show()
 
-    def set_fieldlines(self, startR=[], startZ=[], startPhi=0.0, numTransists=1.0) -> None:
+    def set_fieldlines(self, startR=None, startZ=None, startPhi=0.0, numTransists=1.0) -> None:
         """
         Calculate the field line progress clockwise and counterclockwise from
         StartPhi. This supports inputs of multiple R and z locations.
@@ -1108,6 +1077,10 @@ class Tokamak(object):
         this vectorized format should be faster than storing them in a different manner.
         """
 
+        if startZ is None:
+            startZ = []
+        if startR is None:
+            startR = []
         if numTransists <= 0:
             raise ValueError(f"numTransists must be positive, got {numTransists}")
         # 500 output points per transit, so the nearest-angle lookup along a
@@ -1176,7 +1149,7 @@ class Tokamak(object):
     def get_fieldLines_startPhis(self) -> list:
         return list(self.fieldLines.keys())
 
-    def find_RZ_Fline(self, startPhi, emissionName, inputPhis=[]):
+    def find_RZ_Fline(self, startPhi, emissionName, inputPhis=None):
         """
         Returns the R and z arrays for the given input inputPhi location.
 
@@ -1189,6 +1162,8 @@ class Tokamak(object):
         method only pays the searchsorted cost on each call.
         """
 
+        if inputPhis is None:
+            inputPhis = []
         key = fieldline_key(startPhi)
         if key not in self.fieldLines:
             raise KeyError(f"No field lines traced at {startPhi} deg (key '{key}')" f"Available: {self.get_fieldLines_startPhis()}")

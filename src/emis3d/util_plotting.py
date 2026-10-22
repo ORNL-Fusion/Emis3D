@@ -40,12 +40,14 @@ def proj(local_pt, to_world=None):
 
 
 def draw_Cherab_box(
-    ax, camera, colors=["black", "tab:red", "tab:green", "tab:blue"], to_world=False
+    ax, camera, colors=None, to_world=False
 ):
     """
     Draws a box given an input Point3D
     """
 
+    if colors is None:
+        colors = ["black", "tab:red", "tab:green", "tab:blue"]
     w_ = None
     if to_world:
         w_ = get_to_world(camera)

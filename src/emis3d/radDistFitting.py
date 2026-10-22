@@ -44,8 +44,9 @@ class RadDistFitting:
             self.info.update(temp["info"])
             self._load_ok = True
 
-        except Exception as e:
-            # The caller decides whether this is fatal (see Emis3D._load_radDists)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            # An unreadable or malformed file; the caller decides whether this is
+            # fatal (see Emis3D._load_radDists). Other errors are bugs and propagate.
             self.load_error = f"{type(e).__name__}: {e}"
 
     @staticmethod

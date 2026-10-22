@@ -549,34 +549,26 @@ class RadDist(ABC):
 
                             # --- Below is a calculation of the incident radiance directly,
                             # renormalising for comparison with the sightline
-                            try:
-                                # --- Check for divide by zero values
-                                if foil.sensitivity == 0 or foil.pipelines[0].value.mean == 0 or bolo_.etendues[jj] == 0:
-                                    ans = 0
-                                    ans_error = 0
-                                else:
-                                    fractional_solid_angle = bolo_.etendues[jj] / foil.sensitivity
-                                    radiance = foil.pipelines[0].value.mean / fractional_solid_angle
-                                    radiance_error = (
-                                        np.hypot(
-                                            foil.pipelines[0].value.error() / foil.pipelines[0].value.mean,
-                                            bolo_.etendues_error[jj] / bolo_.etendues[jj],
-                                        )
-                                        * radiance
+                            # --- Check for divide by zero values
+                            if foil.sensitivity == 0 or foil.pipelines[0].value.mean == 0 or bolo_.etendues[jj] == 0:
+                                ans = 0
+                                ans_error = 0
+                            else:
+                                fractional_solid_angle = bolo_.etendues[jj] / foil.sensitivity
+                                radiance = foil.pipelines[0].value.mean / fractional_solid_angle
+                                radiance_error = (
+                                    np.hypot(
+                                        foil.pipelines[0].value.error() / foil.pipelines[0].value.mean,
+                                        bolo_.etendues_error[jj] / bolo_.etendues[jj],
                                     )
-                                    if units == "Brightness":
-                                        ans = radiance * 4.0 * np.pi
-                                        ans_error = radiance_error / radiance * ans
-                                    elif units == "Radiance":
-                                        ans = radiance
-                                        ans_error = radiance_error
-
-                            except Exception as e:
-                                raise RuntimeError(
-                                    f"Could not convert the observation to {units} "
-                                    f"(etendue={bolo_.etendues[jj]:.4g}, sensitivity={foil.sensitivity:.4g}, "
-                                    f"mean={foil.pipelines[0].value.mean:.4g})"
-                                ) from e
+                                    * radiance
+                                )
+                                if units == "Brightness":
+                                    ans = radiance * 4.0 * np.pi
+                                    ans_error = radiance_error / radiance * ans
+                                elif units == "Radiance":
+                                    ans = radiance
+                                    ans_error = radiance_error
 
                         elif units == "Power":
                             ans = foil.pipelines[0].value.mean
@@ -809,12 +801,14 @@ class RadDist(ABC):
         )
         return cf
 
-    def _plotOverview_crossSection(self, ax, boloGroup: str, plot_etendue: list = []) -> None:
+    def _plotOverview_crossSection(self, ax, boloGroup: str, plot_etendue: list | None = None) -> None:
         """
         Draws one top-row panel: the first wall, the chords of a single bolometer
         group, and a cross-section of the radDist at that group's toroidal location.
         """
 
+        if plot_etendue is None:
+            plot_etendue = []
         tok = self.tokamak
 
         tok._plot_first_wall(ax)
@@ -872,7 +866,7 @@ class RadDist(ABC):
     def plotOverview(
         self,
         return_figure: bool = False,
-        plot_etendue: list = [],
+        plot_etendue: list | None = None,
         groups_per_figure: int = 3,
     ):
         """
@@ -895,6 +889,8 @@ class RadDist(ABC):
             [cross-section per group..., injection location, signals per group...]
         """
 
+        if plot_etendue is None:
+            plot_etendue = []
         if groups_per_figure < 1:
             raise ValueError(f"groups_per_figure must be at least 1, got {groups_per_figure}")
 
@@ -989,7 +985,7 @@ class RadDist(ABC):
         logger.info("radDist saved to:\n  folder  : %s\n  filename: %s", pathFileName, saveFileName)
 
     @abstractmethod
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Abstract method to be implemented by subclasses to return, for each
         channel of the bolometer, the list of toroidal angles (radians) at
@@ -1023,10 +1019,12 @@ class Helical(RadDist):
         self,
         startR: float = 0.0,
         startZ: float = 0.0,
-        config: dict = {},
+        config: dict | None = None,
         setFieldLine: bool = True,
     ) -> None:
 
+        if config is None:
+            config = {}
         super(Helical, self).__init__(startR=startR, startZ=startZ, config=config or {})
 
         self.info["setFieldLine"] = setFieldLine
@@ -1108,26 +1106,34 @@ class Helical(RadDist):
         if emissionName is None:
             emissionName = self.emissionName
 
-        R0_arr, z0_arr = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
+        R = np.ascontiguousarray(np.ravel(R), dtype=np.float64)
+        z = np.ascontiguousarray(np.ravel(z), dtype=np.float64)
+        phi = np.atleast_1d(np.asarray(phi, dtype=np.float64)).ravel()
+        if phi.size not in (1, R.size):
+            raise ValueError(f"phi must be one angle or one per point, got {phi.size} for {R.size} points")
+        weights = np.asarray(self.info["weights"], dtype=np.float64)
+        sigma = float(self.info["sigmaKernel"])
 
-        # Squeeze out any spurious dimensions, ensure C-contiguous float64
-        R = np.ascontiguousarray(R.ravel(), dtype=np.float64)
-        z = np.ascontiguousarray(z.ravel(), dtype=np.float64)
-        R0_arr = np.ascontiguousarray(R0_arr.ravel(), dtype=np.float64)
-        z0_arr = np.ascontiguousarray(z0_arr.ravel(), dtype=np.float64)
+        # Field lines' (R, z) at each distinct angle: shape (field lines, angles)
+        angles, which = np.unique(phi, return_inverse=True)
+        R0, z0 = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=angles)
 
-        tot = Util_radDist._evaluate_kernels(
-            R,
-            z,
-            R0_arr,
-            z0_arr,
-            self.info["weights"].astype(np.float64),
-            float(self.info["sigmaKernel"]),
-        )
-
+        # Each point sums over the field lines at its own angle. (Flattening all
+        # angles together used to mix field lines and angles when several were given.)
+        tot = np.empty(R.size)
+        for k in range(angles.size):
+            sel = which == k if angles.size > 1 else slice(None)
+            tot[sel] = Util_radDist._evaluate_kernels(
+                R[sel],
+                z[sel],
+                np.ascontiguousarray(R0[:, k], dtype=np.float64),
+                np.ascontiguousarray(z0[:, k], dtype=np.float64),
+                weights,
+                sigma,
+            )
         return {emissionName: tot}
 
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1139,6 +1145,8 @@ class Helical(RadDist):
         emissionName : str  — used to extract the revolution number from the name.
         """
 
+        if bolo_info is None:
+            bolo_info = {}
         num_channels = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
@@ -1168,10 +1176,12 @@ class HelicalRing(RadDist):
         self,
         startR: float = 0.0,
         startZ: float = 0.0,
-        config: dict = {},
+        config: dict | None = None,
         setFieldLine: bool = True,
     ):
 
+        if config is None:
+            config = {}
         super(HelicalRing, self).__init__(startR=startR, startZ=startZ, config=config or {})
 
         self.info["setFieldLine"] = setFieldLine
@@ -1230,9 +1240,6 @@ class HelicalRing(RadDist):
             emissionName = self.emissionName
 
         localEmis = {}
-        R0, z0 = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=phi)
-        R0 = R0.flatten()
-        z0 = z0.flatten()
 
         vertExtendParam = 3.0  # for vertical extension of plasma... hardcoded for now
 
@@ -1266,7 +1273,7 @@ class HelicalRing(RadDist):
 
         return localEmis
 
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1278,6 +1285,8 @@ class HelicalRing(RadDist):
         emissionName : str  — used to extract the revolution number from the name.
         """
 
+        if bolo_info is None:
+            bolo_info = {}
         num_channels = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
@@ -1300,13 +1309,15 @@ class ElongatedRing(RadDist):
         self,
         startR=None,
         startZ=None,
-        config={},
+        config=None,
     ):
         # Ensure startR and startZ are floats, not None
+        if config is None:
+            config = {}
         if startR is None:
-            startR = float(config.get("startR"))
+            startR = float(config["startR"])
         if startZ is None:
-            startZ = float(config.get("startZ"))
+            startZ = float(config["startZ"])
 
         super(ElongatedRing, self).__init__(startR=startR, startZ=startZ, config=config or {})
         self.info["distType"] = "elongatedRing"
@@ -1358,7 +1369,7 @@ class ElongatedRing(RadDist):
         )
         return localEmis
 
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1370,6 +1381,8 @@ class ElongatedRing(RadDist):
         emissionName : str  — used to extract the revolution number from the name.
         """
 
+        if bolo_info is None:
+            bolo_info = {}
         numChan = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
@@ -1389,13 +1402,15 @@ class SquareTube(RadDist):
         self,
         startR=None,
         startZ=None,
-        config={},
+        config=None,
     ):
         # Ensure startR and startZ are floats, not None
+        if config is None:
+            config = {}
         if startR is None:
-            startR = float(config.get("startR"))
+            startR = float(config["startR"])
         if startZ is None:
-            startZ = float(config.get("startZ"))
+            startZ = float(config["startZ"])
 
         dR = config.get("dR")
         dz = config.get("dz")
@@ -1448,7 +1463,7 @@ class SquareTube(RadDist):
 
         return localEmis
 
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Return, per channel, the list of toroidal angles (radians) at which the
         observation took place. Poloidal-fan cameras view a single toroidal
@@ -1460,6 +1475,8 @@ class SquareTube(RadDist):
         emissionName : str  — used to extract the revolution number from the name.
         """
 
+        if bolo_info is None:
+            bolo_info = {}
         numChan = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
@@ -1578,7 +1595,7 @@ class SimulationRadDist(RadDist):
 
         return {emissionName: emis}
 
-    def _scaling_factor(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _scaling_factor(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Compute the toroidal scaling factor (phi offset) for a bolometer channel.
 
@@ -1588,16 +1605,20 @@ class SimulationRadDist(RadDist):
         emissionName : str  — used to extract the revolution number from the name.
         """
 
+        if bolo_info is None:
+            bolo_info = {}
         numChan = bolo_info["NUM_CHANNELS"]
         phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
 
         return [float(phi)] * numChan
 
-    def _observed_phi_loc(self, bolo_info: dict = {}, emissionName: str | None = None) -> list:
+    def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
         Not yet implimented! (review issue 18)
         """
 
+        if bolo_info is None:
+            bolo_info = {}
         return []
 
     def _save_names(self) -> tuple[str, str]:

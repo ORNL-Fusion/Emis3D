@@ -223,7 +223,7 @@ def ensure_covariance(fit, data_dict: dict, synth: dict, scale_def: str, helical
         return fit, "ok"
     try:
         refit = Util_emis3D.fit_radDist(fit.params, data_dict, synth, scale_def, helical_endpoint_weight, method="least_squares")
-    except Exception as e:  # pragma: no cover - defensive
+    except Util_emis3D.FIT_ERRORS as e:
         logger.warning("Covariance refit failed: %s", e)
         return fit, "no covariance"
     refit_covar = getattr(refit, "covar", None)
@@ -458,7 +458,7 @@ def propagate(
         for cid, fit, synth in nominal:
             try:
                 refit = Util_emis3D.fit_radDist(fit.params, dd, synth, scale_def, helical_endpoint_weight, method="least_squares")
-            except Exception as e:
+            except Util_emis3D.FIT_ERRORS as e:
                 logger.warning("Calibration refit failed for fit %s: %s", cid, e)
                 refit = fit
             fits_r.append((cid, refit, synth))

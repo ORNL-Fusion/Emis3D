@@ -19,6 +19,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 
 from lmfit import minimize
+from lmfit.minimizer import MinimizerException
 
 logger = logging.getLogger(__name__)
 
@@ -497,6 +498,12 @@ def residual(
         return data
 
 
+# Errors a fit can legitimately hit on real data (singular matrices, NaN
+# residuals, failed minimizations). Handlers that record a failed fit and
+# carry on catch only these, so programming errors still propagate.
+FIT_ERRORS = (ValueError, ArithmeticError, RuntimeError, MinimizerException)
+
+
 def fit_radDist(
     pars,
     data_dict: dict,
@@ -537,14 +544,15 @@ def runParallel(job):
 
 def _fit_job(job):
     """
-    Worker for FitPool: one fit. An error is returned rather than raised, so
-    one failing radDist does not stop the others. Defined at module level so
+    Worker for FitPool: one fit. A numerical failure (FIT_ERRORS) is returned
+    rather than raised, so one failing radDist does not stop the others; any
+    other error is a bug and propagates. Defined at module level so
     worker processes can import it (macOS starts workers fresh, by "spawn").
     """
     try:
         index, fit = runParallel(job)
         return index, fit, None
-    except Exception as e:
+    except FIT_ERRORS as e:
         return job[0], None, f"{type(e).__name__}: {e}"
 
 

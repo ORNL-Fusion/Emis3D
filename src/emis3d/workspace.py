@@ -305,19 +305,19 @@ class Workspace:
 
     def provenance(self, run_config: str | os.PathLike | None = None, **fields) -> dict:
         """Record of code version and resolved locations, saved beside results."""
-        try:
-            from importlib.metadata import version
+        from importlib.metadata import PackageNotFoundError, version
 
+        try:
             pkg_version = version("emis3d")
-        except Exception:
+        except PackageNotFoundError:
             pkg_version = "unknown"
         commit, dirty = None, None
         if (REPO_ROOT / ".git").exists():
             try:
                 commit = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip() or None
                 dirty = bool(subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--porcelain"], capture_output=True, text=True, timeout=5).stdout.strip())
-            except Exception:
-                pass
+            except (OSError, subprocess.SubprocessError):
+                pass  # no git: provenance just lacks the commit
         return {
             "created": _dt.datetime.now().isoformat(timespec="seconds"),
             "emis3d_version": pkg_version,

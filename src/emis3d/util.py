@@ -50,13 +50,11 @@ def config_loader(
     try:
         with open(pathFileName, "r") as f:
             config = yaml.safe_load(f)
-        if verbose:
-            logger.debug("Loaded config file: %s", pathFileName)
-        return config
-
-    except Exception as e:
-        logger.error("Could not load the configuration file: %s — %s", pathFileName, e)
-        return None
+    except yaml.YAMLError as e:
+        raise ValueError(f"Could not parse the configuration file {pathFileName}: {e}") from e
+    if verbose:
+        logger.debug("Loaded config file: %s", pathFileName)
+    return config
 
 
 def XY_To_RPhi(X: float, Y: float, TorOffset: float = 0.0) -> tuple[float, float]:
@@ -623,7 +621,7 @@ def get_rectangle_corners(rect) -> list:
     try:
         h = rect.y_width / 2
         w = rect.x_width / 2
-    except Exception:
+    except AttributeError:
         h = rect.dy / 2
         w = rect.dx / 2
 

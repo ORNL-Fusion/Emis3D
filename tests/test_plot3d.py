@@ -121,7 +121,10 @@ def test_chords_are_coloured_by_camera_height(tmp_path):
     assert {b.name: tok.camera_height_class(b) for b in tok.bolometers} == {
         "POL_A": "above", "POL_B": "below", "POL_C": "above", "SKEW": "above", "WRAP": "above", "MID": "midplane"}
     ax = ring.plot3D(n_points=2000)
-    colours = {ln.get_color() for ln in ax.get_lines() if ln.get_linewidth() == 0.5}
+    import inspect
+
+    chord_lw = inspect.signature(tok.plot3d_chords).parameters["lw"].default   # follows any restyling
+    colours = {ln.get_color() for ln in ax.get_lines() if ln.get_linewidth() == chord_lw}
     assert colours == set(tok.HEIGHT_COLORS.values())
     assert [t.get_text() for t in ax.get_legend().get_texts()] == [
         "cameras above the midplane", "cameras at the midplane", "cameras below the midplane"]

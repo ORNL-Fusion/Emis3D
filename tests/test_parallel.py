@@ -49,12 +49,27 @@ def test_worker_processes_give_the_serial_results(prepared, monkeypatch):
         assert b.covar is not None                                # covariance survives the trip back
 
 
-def test_a_failing_fit_is_reported_not_raised(prepared):
+def test_a_numerical_failure_is_reported_not_raised(prepared):
+    """A fit that fails numerically (here a NaN in the model) is recorded, and the others carry on."""
+    import copy
+
     e, _ = prepared
     bad = list(jobs_for(e)[0])
-    bad[3] = {"emissionNames": ["missing"]}                       # a broken synthetic dict
+    synth = copy.deepcopy(bad[3])
+    name = synth["emissionNames"][0]
+    synth[name]["data"][0][0] = [np.nan]
+    bad[3] = synth
     index, fit, error = U.FitPool(1).map([tuple(bad)])[0]
-    assert index == 0 and fit is None and "KeyError" in error
+    assert index == 0 and fit is None and "ValueError" in error
+
+
+def test_a_programming_error_propagates(prepared):
+    """A malformed synthetic dict is a bug, not a failed fit: it must not be hidden."""
+    e, _ = prepared
+    bad = list(jobs_for(e)[0])
+    bad[3] = {"emissionNames": ["missing"]}
+    with pytest.raises(KeyError):
+        U.FitPool(1).map([tuple(bad)])
 
 
 def test_small_batches_do_not_start_processes(prepared):
