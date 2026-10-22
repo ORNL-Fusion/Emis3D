@@ -78,7 +78,7 @@ def _plan_lines(lib, plans, root, workers_override) -> list[str]:
     """What will be built, before anything is built."""
     lines = [f"radDist library: {lib.path} ({lib.tokamakName}, shot {lib.shot}), into {root / lib.folder}"]
     for t, jobs, info, shapes in plans:
-        rays = {**{"pixelSamples": 1000, "integrationStep": 0.01}, **(t.settings.get("rays") or {})}
+        rays = {**{"pixelSamples": 1000, "integrationStep": 0.01, "method": "compiled"}, **(t.settings.get("rays") or {})}
         lines.append(f"  {t.name} ({t.distType}) -> {lib.folder_for(t)}")
         if t.is_simulation:
             lines.append(f"      files: {_values([Path(str(f)).name for f in (t.shape['files'] if isinstance(t.shape['files'], list) else [t.shape['files']])])}"
@@ -94,7 +94,7 @@ def _plan_lines(lib, plans, root, workers_override) -> list[str]:
             where = "inside the wall" if not g.get("rLimits") else f"R {g['rLimits']}, z {g['zLimits']}"
             lines.append(f"      {len(shapes)} distinct shape(s){dedup} x {info['start_positions']} start position(s) "
                          f"(grid {g['NumR']} x {g['NumZ']}, {where}) = {len(jobs)} radDists")
-        lines.append(f"      rays: {rays['pixelSamples']} per channel, step {rays['integrationStep']} m; "
+        lines.append(f"      rays: {rays['pixelSamples']} per channel, step {rays['integrationStep']} m, {rays['method']} emission; "
                      f"workers: {workers_override or t.settings.get('workers') or 1}")
     lines.append(f"Total: {sum(len(p[1]) for p in plans)} radDists")
     return lines

@@ -117,6 +117,7 @@ def test_failed_observation_raises_instead_of_storing_zero(sims, monkeypatch):
         raise ValueError("interpolator out of range")
 
     monkeypatch.setattr(sim, "_evaluate", broken)
+    monkeypatch.setitem(sim.info, "rayMethod", "python")  # so Cherab calls the (broken) Python function
     with pytest.raises(RuntimeError, match="Observation failed for foil .* of camera"):
         sim.bolos_observe()
 

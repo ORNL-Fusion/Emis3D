@@ -17,6 +17,7 @@ import os
 
 import numpy as np
 from cherab.tools.emitters import RadiationFunction
+from cherab.core.math import AxisymmetricMapper, CylindricalTransform, Interpolate2DLinear
 from raysect.optical import VolumeTransform  # type: ignore
 from raysect.core.workflow import SerialEngine
 from raysect.core.math.random import seed as _raysect_seed
@@ -58,6 +59,13 @@ class RadDist(ABC):
 
     # --- (info key, label) pairs that make up the save folder name
     SAVE_KEYS: tuple[tuple[str, str], ...] = ()
+    # Emission that does not depend on the toroidal angle (the fit applies the
+    # toroidal shape afterwards): one compiled grid serves every camera, and
+    # the toroidal power profile is computed once
+    TOROIDALLY_UNIFORM: bool = False
+    # A camera whose central sightlines span less than this toroidally is
+    # treated as poloidal: its view is one toroidal plane
+    POLOIDAL_SPAN_DEG: float = 0.5
 
     def __init__(self, startR=2.96, startZ=0.0, config=None):
 
@@ -292,10 +300,11 @@ class RadDist(ABC):
 
         phi_array = np.linspace(0, 2.0 * np.pi, n_phi, endpoint=False)
 
-        # --- Poloidal integral P_pol(φ) at each toroidal location
+        # --- Poloidal integral P_pol(φ) at each toroidal location (once, if the
+        # emission does not depend on the toroidal angle)
         P_pol = np.zeros(n_phi)
 
-        for i, phi in enumerate(phi_array):
+        for i, phi in enumerate(phi_array[:1] if self.TOROIDALLY_UNIFORM else phi_array):
 
             phi_arr = np.full(len(R_flat), phi)
 
@@ -308,6 +317,9 @@ class RadDist(ABC):
 
             inner = simpson(emis_grid, x=z_vals, axis=1)  # (n_poloidal,)
             P_pol[i] = simpson(inner, x=R_vals)
+
+        if self.TOROIDALLY_UNIFORM:
+            P_pol[:] = P_pol[0]
 
         # --- Total power: phi_array is a uniform periodic grid, so the integral
         # over the full turn is the mean times 2 pi (a Simpson rule over
@@ -442,6 +454,94 @@ class RadDist(ABC):
                         toterrfrac,
                     )
 
+    # ------------------------------------------------------------------
+    # Compiled emission (rays: {method: compiled})
+    # ------------------------------------------------------------------
+    def _grid_spacing(self) -> float:
+        """
+        Grid spacing [m] for compiled emission: an eighth of the narrowest width
+        that shapes the emission, between 0.5 and 3 mm; gridSpacing in the
+        settings overrides it.
+        """
+        if self.info.get("gridSpacing"):
+            return float(self.info["gridSpacing"])
+        widths = [float(self.info[k]) for k in ("sigma_R", "sigma_z", "sigmaKernel", "dR", "dz")
+                  if isinstance(self.info.get(k), (int, float)) and self.info[k] > 0]
+        if self.info.get("distType", "").lower() == "helicalring" and self.info.get("sigma_R") and self.info.get("sigma_z"):
+            widths.append(float(self.info["sigma_R"]) * float(self.info["sigma_z"]))  # its perpendicular width
+        return float(np.clip(min(widths) / 8.0, 5e-4, 3e-3)) if widths else 3e-3
+
+    def _emission_box(self, emissionName: str, phi: float) -> tuple[float, float, float, float] | None:
+        """(R_min, R_max, z_min, z_max) outside which this emission is negligible at phi; None: the whole wall."""
+        return None
+
+    def _compiled_emission(self, emissionName: str, phi: float = 0.0):
+        """
+        The emission as a compiled Cherab function, so ray marching does not
+        call Python at every step: the emissivity on an (R, z) grid at the
+        toroidal angle phi, interpolated by Cherab and mapped around the torus
+        (exact for TOROIDALLY_UNIFORM types; for others, valid for a camera
+        whose view lies in the plane at phi). The grid covers _emission_box,
+        with a zero border, so the emission is zero outside it.
+        """
+        wall = self.tokamak.wall
+        if wall is None:
+            raise RuntimeError("Build the tokamak before compiling the emission")
+        h = self._grid_spacing()
+        box = self._emission_box(emissionName, phi)
+        rmin, rmax, zmin, zmax = wall["minr"], wall["maxr"], wall["minz"], wall["maxz"]
+        if box is not None:
+            rmin, rmax = max(rmin, box[0]), min(rmax, box[1])
+            zmin, zmax = max(zmin, box[2]), min(zmax, box[3])
+        if rmax <= rmin or zmax <= zmin:  # the emission does not reach this plane
+            rmin, rmax, zmin, zmax = wall["minr"], wall["minr"] + 4 * h, wall["minz"], wall["minz"] + 4 * h
+        R = np.arange(rmin - h, rmax + 2 * h, h)
+        z = np.arange(zmin - h, zmax + 2 * h, h)
+        RR, ZZ = np.meshgrid(R, z, indexing="ij")
+        emis = self.calc_emissivity(RR.ravel(), ZZ.ravel(), phi=np.array([phi]), emissionName=emissionName)[emissionName]
+        grid = np.asarray(emis, dtype=float).reshape(RR.shape)
+        grid[0, :] = grid[-1, :] = grid[:, 0] = grid[:, -1] = 0.0  # zero border: nothing outside the grid
+        return AxisymmetricMapper(Interpolate2DLinear(R, z, grid, extrapolate=True, extrapolation_type="nearest"))
+
+    def _camera_view_phi(self, bolo) -> tuple[float, float]:
+        """
+        Toroidal angle (radians) at the middle of a camera's view, and the
+        toroidal span (degrees) of its central sightlines inside the wall.
+        """
+        phis = []
+        for foil in bolo.bolometer_camera:
+            origin, hit, _ = foil.trace_sightline()
+            o = np.array([origin[0], origin[1], origin[2]])
+            d = np.array([hit[0], hit[1], hit[2]]) - o
+            pts = o[None, :] + np.linspace(0.0, 1.0, 60)[:, None] * d[None, :]
+            inside = self.tokamak._inside_tokamak(np.column_stack([np.hypot(pts[:, 0], pts[:, 1]), pts[:, 2]]))
+            if inside.any():
+                phis.extend(np.arctan2(pts[inside, 1], pts[inside, 0]).tolist())
+        if not phis:
+            p = float(np.deg2rad(bolo.info["CAMERA_POSITION_R_Z_PHI"][2]))
+            return p % (2.0 * np.pi), 0.0
+        mid = float(np.angle(np.mean(np.exp(1j * np.asarray(phis)))))
+        spread = np.angle(np.exp(1j * (np.asarray(phis) - mid)))  # relative to the middle, in (-pi, pi]
+        return mid % (2.0 * np.pi), float(np.rad2deg(spread.max() - spread.min()))
+
+    def _emission_function(self, emissionName: str, bolo, cache: dict) -> tuple[Any, str]:
+        """
+        What Cherab evaluates for this emission and camera: a compiled grid
+        when possible (_compiled_emission), else the Python function.
+        Returns (function, how) with how in "uniform", "plane", "python"
+        ("grid3d" for simulation radDists).
+        """
+        if str(self.info.get("rayMethod", "compiled")).lower() == "python":
+            return self._evaluate_cherab, "python"
+        if self.TOROIDALLY_UNIFORM:
+            if emissionName not in cache:
+                cache[emissionName] = self._compiled_emission(emissionName, 0.0)
+            return cache[emissionName], "uniform"
+        phi, span = self._camera_view_phi(bolo)
+        if span > self.POLOIDAL_SPAN_DEG:
+            return self._evaluate_cherab, "python"  # a skewed camera sees many toroidal angles
+        return self._compiled_emission(emissionName, phi), "plane"
+
     def bolos_observe(self) -> None:
         """
         Observes the radiation function for each bolometer.
@@ -492,14 +592,11 @@ class RadDist(ABC):
             if val.name == "Emission Surface":
                 emitter = val
 
-        if emitter is not None:
-            # Change the integration step size
-            step = float(self.info.get("integrationStep", 0.1))
-
-            emittting_material = VolumeTransform(RadiationFunction(self._evaluate_cherab, step=step), emitter.transform.inverse())
-            emitter.material = emittting_material
-        else:
+        if emitter is None:
             raise RuntimeError("Could not find Tokamak Wall in tokamak.world.children during bolos_observe().")
+        step = float(self.info.get("integrationStep", 0.1))
+        compiled_cache: dict = {}
+        self.info["emitterMethods"] = {}
 
         # --- Loop over each emission function within the radDist, then each bolometer
         for emissionName in self.info["emissionNames"]:
@@ -514,6 +611,10 @@ class RadDist(ABC):
             # --- Observe with each bolometer
             for bolo_ in boloCameras:
                 bolo_._change_parent(value=self.tokamak.world)
+                # --- The emission Cherab evaluates for this camera (compiled grid or Python)
+                fn, how = self._emission_function(emissionName, bolo_, compiled_cache)
+                emitter.material = VolumeTransform(RadiationFunction(fn, step=step), emitter.transform.inverse())
+                self.info["emitterMethods"][f"{emissionName}/{bolo_.name}"] = how
                 # print(f"Observing with {bolo_.name}")
                 # TIMER ADDITION
                 _cam_t0 = __import__("time").perf_counter()
@@ -1007,6 +1108,11 @@ class Helical(RadDist):
                                   Should be True in almost all cases
     """
 
+    def _emission_box(self, emissionName: str, phi: float):
+        R0, z0 = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=np.array([phi]))
+        pad = 6.0 * float(self.info["sigmaKernel"])
+        return float(np.min(R0)) - pad, float(np.max(R0)) + pad, float(np.min(z0)) - pad, float(np.max(z0)) + pad
+
     SAVE_KEYS = (
         ("sigma_R", "sigma_R"),
         ("sigmaKernel", "kernel"),
@@ -1165,6 +1271,11 @@ class HelicalRing(RadDist):
     setFieldLine    : bool      — Trace the field line, should be true 99% of the time.
     """
 
+    def _emission_box(self, emissionName: str, phi: float):
+        flR, flZ = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=np.array([phi]))
+        pad = 8.0 * max(float(self.info["sigma_z"]), float(self.info["sigma_R"]) * float(self.info["sigma_z"]))
+        return float(np.min(flR)) - pad, float(np.max(flR)) + pad, float(np.min(flZ)) - pad, float(np.max(flZ)) + pad
+
     SAVE_KEYS = (
         ("sigma_R", "sigma_R"),
         ("sigma_z", "sigma_z"),
@@ -1304,6 +1415,12 @@ class ElongatedRing(RadDist):
     """
 
     SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("rotationAngle", "rot"))
+    TOROIDALLY_UNIFORM = True
+
+    def _emission_box(self, emissionName: str, phi: float):
+        pad = 6.0 * max(float(self.info["sigma_R"]), float(self.info["sigma_z"]))  # any rotation fits
+        R0, z0 = float(self.info["startR"]), float(self.info["startZ"])
+        return R0 - pad, R0 + pad, z0 - pad, z0 + pad
 
     def __init__(
         self,
@@ -1397,6 +1514,17 @@ class SquareTube(RadDist):
     """
 
     SAVE_KEYS = (("dR", "dR"), ("dz", "dz"))
+    TOROIDALLY_UNIFORM = True
+
+    def _grid_spacing(self) -> float:
+        """1 mm by default: the tube has sharp edges, which a grid blurs over one cell."""
+        return float(self.info.get("gridSpacing") or 1e-3)
+
+    def _emission_box(self, emissionName: str, phi: float):
+        h = 2.0 * self._grid_spacing()
+        R0, z0 = float(self.info["startR"]), float(self.info["startZ"])
+        dR, dz = float(self.info["dR"]), float(self.info["dz"])  # half-widths: the tube spans R0 +- dR, z0 +- dz
+        return R0 - dR - h, R0 + dR + h, z0 - dz - h, z0 + dz + h
 
     def __init__(
         self,
@@ -1559,6 +1687,41 @@ class SimulationRadDist(RadDist):
         self.rmin, self.rmax = float(axes["r"][0]), float(axes["r"][-1])
         self.zmin, self.zmax = float(axes["z"][0]), float(axes["z"][-1])
         self.interp_operator = Interpolate3DLinear(*(axes[a] for a in self.AXES), values)
+
+    def _compiled_emission(self, emissionName: str, phi: float = 0.0):
+        """
+        The simulation's own grid as a compiled Cherab function of (x, y, z):
+        reordered to (R, phi, z), extended by a period so it covers Cherab's
+        angle range (-pi, pi] whatever the first angle, and given a zero
+        border in R and z (outside the simulation's domain the emission is
+        zero, as in _evaluate, ramping down over one grid cell). Grid points
+        outside the wall are zero, as calc_emissivity masks them.
+        """
+        two_pi = 2.0 * np.pi
+        v = np.transpose(self.emis_values, [self.AXES.index(a) for a in ("r", "phi", "z")])
+        phi_ax = np.asarray(self.phi_list, dtype=float)  # closed: ends one period after it starts
+        shift = two_pi * np.floor((phi_ax[0] + np.pi) / two_pi)  # first angle into [-pi, pi)
+        phi_ax = phi_ax - shift
+        ext_phi = np.concatenate([phi_ax[:-1] - two_pi, phi_ax])
+        ext_v = np.concatenate([v[:, :-1, :], v], axis=1)
+        r, z = np.asarray(self.r_list, dtype=float), np.asarray(self.z_list, dtype=float)
+        # Outside the wall the emission is zero, as calc_emissivity's wall mask makes it
+        # (Cherab samples the whole emitting annulus, which extends beyond the wall)
+        RR, ZZ = np.meshgrid(r, z, indexing="ij")
+        inside = self.tokamak._inside_tokamak(np.column_stack([RR.ravel(), ZZ.ravel()])).reshape(RR.shape)
+        ext_v = ext_v * inside[:, None, :]
+        dr, dz = r[1] - r[0], z[1] - z[0]
+        r_pad = np.concatenate([[r[0] - dr], r, [r[-1] + dr]])
+        z_pad = np.concatenate([[z[0] - dz], z, [z[-1] + dz]])
+        v_pad = np.pad(ext_v, ((1, 1), (0, 0), (1, 1)))
+        return CylindricalTransform(Interpolate3DLinear(r_pad, ext_phi, z_pad, v_pad, extrapolate=True, extrapolation_type="nearest"))
+
+    def _emission_function(self, emissionName: str, bolo, cache: dict) -> tuple[Any, str]:
+        if str(self.info.get("rayMethod", "compiled")).lower() == "python":
+            return self._evaluate_cherab, "python"
+        if "grid" not in cache:
+            cache["grid"] = self._compiled_emission(emissionName)
+        return cache["grid"], "grid3d"
 
     def _evaluate(
         self,

@@ -15,7 +15,8 @@ units: Brightness  # Signal units: Power (W), Radiance (W/m2/sr) or Brightness (
 eqFileName: MOCK_solovev.geqdsk  # Equilibrium; needed by Helical and HelicalRing types
 numBins: 36  # Toroidal points for the radiated-power profile (the TPF's toroidal resolution)
 workers: 2  # radDists built in parallel
-rays: {pixelSamples: 100, seed: 0, integrationStep: 0.01}  # Rays per channel (production: 1000+), random seed, ray step [m]
+rays: {pixelSamples: 100, seed: 0, integrationStep: 0.01, method: compiled}  # Rays per channel (production: 1000+), seed, ray step [m];
+#   method: compiled (fast, default) or python (the original, slow path); optional gridSpacing [m] for compiled grids
 grid: {rLimits: [1.80, 1.90], zLimits: [0.15, 0.25], NumR: 2, NumZ: 2}  # Start positions [m]; empty limits use the wall
 
 types:
@@ -35,6 +36,6 @@ types:
 
   squareTube:  # A uniform rectangular tube; switched off here
     distType: SquareTube
-    dR: 0.1  # Radial width [m]
-    dz: 0.1  # Vertical height [m]
+    dR: 0.1  # Radial half-width [m]: the tube spans startR +- dR
+    dz: 0.1  # Vertical half-height [m]: the tube spans startZ +- dz
     enabled: false  # Kept in the file, skipped unless named with --only

@@ -11,7 +11,7 @@ for a shot, with shared settings at the top and one block per type.
     eqFileName: g_JET_p95707_t50.544800
     numBins: 100
     workers: 7
-    rays: {pixelSamples: 1000, seed: 0, integrationStep: 0.01}
+    rays: {pixelSamples: 1000, seed: 0, integrationStep: 0.01, method: compiled}
     grid: {rLimits: [], zLimits: [], NumR: 10, NumZ: 20}
 
     types:
@@ -47,7 +47,8 @@ from emis3d.util import config_loader
 # --- Settings shared by every type (any of OVERRIDABLE can be set again inside a type)
 SHARED_KEYS = {"tokamakName", "shot", "folder", "injectionLocation", "units", "eqFileName", "numBins", "workers", "rays", "grid", "types"}
 OVERRIDABLE = {"injectionLocation", "units", "eqFileName", "numBins", "workers", "rays", "grid"}
-RAYS_KEYS = {"pixelSamples", "seed", "integrationStep"}
+RAYS_KEYS = {"pixelSamples", "seed", "integrationStep", "method", "gridSpacing"}
+RAY_METHODS = ("compiled", "python")
 GRID_KEYS = {"rLimits", "zLimits", "NumR", "NumZ"}
 UNITS = ("Power", "Radiance", "Brightness")
 
@@ -67,7 +68,7 @@ NEEDS_EQUILIBRIUM = ("Helical", "HelicalRing")
 # Names the radDist classes use for some settings
 CLASS_NAMES = {"numTransits": "numTransists"}
 
-DEFAULT_RAYS = {"pixelSamples": 1000, "seed": 0, "integrationStep": 0.01}
+DEFAULT_RAYS = {"pixelSamples": 1000, "seed": 0, "integrationStep": 0.01, "method": "compiled"}
 
 
 @dataclass
@@ -177,8 +178,11 @@ class RadDistLibrary:
             "eqFileName": s.get("eqFileName"),
             "integrationStep": float(rays["integrationStep"]),
             "BOLOMETER_PROPS": {"pixelSamples": int(rays["pixelSamples"]), "seed": rays.get("seed")},
+            "rayMethod": rays["method"],
             "saveRunsDirectoryName": f"{self.folder}/{t.name}",
         }
+        if rays.get("gridSpacing"):
+            cfg["gridSpacing"] = float(rays["gridSpacing"])
         cfg.update(shape)
         return cfg
 
@@ -205,6 +209,10 @@ def _check_shared(s: dict, where: str) -> list[str]:
             bad = sorted(set(s["rays"]) - RAYS_KEYS)
             if bad:
                 errors.append(f"{where}rays: unknown key(s) {bad}; it takes {sorted(RAYS_KEYS)}")
+            if s["rays"].get("method", "compiled") not in RAY_METHODS:
+                errors.append(f"{where}rays.method must be one of {RAY_METHODS}, got {s['rays']['method']!r}")
+            if "gridSpacing" in s["rays"] and not (isinstance(s["rays"]["gridSpacing"], (int, float)) and s["rays"]["gridSpacing"] > 0):
+                errors.append(f"{where}rays.gridSpacing must be a positive length in metres")
     if "grid" in s:
         if not isinstance(s["grid"], dict):
             errors.append(f"{where}grid must be a mapping, e.g. {{rLimits: [], zLimits: [], NumR: 10, NumZ: 20}}")

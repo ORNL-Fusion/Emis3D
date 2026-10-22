@@ -35,6 +35,7 @@ def test_shared_settings_reach_every_radDist():
         "distType": "ElongatedRing", "tokamakName": "MOCK", "shotNumber": 7, "units": "Brightness",
         "injectionLocation": 225.0, "numBins": 36, "eqFileName": "MOCK_solovev.geqdsk", "integrationStep": 0.02,
         "BOLOMETER_PROPS": {"pixelSamples": 200, "seed": 1}, "saveRunsDirectoryName": "7/ring",   # folder defaults to shot
+        "rayMethod": "compiled",
         "sigma_R": 0.2, "sigma_z": 0.3, "rotationAngle": 0.0,
     }
 
