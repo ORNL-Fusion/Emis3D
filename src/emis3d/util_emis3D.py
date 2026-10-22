@@ -1,0 +1,715 @@
+# Util_emis3D.py
+"""
+Contains scaling and residual functions used by emis3D.
+
+Note: All fitting is done centered around zero, dphi = phi - mu, where
+mu is the injection location
+
+Written by JLH Aug. 2025
+
+TODO:
+1. Account for rev1, rev2, etc. for the helical distributions. The dphi
+2. scale_step can only have 2 inputs for the step function
+"""
+
+import logging
+import multiprocessing
+import re
+from concurrent.futures import ProcessPoolExecutor
+import numpy as np
+
+from lmfit import minimize
+from lmfit.minimizer import MinimizerException
+
+logger = logging.getLogger(__name__)
+
+
+def _as_channel_segments(rows) -> list:
+    """
+    Every channel entry of a bolometer group as a 1D float array of toroidal
+    segments. Empty channels become a single zero segment so downstream
+    per-channel reductions stay well-defined.
+    """
+    out = []
+    for chan in rows:
+        arr = np.asarray(chan, dtype=float)
+        if arr.ndim != 1:
+            raise ValueError("each channel must be a list of toroidal segments")
+        if arr.size == 0:
+            arr = np.zeros(1)
+        out.append(arr)
+    return out
+
+
+def _exp(dphi: np.ndarray, kappa: float = 0.0) -> np.ndarray:
+    """Exponential function. Peak = 1.0 at dphi = 0."""
+    return np.exp(-1.0 * kappa * (dphi**2))
+
+
+def scale_exp(A: float, B: float, dphi: np.ndarray) -> np.ndarray:
+    """Gaussian (exponential) scaling. Peak is A at dphi = 0"""
+    return A * _exp(dphi, B)
+
+
+def scale_linear(
+    A: float,
+    B: float,
+    dphi: np.ndarray,
+) -> np.ndarray:
+    """
+    Triangular profile centered at mu: A at dphi = 0, falling linearly with
+    slope |B| and staying at zero beyond A / |B|. (It used to take abs(),
+    which made the profile rise again far along a field line.)
+    """
+    return np.maximum(A - np.abs(B) * np.asarray(dphi, dtype=float), 0.0)
+
+
+def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
+    return A * np.ones(dphi.shape[0])
+
+
+def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.ndarray:
+    """
+    Inputs:
+    A: ndarray, use as the amplitudes in the step function
+    phi: Input phi locations (in radians) for every channel for every bolometer (more for toroidal bolometers)
+    bolo_phi_locs: list of just the bolometer phi locations (in radians) (ex, [np.pi, np.deg2rad(225)] for JET)
+
+    Amplitude at toroidal location phi is set to be equal to the amplitude A[i] at the
+    nearest bolo location bolo_phi_locs[i]. Width of the steps is fully determined by
+    the bolometer locations.
+    """
+    A_arr = np.concatenate((A, A, A))
+    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs + (2 * np.pi), bolo_phi_locs - (2 * np.pi)))
+
+    amplitudes = np.zeros(shape=phi.shape)
+    bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
+    phi_arr = np.tile(phi, (len(bolo_phis), 1)).transpose()
+    dists = np.abs(bolo_phis_arr - phi_arr)
+    dists_diffs = dists - np.min(dists, 1)[:, np.newaxis]
+    nearest_bolo_phi_indxs = np.argwhere(dists_diffs < 1e-9)[:, 1]
+    amplitudes = A_arr[nearest_bolo_phi_indxs]
+
+    return amplitudes
+
+
+def scale_wrapper(
+    a: float,
+    b: float,
+    phi: np.ndarray,
+    mu: float = 0.0,
+    scale_def: str | None = None,
+    emissionName: str | None = None,
+    dphi: np.ndarray | None = None,
+    bolo_phi_locs: np.ndarray | None = None,
+):
+    """
+    Wrapper for the scale function; returns a scaling factor array based on
+    the chosen scale_def.
+
+    Parameters
+    ----------
+    a             : Amplitude of the scaling function
+    b             : Shape parameter used by most scaling functions
+    phi           : Toroidal location(s) of each channel (radians)
+    mu            : Injection location (radians)
+    scale_def     : One of 'exponential', 'linear', 'constant'
+    emissionName  : Name of the emission distribution (e.g. 'clockwise')
+    dphi          : Pre-computed dphi; calculated from phi/mu if None
+    numRevolutions: Number of toroidal revolutions for helical distributions
+    bolo_phi_locs : Toroidal locations of the bolometers (radians)
+    """
+
+    if phi is None and dphi is None:
+        raise ValueError("Phi or dphi array must be populated when calling scale_wrapper!")
+
+    # --- Find dphi
+    if dphi is None and phi is not None:
+        dphi = find_dphi(
+            phi,
+            mu,
+            emissionName=str(emissionName),
+        )
+
+    if dphi is None:
+        return
+
+    if scale_def == "exponential":
+        return scale_exp(a, b, dphi)
+    elif scale_def == "linear":
+        return scale_linear(a, b, dphi)
+    elif scale_def == "constant":
+        return scale_constant(a, dphi)
+    elif scale_def == "step":
+        if bolo_phi_locs is not None:
+            return scale_step(A=np.array([a, b]), phi=phi, bolo_phi_locs=bolo_phi_locs)
+        else:
+            print("Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def")
+            return np.zeros(len(dphi))
+    else:
+        return np.ones(dphi.shape[0])
+
+
+def find_dphi(
+    phi: np.ndarray,
+    mu: float = 0.0,
+    emissionName: str = "",
+) -> np.ndarray:
+    """
+    Toroidal distance from mu to phi, in radians.
+
+    phi and mu are physical angles (any value; only phi mod 2*pi matters).
+    For helical emissions the distance is measured along the helix direction
+    and the revolution comes from the emission name: '<direction>_revN' adds
+    N full turns. For anything else it is the shorter way round.
+
+    Examples (degrees)
+    --------
+        phi = 220, mu = 100
+        dphi = 120 for counterClock and non-helical emissions
+        dphi = 240 for clockwise helical emissions
+
+        phi = 275, mu = 260, counterClock_rev1
+        dphi = 15 + 360 = 375
+
+    Parameters
+    ----------
+    phi           : toroidal angles of the observations (radians)
+    mu            : injection location (radians)
+    emissionName  : e.g. 'clockwise_rev0', 'counterClock_rev2', or anything
+                    else for the shortest angular distance
+
+    Returns
+    -------
+    dphi : np.ndarray
+    """
+
+    if emissionName is None:
+        logger.warning("Emission name in Util_emis3D.find_dphi is None.")
+        return None
+
+    phi = np.asarray(phi, dtype=float)
+
+    two_pi = 2.0 * np.pi
+
+    phi_mod = phi % two_pi
+    mu_mod = mu % two_pi
+
+    # Positive directional distances
+    ccw = (phi_mod - mu_mod) % two_pi
+    cw = (mu_mod - phi_mod) % two_pi
+
+    # --- Account for 2nd or more revolutions around the tokamak
+    rev_match = re.search(r"_rev(\d+)", emissionName)
+    n_rev = int(rev_match.group(1)) if rev_match else 0
+    rev_offset = n_rev * two_pi
+
+    if "clockwise" in emissionName:
+        return cw + rev_offset
+
+    if "counterClock" in emissionName:
+        return ccw + rev_offset
+
+    return np.minimum(ccw, cw)
+
+
+def loc_tag(injectionLocation) -> str:
+    """Canonical tag for LMFIT parameter names ('a_240', 'b_ ... _ 240', etc.)
+    Float injection locations must be int to agree with the creation"""
+    return str(int(round(float(injectionLocation))))
+
+
+def _emission_pairs(emissionNames) -> list:
+    """
+    Pair the clockwise / counterClock helical emission directions that share the
+    same revolution suffix.
+
+    Examples
+    --------
+        ['clockwise_rev0', 'counterClock_rev0'] -> [('clockwise_rev0',
+                                                     'counterClock_rev0')]
+
+    Returns
+    -------
+    list of (clockwise_name, counterClock_name) tuples.
+    """
+    cw, ccw = {}, {}
+    for name in emissionNames:
+        # 'clockwise' is not a substring of 'counterClock', so the order of
+        # these checks does not cause a mis-classification.
+        if "clockwise" in name:
+            cw[name.replace("clockwise", "")] = name
+        elif "counterClock" in name:
+            ccw[name.replace("counterClock", "")] = name
+
+    return [(cw[s], ccw[s]) for s in cw if s in ccw]
+
+
+def helical_endpoint_penalty(
+    pars,
+    synthetic_dict,
+    scale_def: str | None = None,
+    weight: float = 0.0,
+) -> list:
+    """
+    Soft constraint tying paired clockwise / counterClock helical distributions
+    together at the helix *endpoint*.
+
+    The peak (dphi = 0) of the two directions is already tied together because
+    both share the universal amplitude ``a_<tag>``. What is *not* tied is the
+    endpoint: where each direction finishes its revolution, back at the
+    injection angle after travelling (k + 1) full turns for revolution k.
+    This function adds that missing condition, once per revolution pair.
+
+    Each direction is sampled within its own revolution: the endpoint is the
+    sample with the largest toroidal distance along that direction, and the
+    start is the one with the smallest. (The grid point nearest the injector
+    is the endpoint for one direction but the start for the other, which is
+    what this used to sample for both.)
+
+        P_end_d   = scale_d(dphi_end_d) * P_pol_d(end) * scaleSynth
+        P_start_d = P_pol_d(start) * scaleSynth
+
+    The penalty, in the ``(data - model) / error`` units LMFIT minimizes, is::
+
+        weight * (P_end_cw - P_end_ccw) / (P_ref + eps)
+
+        P_ref = a * 0.5 * (P_start_cw + P_start_ccw)
+
+    Normalising by the start of the revolution keeps it unitless.
+
+    Returns an empty list (no constraint) when:
+      * ``weight == 0``,
+      * no clockwise/counterClock pair is present (non-helical distribution), or
+      * the shared amplitude ``a_<tag>`` is absent.
+
+    Notes
+    -----
+    The radiated-power profile is stored on the radDist under
+    ``data['toroidalRadiatedPower'][emissionName]`` with keys ``'phi_array'``
+    and ``'P_pol'`` (NOT ``'phi'``); ``_build_synthetic_dict`` copies those into
+    ``synthetic_dict[emissionName]``.
+    """
+
+    if not weight:
+        return []
+
+    pairs = _emission_pairs(synthetic_dict.get("emissionNames", []))
+    if not pairs:
+        return []
+
+    params = pars.valuesdict()
+    tag = loc_tag(synthetic_dict["injectionLocation"])
+
+    a_name = f"a_{tag}"
+    if a_name not in params:
+        return []
+    a = params[a_name]
+
+    # Injection / peak location (rad)
+    mu = float(synthetic_dict["injectionLocation_rad"])
+    if "peak_rad_loc" in params:
+        mu = float(params["peak_rad_loc"])
+
+    eps = 1.0e-30
+    penalties = []
+
+    for cw_name, ccw_name in pairs:
+        endpoint_power = {}
+        peak_Ppol = {}
+        usable = True  # False if the scale definition gives no value
+
+        for name in (cw_name, ccw_name):
+            sub = synthetic_dict[name]
+            phi_arr = np.asarray(sub["phi_array"], dtype=float)
+            P_pol = np.asarray(sub["P_pol"], dtype=float)
+
+            b = params.get(f"b_{name}_{tag}", 0.0)
+
+            # Distance along this direction for every sample of its revolution
+            dphi = find_dphi(phi_arr, mu, name)
+            i_end = int(np.argmax(dphi))
+            i_start = int(np.argmin(dphi))
+
+            scale = scale_wrapper(
+                a=a,
+                b=b,
+                phi=phi_arr,
+                mu=mu,
+                dphi=dphi,
+                scale_def=scale_def,
+                emissionName=name,
+            )
+
+            if scale is None:
+                usable = False
+                break
+
+            scaleSynth = float(sub.get("scaleSynth", 1.0))
+
+            endpoint_power[name] = scale[i_end] * P_pol[i_end] * scaleSynth
+            peak_Ppol[name] = P_pol[i_start] * scaleSynth
+
+        if not usable:
+            continue
+
+        p_cw = endpoint_power[cw_name]
+        p_ccw = endpoint_power[ccw_name]
+
+        # Peak power shared reference (dphi = 0 amplitude is 'a'); keeps the
+        # penalty bounded and ->0 when both endpoints have decayed away.
+        p_peak = a * 0.5 * (peak_Ppol[cw_name] + peak_Ppol[ccw_name])
+        penalties.append(weight * (p_cw - p_ccw) / (p_peak + eps))
+
+    return penalties
+
+
+def residual(
+    pars,
+    data_dict,
+    synthetic_dict,
+    scale_def: str | None = None,
+    residual: bool = True,
+    helical_endpoint_weight: float = 0.0,
+):
+    """
+    Computes the residual (or the scaled synthetic data) for the minimizer.
+
+    When ``residual=True`` returns a flat list of (data - model) values for
+    each bolometer channel (LMFIT squares these internally).
+    When ``residual=False`` returns a dict of scaled synthetic arrays keyed
+    by emissionName → bolometer-group index. This is used to make synthetic data
+    in Emis3D._post_process_fit_arrangement()
+
+    ``helical_endpoint_weight`` (only used when ``residual=True``) controls the
+    soft constraint that ties paired clockwise / counterClock helical
+    distributions together at the helix endpoint; see
+    :func:`helical_endpoint_penalty`. A weight of 0 disables the constraint.
+    """
+
+    a = 0.0
+    b = 0.0
+    params = pars.valuesdict()
+
+    # --- Check to see if the peak radiation location can be varied
+    mu = float(synthetic_dict["injectionLocation_rad"])
+    if "peak_rad_loc" in params:
+        mu = float(params["peak_rad_loc"])
+
+    # --- Find the total synthetic emission
+    temp_ = {}  # accumulated model signal per bolometer group
+    data = {}  # per-emission scaled synthetic (returned when residual=False)
+
+    # --- Find the bolometer phi locations, combine to one large list
+    bolo_phis = []
+    for emissionName in synthetic_dict["emissionNames"]:
+        phi_loc = synthetic_dict[emissionName]["observed_phi_loc"]
+        for group in phi_loc:
+            for chan in group:
+                bolo_phis.extend(np.atleast_1d(chan).tolist())
+
+    # Remove duplicates
+    bolo_phis = np.asarray(list(set(bolo_phis)))
+
+    for emissionName in synthetic_dict["emissionNames"]:
+
+        data[emissionName] = {}
+        tag = loc_tag(synthetic_dict["injectionLocation"])
+        a = params[f"a_{tag}"]
+        b = params[f"b_{emissionName}_{tag}"]
+
+        # --- Loop over each bolometer group
+        for ii in range(len(synthetic_dict[emissionName]["data"])):
+
+            # --- Per-channel lists of toroidal observation segments. Each
+            # channel holds one phi and one synthetic value per segment
+            # (single-element lists for poloidal-fan cameras).
+
+            phi_segs = _as_channel_segments(synthetic_dict[emissionName]["observed_phi_loc"][ii])
+            synth_segs = _as_channel_segments(synthetic_dict[emissionName]["data"][ii])
+
+            # --- Check to make sure lists are equal
+            if len(phi_segs) != len(synth_segs):
+                raise RuntimeError(f"observed_phi_loc and data have different channel counts " f"({len(phi_segs)} vs {len(synth_segs)}) for " f"'{emissionName}', bolometer group {ii}")
+
+            for jj, (p_, s_) in enumerate(zip(phi_segs, synth_segs)):
+                if len(p_) != len(s_):
+                    raise RuntimeError(f"Channel {jj} of '{emissionName}', bolometer group " f"{ii} has {len(p_)} observed_phi_loc segments but " f"{len(s_)} data segments")
+
+            phi_flat = np.concatenate(phi_segs)
+            synth_flat = np.concatenate(synth_segs)
+
+            # --- Return the scale factor for every segment
+            scale_ = scale_wrapper(
+                a=a,
+                b=b,
+                phi=phi_flat,
+                mu=mu,
+                scale_def=scale_def,
+                emissionName=emissionName,
+                bolo_phi_locs=bolo_phis,
+            )
+
+            if scale_ is None:
+                raise RuntimeError("Scale_ returned None for some reason!?!")
+
+            # --- Sum the scaled segments within each channel so the model is
+            # one value per channel, matching the measured signal
+            seg_counts = [len(p) for p in phi_segs]
+            starts = np.cumsum([0] + seg_counts[:-1])
+            model_ = np.add.reduceat(scale_ * synth_flat, starts)
+
+            if ii not in temp_:
+                temp_[ii] = np.zeros(len(model_))
+
+            temp_[ii] += model_
+            data[emissionName][ii] = model_
+
+    if residual and data_dict is not None:
+        res = []
+        # --- Loop over each bolometer group
+        for ii in temp_:
+            data_ = np.asarray(data_dict["observed"][ii], dtype=float)
+            data_error = np.asarray(data_dict["observed_error"][ii], dtype=float)
+
+            # --- Bad channels have an infinite error (see channel_error) and are
+            # left out entirely, so chi-square and AIC count only real channels.
+            # Near-zero and negative readings stay in: they constrain where the
+            # radiation is not.
+            use = np.isfinite(data_) & np.isfinite(data_error) & (data_error > 0)
+
+            # --- Signed residual; LMFIT squares it
+            res.extend(((data_[use] - temp_[ii][use]) / data_error[use]).tolist())
+
+        # --- Soft constraint: tie paired clockwise / counterClock helical
+        # distributions together at the helix endpoint (phi = mu mod 2*pi).
+        # Returns [] for non-helical fits or when weight == 0.
+        res.extend(
+            helical_endpoint_penalty(
+                pars,
+                synthetic_dict,
+                scale_def=scale_def,
+                weight=helical_endpoint_weight,
+            )
+        )
+
+        return res
+    else:
+        return data
+
+
+# Errors a fit can legitimately hit on real data (singular matrices, NaN
+# residuals, failed minimizations). Handlers that record a failed fit and
+# carry on catch only these, so programming errors still propagate.
+FIT_ERRORS = (ValueError, ArithmeticError, RuntimeError, MinimizerException)
+
+
+def fit_radDist(
+    pars,
+    data_dict: dict,
+    synthetic_dict: dict,
+    scale_def: str,
+    helical_endpoint_weight: float = 0.0,
+    method: str = "least_squares",
+):
+    """
+    Fit one radDist to the data: minimize chi-square with LMFIT. Both
+    Emis3D._minimize_radDists and runParallel (scripts/run_emis3D.py) call
+    this, so the two paths always fit the same way.
+    """
+    return minimize(
+        residual,
+        pars,
+        args=(data_dict, synthetic_dict, scale_def, True, helical_endpoint_weight),
+        method=method,
+    )
+
+
+def fit_score(fit) -> float:
+    """
+    Score used to rank radDists (lower is better): lmfit's AIC,
+    N ln(chi2 / N) + 2 k. It does not depend on the overall scale of the
+    channel errors, and it charges for each free parameter, so radDist types
+    with more parameters (helical) are compared fairly with simpler ones.
+    """
+    aic = float(getattr(fit, "aic", np.inf))
+    return aic if np.isfinite(aic) else np.inf
+
+
+def runParallel(job):
+    """One fit from a job tuple (fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method)."""
+    fit_index, pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method = job
+    return fit_index, fit_radDist(pars, data_dict, synth_dict, scale_def, helical_endpoint_weight, method)
+
+
+def _fit_job(job):
+    """
+    Worker for FitPool: one fit. A numerical failure (FIT_ERRORS) is returned
+    rather than raised, so one failing radDist does not stop the others; any
+    other error is a bug and propagates. Defined at module level so
+    worker processes can import it (macOS starts workers fresh, by "spawn").
+    """
+    try:
+        index, fit = runParallel(job)
+        return index, fit, None
+    except FIT_ERRORS as e:
+        return job[0], None, f"{type(e).__name__}: {e}"
+
+
+class FitPool:
+    """
+    Runs fits in worker processes. Each lmfit fit is mostly Python, so threads
+    give little speed-up (the interpreter lock lets one run at a time);
+    processes do.
+
+    The pool is started on first use and reused, so the start-up cost (each
+    worker imports emis3d and Cherab, a few seconds) is paid once per run, not
+    once per evaluation time. It is only started for at least
+    MIN_JOBS_PER_WORKER fits per worker (a typical fit takes 20-50 ms, so
+    about a second of work each); smaller batches run serially, unless the
+    pool is already running. Results come back in job order as
+    (index, fit or None, error or None).
+    """
+
+    MIN_JOBS_PER_WORKER = 50
+
+    def __init__(self, workers: int = 1):
+        self.workers = max(1, int(workers))
+        self._executor = None
+
+    def map(self, jobs: list) -> list:
+        if self.workers == 1 or len(jobs) < 2:
+            return [_fit_job(job) for job in jobs]
+        if self._executor is None and len(jobs) < self.MIN_JOBS_PER_WORKER * self.workers:
+            return [_fit_job(job) for job in jobs]
+        if self._executor is None:
+            self._executor = ProcessPoolExecutor(max_workers=self.workers, mp_context=multiprocessing.get_context("spawn"))
+        # Several jobs per message; the shared data_dict is sent once per chunk
+        chunksize = max(1, len(jobs) // (4 * self.workers))
+        return list(self._executor.map(_fit_job, jobs, chunksize=chunksize))
+
+    def close(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown()
+            self._executor = None
+
+
+def channel_error(
+    definition: str,
+    signal,
+    peak: float,
+    floor: float = 0.05,
+    relative: float = 0.05,
+    noise=None,
+) -> np.ndarray:
+    """
+    Absolute error (sigma) of each channel, in the data's units.
+
+    floor_relative (default): sigma^2 = (floor * peak)^2 + (relative * signal)^2.
+        The floor is an additive error, so near-zero channels count in absolute
+        terms and cannot dominate the fit; the relative term is the calibration
+        uncertainty, so strong channels are fitted to about that fraction. If
+        noise is given (per channel, same units), the floor is raised to it.
+    Other definitions (constant, poisson, exponential) keep
+        their fractional form, sigma = signal * signal_error(...). They are not
+        defined for signal <= 0, so those channels get an infinite error and are
+        left out of the fit.
+    """
+    d = np.asarray(signal, dtype=float)
+    if definition.lower() == "floor_relative":
+        floor_abs = np.full(d.shape, floor * peak)
+        if noise is not None:
+            floor_abs = np.maximum(floor_abs, np.asarray(noise, dtype=float))
+        return np.sqrt(floor_abs**2 + (relative * d) ** 2)
+
+    out = np.full(d.shape, np.inf)
+    pos = np.isfinite(d) & (d > 0)
+    if np.any(pos):
+        out[pos] = d[pos] * np.asarray(signal_error(definition, d[pos], peak), dtype=float)
+    return out
+
+
+def signal_error(
+    type: str,
+    signal: np.ndarray,
+    max_signal: float,
+    scale_factor: float = 1.0,
+):
+    """
+    Fractional error (error / signal) of a channel for the named error model.
+    Names are case-insensitive; an unknown name raises ValueError.
+
+        constant     10% of the peak, the same for every channel
+        poisson      grows as sqrt(signal), like shot noise
+        exponential  large near zero, small at the peak
+
+    floor_relative, the default, is computed in channel_error instead.
+    """
+    models = {
+        "constant": lambda: error_constant(signal, max_signal),
+        "poisson": lambda: error_poisson(signal, max_signal, scale_factor),
+        "exponential": lambda: error_exponential(signal, max_signal, scale_factor),
+    }
+    name = type.lower()
+    if name not in models:
+        raise ValueError(f"Unknown error model {type!r}; choose from {sorted(models)} or 'floor_relative'")
+    return models[name]()
+
+
+def error_constant(
+    signal: np.ndarray,
+    max_signal: float,
+    _floor: float = 1.0e-12,
+    fraction: float = 0.1,  # 10%
+) -> np.ndarray:
+    """Returns fraction * max_signal for each signal"""
+    signal = np.asarray(signal)
+    signal = np.clip(signal, _floor, None)
+
+    return fraction * max_signal / signal
+
+
+def error_exponential(
+    signal: np.ndarray,
+    max_signal: float,
+    scale_factor: float = 1.0,
+    decay: float = 4.0,
+) -> np.ndarray:
+    """
+    Exponential decay error model.
+
+    error ≈ scale_factor at signal = 0
+    error ≈ 0            at signal = max_signal
+    """
+    signal = np.clip(signal, 0.0, None)
+    return scale_factor * np.exp(-decay * signal / max_signal)
+
+
+def error_poisson(
+    signal: np.ndarray,
+    max_signal: float,
+    scale_factor: float = 1.0,
+    _floor: float = 1.0e-12,
+) -> np.ndarray:
+    """
+    Poisson (shot-noise) error model: the fractional error falls as
+    1/sqrt(signal), so the absolute error grows as sqrt(signal).
+
+    error / signal = scale_factor * sqrt(max_signal / signal), 1.0 at the peak.
+    (Previously named "inverse square", which it is not.)
+    """
+    signal = np.clip(signal, _floor, None)
+    return scale_factor * np.sqrt(max_signal / signal)
+
+
+def print_intro() -> None:
+
+    print("""
+
+    ███████╗███╗   ███╗██╗███████╗██████╗ ██████╗ 
+    ██╔════╝████╗ ████║██║██╔════╝╚════██╗██╔══██╗
+    █████╗  ██╔████╔██║██║███████╗ █████╔╝██║  ██║
+    ██╔══╝  ██║╚██╔╝██║██║╚════██║ ╚═══██╗██║  ██║
+    ███████╗██║ ╚═╝ ██║██║███████║██████╔╝██████╔╝
+    ╚══════╝╚═╝     ╚═╝╚═╝╚══════╝╚═════╝ ╚═════╝
+    """)

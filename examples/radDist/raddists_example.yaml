@@ -1,0 +1,41 @@
+# radDist library config: every radDist type for one shot, in one file.
+# Example on the built-in MOCK machine. Build with:
+#   emis3d make-raddists raddists_example.yaml               (every enabled type)
+#   emis3d make-raddists raddists_example.yaml --only helical (one type)
+#   emis3d make-raddists raddists_example.yaml --dry-run      (count only)
+# Settings at the top are shared by every type; any of injectionLocation,
+# units, eqFileName, numBins, workers, rays and grid can be set again inside a
+# type to override it there. Any shape setting can be a list, which is swept.
+
+tokamakName: MOCK  # Machine; selects machines/MOCK and equilibria/MOCK
+shot: 1  # For reference; also the default folder
+folder: example  # Library folder under raddists/MOCK; each type builds into <folder>/<type name>
+injectionLocation: 225  # Injector toroidal angle [deg]; stored in every radDist and must match the run config
+units: Brightness  # Signal units: Power (W), Radiance (W/m2/sr) or Brightness (W/m2, 4 pi x radiance)
+eqFileName: MOCK_solovev.geqdsk  # Equilibrium; needed by Helical and HelicalRing types
+numBins: 36  # Toroidal points for the radiated-power profile (the TPF's toroidal resolution)
+workers: 2  # radDists built in parallel
+rays: {pixelSamples: 100, seed: 0, integrationStep: 0.01, method: compiled}  # Rays per channel (production: 1000+), seed, ray step [m];
+#   method: compiled (fast, default) or python (the original, slow path); optional gridSpacing [m] for compiled grids
+grid: {rLimits: [1.80, 1.90], zLimits: [0.15, 0.25], NumR: 2, NumZ: 2}  # Start positions [m]; empty limits use the wall
+
+types:
+  elongatedRing:  # Axisymmetric rings; built into example/elongatedRing
+    distType: ElongatedRing
+    sigma_R: [0.2, 0.3]  # Radial width [m]
+    sigma_z: [0.25]  # Vertical width [m]
+    rotationAngle: [0, 30]  # Tilt in the poloidal plane [deg]
+
+  helical:  # Emission along field lines from the injector; built into example/helical
+    distType: Helical
+    sigma_R: [0.05]  # Width of the source region around each start point [m]
+    sigmaKernel: 0.02  # Width of the emission around each field line [m]; smaller than every sigma_R
+    numFieldLines: 50  # Field lines traced per radDist
+    numTransits: 1  # Toroidal transits followed in each direction
+    grid: {rLimits: [1.90, 2.00], zLimits: [0.0, 0.0], NumR: 2, NumZ: 1}  # Overrides the shared grid
+
+  squareTube:  # A uniform rectangular tube; switched off here
+    distType: SquareTube
+    dR: 0.1  # Radial half-width [m]: the tube spans startR +- dR
+    dz: 0.1  # Vertical half-height [m]: the tube spans startZ +- dz
+    enabled: false  # Kept in the file, skipped unless named with --only

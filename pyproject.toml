@@ -10,13 +10,15 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "cherab>=1.5.0",
-    "raysect==0.8.1.*",
-    "numpy<2.0",
+    "cherab>=1.6.0",
+    "raysect==0.9.1.*",
+    "numpy>=2.0",
     "scipy>=1.16.3",
     "matplotlib>=3.10.8",
     "numba>=0.64.0",
     "lmfit>=1.3.4",
+    # lets lmfit estimate parameter uncertainties after differential evolution
+    "numdifftools>=0.10.1",
     "freeqdsk>=0.5.2",
     "h5py",
     "pandas",
@@ -30,11 +32,18 @@ test = [
     "pytest-cov",
 ]
 
-[tool.setuptools]
-packages = ["main"]
+[project.scripts]
+emis3d = "emis3d.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The built-in MOCK machine ships with the package (see emis3d/mock.py)
+[tool.setuptools.package-data]
+emis3d = ["machines/**/*"]
 
 [tool.coverage.run]
-source = ["main"]
+source = ["emis3d"]
 
 [tool.coverage.report]
 show_missing = true
@@ -44,3 +53,18 @@ markers = [
     "cherab: slow tests that build a scene and ray-trace with cherab (deselected by default)",
 ]
 addopts = "-m 'not cherab'"
+pythonpath = ["src"]
+
+# Formatting: 200 characters per line (the longest lines in the code are 184)
+[tool.black]
+line-length = 200
+
+[tool.ruff]
+line-length = 200
+
+[tool.ruff.lint]
+# Pyflakes (unused or undefined names), syntax errors and bugbear (likely bugs,
+# such as mutable default arguments). zip() without strict= is allowed: some
+# zips pair sequences of different lengths on purpose.
+select = ["F", "E9", "B"]
+ignore = ["B905"]

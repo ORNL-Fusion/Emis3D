@@ -22,8 +22,20 @@ jobs:
       - name: Install package
         run: pip install -e ".[test]"
 
+      - name: Lint (rules in pyproject.toml)
+        run: |
+          pip install ruff
+          ruff check .
+
       - name: Smoke-test imports
-        run: python -c "import cherab; import raysect; import main"
+        run: python -c "import cherab; import raysect; import emis3d"
 
       - name: Run unit tests
-        run: python -m pytest tests/ -v --cov=main --cov-report=term-missing
+        run: python -m pytest tests/ -v --cov=emis3d --cov-report=term-missing
+
+      # Ray-tracing tests on the built-in MOCK machine, including the end-to-end
+      # self-test (about 15 s); deselected from the default run by the cherab marker
+      - name: Run ray-tracing tests
+        env:
+          MPLBACKEND: Agg
+        run: python -m pytest tests/ -v -m cherab

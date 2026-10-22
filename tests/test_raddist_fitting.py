@@ -1,8 +1,8 @@
 """
 tests/test_raddist_fitting.py
 =============================
-Unit tests for main/radDistFitting.py (data mapping / parameter creation)
-and main/Globals.py (path constants).
+Unit tests for src/emis3d/radDistFitting.py (data mapping / parameter creation)
+and src/emis3d/Globals.py (constants).
 No cherab, raysect, or real file I/O required beyond what we fabricate in-memory.
 
 NOTE: TO TEST THIS STUFF, go to the main directory, then type:
@@ -15,13 +15,10 @@ import os
 import numpy as np
 import pytest
 
-from main.Globals import (
-    EMIS3D_PARENT_DIRECTORY,
-    EMIS3D_TOKMAK_DIRECTORY,
-    SUPPORTED_TOKAMAKS,
-)
-from main.radDistFitting import RadDistFitting
-from main.Util import find_max_nested_lists
+from emis3d.globals import RADDIST_FORMAT, SUPPORTED_TOKAMAKS
+from emis3d.workspace import BUILTIN_MACHINES
+from emis3d.radDistFitting import RadDistFitting
+from emis3d.util import find_max_nested_lists
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -30,16 +27,8 @@ from main.Util import find_max_nested_lists
 
 class TestGlobals:
 
-    def test_file_path_is_directory(self):
-        assert os.path.isdir(
-            EMIS3D_PARENT_DIRECTORY
-        ), f"EMIS3D_PARENT_DIRECTORY '{EMIS3D_PARENT_DIRECTORY}' is not a directory"
-
-    def test_parent_directory_exists(self):
-        assert os.path.isdir(EMIS3D_PARENT_DIRECTORY)
-
-    def test_tokamak_directory_exists(self):
-        assert os.path.isdir(EMIS3D_TOKMAK_DIRECTORY)
+    def test_builtin_machines_ship_with_the_package(self):
+        assert os.path.isfile(BUILTIN_MACHINES / "MOCK" / "MOCK_settings.yaml")
 
     def test_supported_tokamaks_is_list(self):
         assert isinstance(SUPPORTED_TOKAMAKS, list)
@@ -82,13 +71,11 @@ def _minimal_raddist_json(
         channel_order[bolo] = channel_tags
         power_data[bolo] = [[float(i + 1)] * n_segments for i in range(n_channels)]
         power_error[bolo] = [[0.1 * (i + 1)] * n_segments for i in range(n_channels)]
-        phi_loc[bolo] = [
-            [0.5 * (i + 1) + 0.1 * s for s in range(n_segments)]
-            for i in range(n_channels)
-        ]
+        phi_loc[bolo] = [[0.5 * (i + 1) + 0.1 * s for s in range(n_segments)] for i in range(n_channels)]
 
     data = {
         "info": {
+            "radDistFormat": RADDIST_FORMAT,
             "distType": distType,
             "emissionNames": [emission],
             "injectionLocation": 120.0,
@@ -164,9 +151,7 @@ class TestRadDistFitting:
 
     def test_prepare_for_fits_data_length(self, tmp_path):
         n_ch = 4
-        path, _, channel_tags, emission = _minimal_raddist_json(
-            tmp_path, n_channels=n_ch
-        )
+        path, _, channel_tags, emission = _minimal_raddist_json(tmp_path, n_channels=n_ch)
         rdf = RadDistFitting(radDistPath=path)
         channel_order = [channel_tags]
         rdf.prepare_for_fits(channel_order)
@@ -221,7 +206,7 @@ class TestRadDistFitting:
 # Emis3D error handling — exceptions replace error_free flag
 # ---------------------------------------------------------------------------
 
-from main.Emis3D import Emis3D
+from emis3d.emis3D import Emis3D
 
 
 class TestEmis3DErrorHandling:
@@ -233,23 +218,21 @@ class TestEmis3DErrorHandling:
 
     def test_missing_config_file_raises(self, tmp_path):
         """A missing run config file raises FileNotFoundError."""
-        e = Emis3D(initialize=False)
+        e = Emis3D(initialize=False, workspace=tmp_path)
         with pytest.raises(FileNotFoundError):
-            e._load_config_file(tokamakName="DIII-D", runConfigName="nonexistent.yaml")
+            e._load_config_file(tokamakName="MOCK", runConfigName="nonexistent.yaml")
 
     def test_no_error_free_attribute(self):
         """error_free flag has been removed — Emis3D must not have it."""
         e = Emis3D(initialize=False)
-        assert not hasattr(
-            e, "error_free"
-        ), "error_free should be removed; use exceptions instead"
+        assert not hasattr(e, "error_free"), "error_free should be removed; use exceptions instead"
 
     def test_verbose_sets_debug_logging(self):
         """verbose=True must configure the 'main' logger to DEBUG."""
         import logging
 
         Emis3D(initialize=False, verbose=True)
-        assert logging.getLogger("main").level == logging.DEBUG
+        assert logging.getLogger("emis3d").level == logging.DEBUG
 
     def test_missing_bolometers_key_raises(self):
         """_load_bolometer_data raises RuntimeError when BOLOMETERS missing from info."""
@@ -268,7 +251,7 @@ class TestSaveRadDistConsolidation:
 
     def test_base_class_has_save_rad_dist(self):
         """saveRadDist must now live on RadDist, not be abstract."""
-        from main.radDist import RadDist
+        from emis3d.radDist import RadDist
         import inspect
 
         # Method should be defined on RadDist itself, not just declared abstract
@@ -278,30 +261,22 @@ class TestSaveRadDistConsolidation:
 
     def test_subclasses_no_longer_override_save_rad_dist(self):
         """Helical, HelicalRing, ElongatedRing, SquareTube must not define saveRadDist."""
-        from main.radDist import Helical, HelicalRing, ElongatedRing, SquareTube
+        from emis3d.radDist import Helical, HelicalRing, ElongatedRing, SquareTube
 
         for cls in (Helical, HelicalRing, ElongatedRing, SquareTube):
-            assert (
-                "saveRadDist" not in cls.__dict__
-            ), f"{cls.__name__} still overrides saveRadDist — should use base class"
+            assert "saveRadDist" not in cls.__dict__, f"{cls.__name__} still overrides saveRadDist — should use base class"
 
-    def test_helical_folder_suffix_uses_sigma_kernel(self):
-        """Helical._folder_suffix must use sigmaKernel, not rotationAngle."""
-        from main.radDist import Helical
+    def test_helical_save_name_includes_sigma_kernel(self):
+        """Helical radDists that differ only in sigmaKernel must not share a file."""
+        from emis3d.radDist import Helical
 
-        assert (
-            "_folder_suffix" in Helical.__dict__
-        ), "Helical must override _folder_suffix"
-        import inspect
+        assert "sigmaKernel" in dict(Helical.SAVE_KEYS)
 
-        src = inspect.getsource(Helical._folder_suffix)
-        assert "sigmaKernel" in src
+    def test_parametric_subclasses_use_the_base_naming(self):
+        """Parametric types list SAVE_KEYS; only simulation radDists override _save_names."""
+        from emis3d.radDist import HelicalRing, ElongatedRing, SquareTube, Helical, SimulationRadDist
 
-    def test_other_subclasses_use_base_folder_suffix(self):
-        """HelicalRing, ElongatedRing, SquareTube must use the base _folder_suffix."""
-        from main.radDist import HelicalRing, ElongatedRing, SquareTube
-
-        for cls in (HelicalRing, ElongatedRing, SquareTube):
-            assert (
-                "_folder_suffix" not in cls.__dict__
-            ), f"{cls.__name__} should not override _folder_suffix"
+        for cls in (Helical, HelicalRing, ElongatedRing, SquareTube):
+            assert "_save_names" not in cls.__dict__, f"{cls.__name__} should use RadDist._save_names"
+            assert cls.SAVE_KEYS, f"{cls.__name__} must list its SAVE_KEYS"
+        assert "_save_names" in SimulationRadDist.__dict__

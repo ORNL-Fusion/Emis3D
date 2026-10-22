@@ -5,7 +5,7 @@ Regression test for reproducible Cherab observations.
 
 With an RNG seed set in ``BOLOMETER_PROPS``, an ``ElongatedRing`` observed twice
 yields identical per-channel brightness. ElongatedRing needs no equilibrium
-g-file, so this depends only on the in-repo DIII-D geometry.
+g-file, so it runs on the built-in MOCK machine.
 
 Opt-in (slow): ``foil.observe()`` ray-traces, so this is deselected by default
 via the ``cherab`` marker. Run it explicitly with:
@@ -21,10 +21,10 @@ import pytest
 # deselected from a normal `pytest` run and execute only via `pytest -m cherab`.
 pytestmark = pytest.mark.cherab
 
-BOLO_GROUP = "SX90PF_UP"
+BOLO_GROUP = "POL_A"
 CONFIG = {
     "distType": "ElongatedRing",
-    "tokamakName": "DIII-D",
+    "tokamakName": "MOCK",
     "units": "Brightness",
     "injectionLocation": 225,
     "eqFileName": "",
@@ -39,9 +39,9 @@ def test_seeded_observation_is_reproducible():
     """Two seeded observes of one structure produce bit-identical brightness."""
     pytest.importorskip("cherab", reason="cherab not installed")
     pytest.importorskip("raysect", reason="raysect not installed")
-    import main.radDist as radDist
+    import emis3d.radDist as radDist
 
-    rD = radDist.ElongatedRing(startR=2.055, startZ=0.414, config=dict(CONFIG))
+    rD = radDist.ElongatedRing(startR=1.85, startZ=0.2, config=dict(CONFIG))
     rD.tokamak.bolometers = [b for b in rD.tokamak.bolometers if b.name == BOLO_GROUP]
 
     def observe():
