@@ -8,12 +8,12 @@ but the general structure is this:
 
 ## Installation
 
-Requires Python 3.11 or 3.12.
+Requires Python 3.11, 3.12 or 3.13.
 
 ```bash
 git clone https://github.com/ORNL-Fusion/Emis3D
 cd Emis3D
-python3.12 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
@@ -21,7 +21,7 @@ pip install -e .
 Or, with [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv --python 3.12
+uv venv --python 3.13
 uv pip install -e .
 ```
 
@@ -29,9 +29,7 @@ uv pip install -e .
 
 Emis3D uses raysect 0.9.1 and Cherab 1.6, which require numpy 2. Both publish
 ready-built packages for Linux only; on macOS pip compiles them from source,
-which needs the Xcode command-line tools and takes several minutes. They
-support Python 3.13 as well, but Emis3D has only been tested on 3.11 and 3.12,
-so `requires-python` stays at `<3.13` for now.
+which needs the Xcode command-line tools and takes several minutes. 
 
 ### Troubleshooting
 
