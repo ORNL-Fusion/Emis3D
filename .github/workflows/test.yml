@@ -22,6 +22,11 @@ jobs:
       - name: Install package
         run: pip install -e ".[test]"
 
+      - name: Lint (rules in pyproject.toml)
+        run: |
+          pip install ruff
+          ruff check .
+
       - name: Smoke-test imports
         run: python -c "import cherab; import raysect; import emis3d"
 

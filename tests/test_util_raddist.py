@@ -27,8 +27,6 @@ class TestBivariateNormal:
 
     def _integrate(self, fn_vals, R_vals, z_vals):
         """2-D numerical integral over a regular grid."""
-        dR = R_vals[1] - R_vals[0]
-        dz = z_vals[1] - z_vals[0]
         N = len(R_vals)
         grid = fn_vals.reshape(N, N)
         return simps(simps(grid, x=z_vals, axis=1), x=R_vals)
@@ -56,7 +54,6 @@ class TestBivariateNormal:
 
     def test_symmetry(self):
         """bivariate_normal should be symmetric in R and z around (R0, z0)."""
-        pts = np.array([0.0, 0.3, -0.3, 0.5, -0.5])
         R0, z0, sig = 2.0, 1.0, 0.4
         for delta in [0.1, 0.3, 0.7]:
             v_plus = bivariate_normal(np.array([R0 + delta]), np.array([z0]), R0=R0, z0=z0, sigma_z=sig)

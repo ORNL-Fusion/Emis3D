@@ -144,7 +144,7 @@ def scale_wrapper(
         if bolo_phi_locs is not None:
             return scale_step(A=np.array([a, b]), phi=phi, bolo_phi_locs=bolo_phi_locs)
         else:
-            print(f"Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def")
+            print("Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def")
             return np.zeros(len(dphi))
     else:
         return np.ones(dphi.shape[0])

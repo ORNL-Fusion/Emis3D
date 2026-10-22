@@ -54,3 +54,17 @@ markers = [
 ]
 addopts = "-m 'not cherab'"
 pythonpath = ["src"]
+
+# Formatting: 200 characters per line (the longest lines in the code are 184)
+[tool.black]
+line-length = 200
+
+[tool.ruff]
+line-length = 200
+
+[tool.ruff.lint]
+# Pyflakes (unused or undefined names), syntax errors and bugbear (likely bugs,
+# such as mutable default arguments). zip() without strict= is allowed: some
+# zips pair sequences of different lengths on purpose.
+select = ["F", "E9", "B"]
+ignore = ["B905"]

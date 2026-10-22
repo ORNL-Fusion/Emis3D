@@ -684,8 +684,6 @@ class Tokamak(object):
                 # --- Over plot the chords in the cofig file
                 if plot_chord_info and bolo.info is not None:
                     if "r0" in bolo.info:
-                        label_ = "Chords from config file"
-
                         num_chords = len(bolo.info["r0"])
 
                         # --- phi0 and phif are optional. Without them the chord
@@ -707,11 +705,6 @@ class Tokamak(object):
                         )
 
                         for ii in range(num_chords):
-                            # --- Check to see if the currnt plot already has the correct label
-                            _, labels = ax.get_legend_handles_labels()
-                            if "Chords from config file" in labels:
-                                label_ = "__no_legend__"
-
                             # --- Project the 3D chord into the plane of the
                             # --- bolometer, then fit a straight line to it. For an
                             # --- in-plane chord (phi0 == phif) the projection is
@@ -1327,9 +1320,8 @@ class Tokamak(object):
         from raysect.core.math import translate
         from raysect.optical.observer import PinholeCamera, RGBPipeline2D, RGBAdaptiveSampler2D  # type: ignore
         from raysect.optical import rotate, d65_white  # type: ignore
-        from raysect.optical.library import Aluminium
         from raysect.optical.material import UniformSurfaceEmitter  # type: ignore
-        from raysect.optical.library.spectra.colours import red, green, blue, purple
+        from raysect.optical.library.spectra.colours import red
         from raysect.primitive import Sphere
 
         # add general toroidal light source

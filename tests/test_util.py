@@ -95,7 +95,6 @@ class TestRpzXYZ:
 
     def test_auto_transpose(self):
         """Function should accept (3,N) or (N,3) and return (3,N)."""
-        rpz_T = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])  # (2,3) — wrong orientation
         # rpz_XYZ raises ValueError for non-3-leading arrays that can't be fixed
         rpz_ok = np.array([[1.0], [0.0], [0.0]])
         XYZ = rpz_XYZ(rpz_ok)
@@ -283,8 +282,9 @@ class TestSplitRevolutions:
             assert key in revs[0]
 
     @staticmethod
-    def _traced(n_revs, direction, n_per_rev=100, phi0=np.deg2rad(225.0)):
+    def _traced(n_revs, direction, n_per_rev=100, phi0=None):
         """Like the tracer's output: endpoint included, phi increasing or decreasing."""
+        phi0 = np.deg2rad(225.0) if phi0 is None else phi0
         phi = phi0 + direction * np.linspace(0, n_revs * 2 * np.pi, n_revs * n_per_rev + 1)
         L = np.linspace(0, 1, phi.size)                      # distance along the line, from the start
         return np.cos(phi), np.sin(phi), np.zeros(phi.size), phi, np.ones(phi.size), L

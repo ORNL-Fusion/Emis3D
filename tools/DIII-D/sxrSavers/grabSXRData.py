@@ -133,7 +133,7 @@ if plot_average_window:
         loc_s = np.abs(data.get_time() - (average_time - average_dt)).argmin()
         loc_e = np.abs(data.get_time() - (average_time + average_dt)).argmin()
 
-        for ii, da in enumerate(range(data.info["numChannels"])):
+        for ii in range(data.info["numChannels"]):
             if np.mean(data.get_calibrated()[ii, loc_s:loc_e]) == 0:
                 data.get_calibrated()[ii, loc_s:loc_e] = np.nan
 

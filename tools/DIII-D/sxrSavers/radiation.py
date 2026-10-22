@@ -11,7 +11,6 @@ import numpy as np
 import scipy.constants
 from scipy.signal import savgol_filter
 from Util_SXR import filter_data
-from emis3d.globals import *
 from emis3d.workspace import get_workspace
 from emis3d.util import read_h5
 
@@ -32,12 +31,18 @@ class SXRSignal:
         filterWindowLength=21,
         filterPolyOrder=3,
         filterType="hanning",
-        badChannels=[],
-        invertedChannels=[],
-        truncateTimeRange=[],
+        badChannels=None,
+        invertedChannels=None,
+        truncateTimeRange=None,
         runner=True,
     ):
 
+        if truncateTimeRange is None:
+            truncateTimeRange = []
+        if invertedChannels is None:
+            invertedChannels = []
+        if badChannels is None:
+            badChannels = []
         self.info = {}
         self.info["shotNumber"] = shotNumber
         self.info["arrayName"] = arrayName
@@ -171,11 +176,13 @@ class SXRSignal:
                 self.data["PROCESSED_SIGNAL_SIGMA"][ii, :] = 0
             print(f"Signals set to zero for bad channel: {self.data['channelOrder'][ii]}")
 
-    def _correct_offset(self, offsetWindow=[]):
+    def _correct_offset(self, offsetWindow=None):
         """
         Definition to correct the offset
         """
 
+        if offsetWindow is None:
+            offsetWindow = []
         if len(offsetWindow) == 0:
             # Subtract from the last 200 ms of the signal
             endT = self.get_time()[-1]
@@ -295,8 +302,10 @@ class SXRSignal:
             self.data["PROCESSED_SIGNAL"][ii, :] = d.copy()
             self.data["PROCESSED_SIGNAL_SIGMA"][ii, :] = d_e.copy()
 
-    def truncate_data(self, timeWindow=[]):
+    def truncate_data(self, timeWindow=None):
         """This definition will truncate the data within the structure"""
+        if timeWindow is None:
+            timeWindow = []
         if len(timeWindow) > 0:
 
             start = self._get_time_loc(timeWindow[0])

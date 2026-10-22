@@ -8,6 +8,11 @@ The ``emis3d`` command.
     emis3d selftest [--keep DIR]           run the whole pipeline on the MOCK machine
     emis3d calibrate RUN --times T [T ...] [--reference CAMERA] [--output FILE]
                                            cross-calibrate cameras (emis3d.calibration)
+    emis3d make-raddists CONFIG [--tokamak NAME] [--workers N] [--dry-run]
+                                           build a radDist library
+    emis3d check RUN                       find problems in a run config and its files
+    emis3d run RUN [--times T ...] [--workers N] [--no-plots]
+                                           fit every evaluation time, save figures and results
 """
 
 from __future__ import annotations
@@ -168,6 +173,48 @@ def cmd_calibrate(args) -> int:
     return 0
 
 
+def cmd_make_raddists(args) -> int:
+    from emis3d.pipeline import make_raddists
+
+    summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace,
+                            workers=args.workers, dry_run=args.dry_run)
+    verb = "Would build" if args.dry_run else "Built"
+    print(f"{verb} {summary['radDists']} {summary['distType']} radDists "
+          f"({summary['shapes']} shape(s) x {summary['start_positions']} start positions) in {summary['folder']}")
+    return 0
+
+
+def cmd_check(args) -> int:
+    from emis3d.pipeline import check
+
+    findings = check(args.config, workspace=args.workspace, sample=args.sample)
+    marks = {"ok": "  ok ", "warning": "  !  ", "error": "  x  "}
+    for f in findings:
+        print(f"{marks[f.level]} {f.message}")
+    errors = sum(f.level == "error" for f in findings)
+    warnings_ = sum(f.level == "warning" for f in findings)
+    print(f"\n{errors} error(s), {warnings_} warning(s)")
+    return 1 if errors else 0
+
+
+def cmd_run(args) -> int:
+    from emis3d.calibration import parse_times
+    from emis3d.pipeline import run
+
+    times = parse_times(args.times) if args.times else None
+    e = run(args.config, workspace=args.workspace, workers=args.workers, times=times, plots=not args.no_plots)
+    for t in sorted(e.bestFits):
+        best = e.bestFits[t]
+        rad = best.get("radiation_distribution", {})
+        line = f"t = {t:g}: TPF {rad.get('toroidal_peaking_factor', float('nan')):.3f}"
+        tpf = best.get("ranges", {}).get("total", {}).get("tpf")
+        if tpf:
+            line += f" (68%: {tpf['68%'][0]:.3f}-{tpf['68%'][1]:.3f})"
+        print(line)
+    print(f"Results in {e._results_dir()}")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="emis3d", description="Emis3D command-line tools")
     sub = p.add_subparsers(dest="command", required=True)
@@ -203,6 +250,28 @@ def main(argv=None) -> int:
     pc.add_argument("--workspace")
     pc.add_argument("--output", help="also write the BOLOMETERS block to this file")
     pc.set_defaults(func=cmd_calibrate)
+
+    pr = sub.add_parser("make-raddists", help="build a radDist library from a radDist config")
+    pr.add_argument("config", help="radDist config: a path, or a name in the raddists/<tokamak> folder")
+    pr.add_argument("--tokamak", help="machine (default: the config's tokamakName)")
+    pr.add_argument("--workers", type=int, help="radDists built in parallel (default: the config's numProcessors)")
+    pr.add_argument("--dry-run", action="store_true", help="only count what would be built")
+    pr.add_argument("--workspace")
+    pr.set_defaults(func=cmd_make_raddists)
+
+    pk = sub.add_parser("check", help="find problems in a run config and its files before a long run")
+    pk.add_argument("config", help="run config")
+    pk.add_argument("--sample", type=int, default=3, help="radDists to load per folder (default 3)")
+    pk.add_argument("--workspace")
+    pk.set_defaults(func=cmd_check)
+
+    pn = sub.add_parser("run", help="fit every evaluation time, save one figure per time and the best fits")
+    pn.add_argument("config", help="run config")
+    pn.add_argument("--times", nargs="+", help="override the run config's times, e.g. 50.949 or 50.949:50.96:0.002")
+    pn.add_argument("--workers", type=int, help="parallel fits (default: numProcessorsFitting)")
+    pn.add_argument("--no-plots", action="store_true", help="skip the figures")
+    pn.add_argument("--workspace")
+    pn.set_defaults(func=cmd_run)
 
     args = p.parse_args(argv)
     try:
