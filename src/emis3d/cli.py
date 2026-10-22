@@ -8,8 +8,8 @@ The ``emis3d`` command.
     emis3d selftest [--keep DIR]           run the whole pipeline on the MOCK machine
     emis3d calibrate RUN --times T [T ...] [--reference CAMERA] [--output FILE]
                                            cross-calibrate cameras (emis3d.calibration)
-    emis3d make-raddists CONFIG [--tokamak NAME] [--workers N] [--dry-run]
-                                           build a radDist library
+    emis3d make-raddists CONFIG [--only TYPES] [--workers N] [--dry-run]
+                                           build the radDists of a library config
     emis3d check RUN                       find problems in a run config and its files
     emis3d run RUN [--times T ...] [--workers N] [--no-plots]
                                            fit every evaluation time, save figures and results
@@ -176,11 +176,14 @@ def cmd_calibrate(args) -> int:
 def cmd_make_raddists(args) -> int:
     from emis3d.pipeline import make_raddists
 
-    summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace,
+    only = [n.strip() for n in args.only.split(",")] if args.only else None
+    summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only,
                             workers=args.workers, dry_run=args.dry_run)
+    print(f"{'type':18s} {'distType':14s} {'shapes':>6s} {'positions':>9s} {'radDists':>8s}  folder")
+    for t in summary["types"]:
+        print(f"{t['name']:18s} {t['distType']:14s} {t['shapes']:6d} {t['start_positions']:9d} {t['radDists']:8d}  {t['folder']}")
     verb = "Would build" if args.dry_run else "Built"
-    print(f"{verb} {summary['radDists']} {summary['distType']} radDists "
-          f"({summary['shapes']} shape(s) x {summary['start_positions']} start positions) in {summary['folder']}")
+    print(f"{verb} {summary['radDists']} radDists")
     return 0
 
 
@@ -251,10 +254,11 @@ def main(argv=None) -> int:
     pc.add_argument("--output", help="also write the BOLOMETERS block to this file")
     pc.set_defaults(func=cmd_calibrate)
 
-    pr = sub.add_parser("make-raddists", help="build a radDist library from a radDist config")
-    pr.add_argument("config", help="radDist config: a path, or a name in the raddists/<tokamak> folder")
-    pr.add_argument("--tokamak", help="machine (default: the config's tokamakName)")
-    pr.add_argument("--workers", type=int, help="radDists built in parallel (default: the config's numProcessors)")
+    pr = sub.add_parser("make-raddists", help="build the radDists of a library config")
+    pr.add_argument("config", help="library config: a path, or a name in the raddists/<tokamak> folder (with --tokamak)")
+    pr.add_argument("--tokamak", help="machine, to find the config by name in its raddists folder")
+    pr.add_argument("--only", help="comma-separated type names to build (default: every enabled type)")
+    pr.add_argument("--workers", type=int, help="radDists built in parallel (default: the config's workers)")
     pr.add_argument("--dry-run", action="store_true", help="only count what would be built")
     pr.add_argument("--workspace")
     pr.set_defaults(func=cmd_make_raddists)

@@ -15,11 +15,12 @@ from emis3d.cli import main
 from emis3d.pipeline import check, make_raddists
 from test_calibration import write_workspace
 
-RING = {"distType": "ElongatedRing", "tokamakName": "MOCK", "saveRunsDirectoryName": "lib", "units": "Brightness",
-        "injectionLocation": 225.0, "eqFileName": None, "numProcessors": 1,
-        "sigma_R_vals": [0.15, 0.2], "sigma_z_vals": [0.2],
-        "GRID": {"rLimits": [], "zLimits": [], "NumRStartGrid": 4, "NumZStartGrid": 4},
-        "BOLOMETER_PROPS": {"pixelSamples": 5, "seed": 0}}
+LIBRARY = {
+    "tokamakName": "MOCK", "shot": 1, "folder": "lib", "injectionLocation": 225.0, "units": "Brightness",
+    "workers": 1, "rays": {"pixelSamples": 5, "seed": 0},
+    "grid": {"rLimits": [], "zLimits": [], "NumR": 4, "NumZ": 4},
+    "types": {"ring": {"distType": "ElongatedRing", "sigma_R": [0.15, 0.2], "sigma_z": [0.2]}},
+}
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def ws_dir(tmp_path):
     return tmp_path
 
 
-def write_cfg(ws_dir, cfg, name="ring.yaml"):
+def write_cfg(ws_dir, cfg, name="raddists.yaml"):
     path = ws_dir / "raddists" / "MOCK" / name
     path.write_text(yaml.safe_dump(cfg))
     return path
@@ -39,39 +40,28 @@ def write_cfg(ws_dir, cfg, name="ring.yaml"):
 # make_raddists
 # ---------------------------------------------------------------------------
 
-def test_dry_run_counts_shapes_and_positions(ws_dir):
-    s = make_raddists(write_cfg(ws_dir, RING), workspace=ws_dir, dry_run=True)
-    assert s["distType"] == "ElongatedRing" and s["shapes"] == 2 and s["start_positions"] > 0
-    assert s["radDists"] == s["shapes"] * s["start_positions"]
-    assert s["folder"].endswith("raddists/MOCK/lib")
+def test_dry_run_counts_each_type(ws_dir):
+    s = make_raddists(write_cfg(ws_dir, LIBRARY), workspace=ws_dir, dry_run=True)
+    (ring,) = s["types"]
+    assert ring["name"] == "ring" and ring["shapes"] == 2 and ring["start_positions"] > 0
+    assert s["radDists"] == ring["radDists"] == 2 * ring["start_positions"]
+    assert ring["folder"].endswith("raddists/MOCK/lib/ring")
 
 
-def test_config_by_name_and_tokamak_from_the_config(ws_dir):
-    write_cfg(ws_dir, RING)
-    assert make_raddists("ring.yaml", tokamak="MOCK", workspace=ws_dir, dry_run=True)["shapes"] == 2
+def test_config_by_name_with_tokamak(ws_dir):
+    write_cfg(ws_dir, LIBRARY)
+    assert make_raddists("raddists.yaml", tokamak="MOCK", workspace=ws_dir, dry_run=True)["radDists"] > 0
+    with pytest.raises(ValueError, match="is for MOCK, not JET"):
+        make_raddists(write_cfg(ws_dir, LIBRARY), tokamak="JET", workspace=ws_dir, dry_run=True)
 
 
-@pytest.mark.parametrize("dist, keys", [
-    ("Helical", {"sigma_R_vals": [0.05], "sigmaKernel": 0.02, "numFieldLines": 10, "eqFileName": "MOCK_solovev.geqdsk"}),
-    ("HelicalRing", {"sigma_R_vals": [0.05], "sigma_z_vals": [0.05], "eqFileName": "MOCK_solovev.geqdsk"}),
-    ("ElongatedRing", {"sigma_R_vals": [0.15], "sigma_z_vals": [0.2]}),          # no rotationAngles
-])
-def test_only_the_keys_a_type_uses_are_required(ws_dir, dist, keys):
-    cfg = {k: v for k, v in RING.items() if k not in ("sigma_R_vals", "sigma_z_vals")}
-    cfg.update(distType=dist, **keys)
-    assert make_raddists(write_cfg(ws_dir, cfg), workspace=ws_dir, dry_run=True)["shapes"] == 1
-
-
-@pytest.mark.parametrize("change, match", [
-    ({"sigma_z_vals": None}, "missing"),
-    ({"distType": "Banana"}, "Unknown distType"),
-    ({"GRID": None}, "missing"),
-])
-def test_bad_configs_are_reported(ws_dir, change, match):
-    cfg = {**RING, **change}
-    cfg = {k: v for k, v in cfg.items() if v is not None}
-    with pytest.raises(ValueError, match=match):
-        make_raddists(write_cfg(ws_dir, cfg), workspace=ws_dir, dry_run=True)
+def test_only_selects_types(ws_dir):
+    cfg = {**LIBRARY, "types": {**LIBRARY["types"], "tube": {"distType": "SquareTube", "dR": 0.1, "dz": 0.1, "enabled": False}}}
+    path = write_cfg(ws_dir, cfg)
+    assert [t["name"] for t in make_raddists(path, workspace=ws_dir, dry_run=True)["types"]] == ["ring"]   # tube is off
+    assert [t["name"] for t in make_raddists(path, workspace=ws_dir, only=["tube"], dry_run=True)["types"]] == ["tube"]
+    with pytest.raises(ValueError, match="no type"):
+        make_raddists(path, workspace=ws_dir, only=["nope"], dry_run=True)
 
 
 def test_missing_config_is_reported(ws_dir):
@@ -80,16 +70,33 @@ def test_missing_config_is_reported(ws_dir):
 
 
 def test_make_raddists_command_dry_run(ws_dir, capsys):
-    assert main(["make-raddists", str(write_cfg(ws_dir, RING)), "--workspace", str(ws_dir), "--dry-run"]) == 0
-    assert "Would build" in capsys.readouterr().out
+    assert main(["make-raddists", str(write_cfg(ws_dir, LIBRARY)), "--workspace", str(ws_dir), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "ring" in out and "Would build" in out
 
 
 @pytest.mark.cherab
-def test_make_raddists_builds_files(ws_dir):
-    cfg = {**RING, "sigma_R_vals": [0.2], "GRID": {"rLimits": [1.7, 1.9], "zLimits": [0.0, 0.0], "NumRStartGrid": 2, "NumZStartGrid": 1}}
+def test_make_raddists_builds_files_and_a_manifest(ws_dir, tmp_path):
+    import json as _json
+
+    import numpy as np
+
+    r = np.linspace(1.05, 2.35, 14)
+    z = np.linspace(-1.05, 1.05, 22)
+    phi = np.linspace(0, 2 * np.pi, 12, endpoint=False)
+    Z, R, P = np.meshgrid(z, r, phi, indexing="ij")
+    sim = ws_dir / "raddists" / "MOCK" / "sim.json"
+    sim.write_text(_json.dumps({"pradArray": np.exp(-((R - 1.85) ** 2 + Z**2) / 0.1).tolist(), "r_list": r.tolist(),
+                                "z_list": z.tolist(), "phi_list": phi.tolist()}))
+    cfg = {**LIBRARY, "grid": {"rLimits": [1.7, 1.9], "zLimits": [0.0, 0.0], "NumR": 2, "NumZ": 1},
+           "types": {"ring": {"distType": "ElongatedRing", "sigma_R": 0.2, "sigma_z": 0.2},
+                     "sim": {"distType": "NIMROD", "files": ["sim.json"], "timesteps": [3]}}}
     s = make_raddists(write_cfg(ws_dir, cfg), workspace=ws_dir)
-    files = sorted((ws_dir / "raddists" / "MOCK" / "lib").rglob("*.json"))
-    assert len(files) == s["radDists"] == 2
+    lib = ws_dir / "raddists" / "MOCK" / "lib"
+    assert len(list((lib / "ring").rglob("*.json"))) == 2 and len(list((lib / "sim").rglob("t_3.json"))) == 1
+    manifest = yaml.safe_load((lib / "manifest.yaml").read_text())
+    assert [t["name"] for t in manifest["built"]] == ["ring", "sim"] and manifest["library"]["types"]["sim"]["timesteps"] == [3]
+    assert s["radDists"] == 3
 
 
 # ---------------------------------------------------------------------------

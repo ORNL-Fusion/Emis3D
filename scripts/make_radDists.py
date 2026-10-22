@@ -36,7 +36,10 @@ to Util and Util_radDist files
 
 TODO:
 
-Equivalent command: emis3d make-raddists <config> [--tokamak NAME] [--workers N] [--dry-run]
+Equivalent command: emis3d make-raddists <library config> [--only TYPES] [--workers N] [--dry-run]
+
+The library config describes every radDist type for a shot in one file; see
+emis3d/raddist_library.py and examples/radDist/raddists_example.yaml.
 """
 
 import argparse
@@ -46,17 +49,19 @@ from emis3d.pipeline import make_raddists
 if __name__ == "__main__":  # required: worker processes re-import this file on macOS
     # --- Defaults, used when no arguments are given
     tokamakName = "JET"
-    configFileName = "elongatedRing_config.yaml"  # a path, or a name in the workspace's raddists/<tokamak> folder
+    configFileName = "95709/raddists.yaml"  # a path, or a name in the workspace's raddists/<tokamak> folder
 
-    parser = argparse.ArgumentParser(description="Generate a radDist library")
+    parser = argparse.ArgumentParser(description="Build the radDists of a library config")
     parser.add_argument("--tokamak", default=tokamakName)
-    parser.add_argument("--config", default=configFileName, help="radDist config: a path, or a name in the 'raddists' location")
+    parser.add_argument("--config", default=configFileName, help="library config: a path, or a name in the 'raddists' location")
+    parser.add_argument("--only", default=None, help="comma-separated type names (default: every enabled type)")
     parser.add_argument("--workspace", default=None, help="workspace folder (default: nearest emis3d.yaml, EMIS3D_RUNS_DIR or user config)")
-    parser.add_argument("--workers", type=int, default=None, help="radDists built in parallel (default: the config's numProcessors)")
+    parser.add_argument("--workers", type=int, default=None, help="radDists built in parallel (default: the config's workers)")
     parser.add_argument("--dry-run", action="store_true", help="only count what would be built")
     args = parser.parse_args()
 
-    summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, workers=args.workers, dry_run=args.dry_run)
-    verb = "Would build" if args.dry_run else "Built"
-    print(f"{verb} {summary['radDists']} {summary['distType']} radDists "
-          f"({summary['shapes']} shape(s) x {summary['start_positions']} start positions) in {summary['folder']}")
+    only = [n.strip() for n in args.only.split(",")] if args.only else None
+    summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only, workers=args.workers, dry_run=args.dry_run)
+    for t in summary["types"]:
+        print(f"{t['name']}: {t['radDists']} {t['distType']} radDists ({t['shapes']} shape(s) x {t['start_positions']}) in {t['folder']}")
+    print(f"{'Would build' if args.dry_run else 'Built'} {summary['radDists']} radDists")

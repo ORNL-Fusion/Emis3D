@@ -3,7 +3,7 @@
 The three everyday jobs, as functions (used by the `emis3d` command and by
 scripts/make_radDists.py and scripts/run_emis3D.py):
 
-    make_raddists(config)   build a radDist library from a radDist config
+    make_raddists(config)   build the radDists of a library config (emis3d.raddist_library)
     run(run_config)         fit every evaluation time, save figures and results
     check(run_config)       find problems in a run config and its files before a long run
 """
@@ -20,117 +20,115 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Shape parameters each radDist type needs in its config (the rest are optional)
-REQUIRED_SHAPE_KEYS = {
-    "ElongatedRing": ("sigma_R_vals", "sigma_z_vals"),
-    "HelicalRing": ("sigma_R_vals", "sigma_z_vals"),
-    "Helical": ("sigma_R_vals",),
-    "SquareTube": (),
-}
-
-
 # ---------------------------------------------------------------------------
 # Building radDist libraries
 # ---------------------------------------------------------------------------
 
 
-def _raddist_config_path(config, tokamak: str | None, ws) -> Path:
+def _library_path(config, tokamak: str | None, ws) -> Path:
     given = Path(os.path.expanduser(str(config)))
     if given.is_file():
         return given
     if tokamak is None:
-        raise FileNotFoundError(f"radDist config {config} not found; give a path, or --tokamak to look in the raddists location")
+        raise FileNotFoundError(f"radDist library config {config} not found; give a path, or --tokamak to look in the raddists location")
     path = ws.path("raddists", tokamak=tokamak) / str(config)
     if not path.is_file():
-        raise FileNotFoundError(f"radDist config not found: {path}")
+        raise FileNotFoundError(f"radDist library config not found: {path}")
     return path
 
 
-def make_raddists(config, tokamak: str | None = None, workspace=None, workers: int | None = None, dry_run: bool = False) -> dict:
-    """
-    Build every radDist described by a radDist config.
-
-    config    : a path, or a name in the workspace's raddists/<tokamak> folder
-    tokamak   : machine (default: the config's tokamakName)
-    workers   : radDists built in parallel (default: the config's numProcessors, else 1)
-    dry_run   : only count what would be built
-
-    Only distinct shapes are built (util_radDist.shape_parameter_sets);
-    sigma_z_vals and rotationAngles are needed only by the types that use them.
-    Returns a summary: distType, shapes, start_positions, radDists, folder.
-    """
+def start_positions(lib, t, ws):
+    """The (R, z) start positions for one type: its grid, kept inside the wall."""
     import emis3d.util_radDist as Util_radDist
     from emis3d.tokamak import Tokamak
-    from emis3d.util import config_loader
+
+    tok = Tokamak(tokamakName=lib.tokamakName, mode="Analysis", reflections=False, eqFileName=t.settings.get("eqFileName"), workspace=ws)
+    grid = t.settings["grid"]
+    if not grid.get("rLimits") or not grid.get("zLimits"):
+        rz = Util_radDist.callRZGridTokamak(tok, num_r=grid["NumR"], num_z=grid["NumZ"])
+    else:
+        if tok.wall is None:
+            raise RuntimeError(f"{lib.tokamakName} has no wall to place the start positions in")
+        rz = Util_radDist.createRZGrid(r_limits=grid["rLimits"], z_limits=grid["zLimits"], num_r=grid["NumR"],
+                                       num_z=grid["NumZ"], wallcurve=tok.wall["wallcurve"])
+    if rz is None or len(rz) == 0:
+        raise ValueError(f"types.{t.name}: no start positions inside the wall for its grid")
+    return rz
+
+
+def make_raddists(config, tokamak: str | None = None, workspace=None, only=None, workers: int | None = None, dry_run: bool = False) -> dict:
+    """
+    Build the radDists of a library config (emis3d.raddist_library), every
+    enabled type or only those named in `only`.
+
+    config  : a path, or a name in the workspace's raddists/<tokamak> folder
+    workers : radDists built in parallel (default: the config's workers, else 1)
+    dry_run : only count what would be built
+
+    Each type is built into raddists/<tokamak>/<folder>/<type name>; after a
+    build, manifest.yaml in raddists/<tokamak>/<folder> records the config,
+    the counts and the code version. Returns
+    {"types": [{name, distType, shapes, start_positions, radDists, folder}], "radDists": total}.
+    """
+    import yaml
+
+    import emis3d.util_radDist as Util_radDist
+    from emis3d.raddist_library import RadDistLibrary
     from emis3d.workspace import Workspace, set_workspace
 
     ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(workspace=workspace)
     set_workspace(ws)
     ws.export_env()  # worker processes resolve the same workspace
 
-    path = _raddist_config_path(config, tokamak, ws)
-    cfg = config_loader(path)
-    if not isinstance(cfg, dict):
-        raise ValueError(f"radDist config {path} is empty or not a mapping")
-    tokamak = tokamak or cfg.get("tokamakName")
-    if not tokamak:
-        raise ValueError(f"No tokamakName in {path} and none given")
-    cfg["tokamakName"] = tokamak
+    path = _library_path(config, tokamak, ws)
+    lib = RadDistLibrary.load(path)
+    if tokamak and tokamak != lib.tokamakName:
+        raise ValueError(f"{path} is for {lib.tokamakName}, not {tokamak}")
+    selected = lib.select(only)
 
-    dist = cfg.get("distType")
-    workers_fn = {
-        "Helical": Util_radDist.radDist_Helical_parallel,
+    builders = {
         "ElongatedRing": Util_radDist.radDist_ElongatedRing_parallel,
+        "Helical": Util_radDist.radDist_Helical_parallel,
         "HelicalRing": Util_radDist.radDist_HelicalRing_parallel,
         "SquareTube": Util_radDist.radDist_SquareTube_parallel,
+        "NIMROD": Util_radDist.radDist_NIMROD_parallel,
+        "M3DC1": Util_radDist.radDist_M3DC1_parallel,
     }
-    if dist not in workers_fn:
-        raise ValueError(f"Unknown distType {dist!r} in {path}; choose from {sorted(workers_fn)}")
-    missing = [k for k in REQUIRED_SHAPE_KEYS[dist] if not cfg.get(k)]
-    for key in ("saveRunsDirectoryName", "GRID"):
-        if key not in cfg:
-            missing.append(key)
-    if missing:
-        raise ValueError(f"{path} ({dist}) is missing {missing}")
+    root = ws.path("raddists", tokamak=lib.tokamakName)
 
-    # --- Start positions: the grid, kept inside the wall
-    tok = Tokamak(tokamakName=tokamak, mode="Analysis", reflections=False, eqFileName=cfg.get("eqFileName"), workspace=ws)
-    grid = cfg["GRID"]
-    if not grid.get("rLimits") or not grid.get("zLimits"):
-        rz = Util_radDist.callRZGridTokamak(tok, num_r=grid["NumRStartGrid"], num_z=grid["NumZStartGrid"])
-    else:
-        if tok.wall is None:
-            raise RuntimeError(f"{tokamak} has no wall to place the start positions in")
-        rz = Util_radDist.createRZGrid(r_limits=grid["rLimits"], z_limits=grid["zLimits"], num_r=grid["NumRStartGrid"],
-                                       num_z=grid["NumZStartGrid"], wallcurve=tok.wall["wallcurve"])
-    if rz is None or len(rz) == 0:
-        raise ValueError(f"No start positions inside the wall for the GRID in {path}")
+    plans = []
+    for t in selected:
+        shapes = lib.shape_sets(t)
+        if t.is_simulation:
+            jobs = [(shape["sourceFile"], shape["timestep"], lib.radDist_config(t, shape)) for shape in shapes]
+            positions = 1
+        else:
+            rz = start_positions(lib, t, ws)
+            jobs = [(val, lib.radDist_config(t, shape)) for shape in shapes for val in rz]
+            positions = len(rz)
+        plans.append((t, jobs, {"name": t.name, "distType": t.distType, "shapes": len(shapes), "start_positions": positions,
+                                "radDists": len(jobs), "folder": str(root / lib.folder_for(t))}))
 
-    # --- Distinct shapes; the per-value lists are not passed to each radDist
-    shapes = Util_radDist.shape_parameter_sets(
-        dist, cfg.pop("sigma_R_vals", [None]), cfg.pop("sigma_z_vals", [None]), cfg.pop("rotationAngles", [0.0])
-    )
-    jobs = []
-    for params in shapes:
-        job_cfg = dict(cfg)
-        job_cfg.update(params)
-        jobs.extend((val, job_cfg) for val in rz)
-
-    summary = {
-        "distType": dist,
-        "shapes": len(shapes),
-        "start_positions": len(rz),
-        "radDists": len(jobs),
-        "folder": str(ws.path("raddists", tokamak=tokamak) / cfg["saveRunsDirectoryName"]),
-    }
+    summary = {"types": [p[2] for p in plans], "radDists": sum(p[2]["radDists"] for p in plans)}
     if dry_run:
         return summary
 
-    n_workers = max(1, int(workers or cfg.get("numProcessors") or 1))
-    logger.info("Building %d radDists with %d worker(s)", len(jobs), n_workers)
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        for _ in executor.map(workers_fn[dist], jobs):  # consume, so worker errors surface
-            pass
+    for t, jobs, _ in plans:
+        n_workers = max(1, int(workers or t.settings.get("workers") or 1))
+        logger.info("Building %d %s radDists (%s) with %d worker(s)", len(jobs), t.distType, t.name, n_workers)
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            for _ in executor.map(builders[t.distType], jobs):  # consume, so worker errors surface
+                pass
+
+    manifest = {
+        "config": str(path.resolve()),
+        "built": summary["types"],
+        "provenance": ws.provenance(),
+        "library": yaml.safe_load(path.read_text()),
+    }
+    out = root / lib.folder / "manifest.yaml"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(manifest, sort_keys=False))
     return summary
 
 
