@@ -61,7 +61,5 @@ if __name__ == "__main__":  # required: worker processes re-import this file on 
     args = parser.parse_args()
 
     only = [n.strip() for n in args.only.split(",")] if args.only else None
-    summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only, workers=args.workers, dry_run=args.dry_run)
-    for t in summary["types"]:
-        print(f"{t['name']}: {t['radDists']} {t['distType']} radDists ({t['shapes']} shape(s) x {t['start_positions']}) in {t['folder']}")
-    print(f"{'Would build' if args.dry_run else 'Built'} {summary['radDists']} radDists")
+    make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only, workers=args.workers,
+                  dry_run=args.dry_run, progress=True)

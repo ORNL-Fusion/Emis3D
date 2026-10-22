@@ -248,7 +248,9 @@ def _parse_type(name: str, block, shared: dict) -> tuple[RadDistType | None, lis
     if dist in NEEDS_EQUILIBRIUM and not settings.get("eqFileName"):
         errors.append(f"{where}{dist} needs an eqFileName (an equilibrium to trace field lines in)")
 
-    shape = {**spec["optional"], **{k: block[k] for k in shape_keys if k in block}}
+    # In the type's own order (required, then optional), so reports read consistently
+    order = list(spec["required"]) + list(spec["optional"])
+    shape = {k: block.get(k, spec["optional"].get(k)) for k in order if k in block or k in spec["optional"]}
     for k, v in shape.items():
         if isinstance(v, (list, tuple)) and len(v) == 0:
             errors.append(f"{where}{k} is an empty list")

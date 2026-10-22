@@ -178,13 +178,8 @@ def cmd_make_raddists(args) -> int:
 
     only = [n.strip() for n in args.only.split(",")] if args.only else None
     summary = make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only,
-                            workers=args.workers, dry_run=args.dry_run)
-    print(f"{'type':18s} {'distType':14s} {'shapes':>6s} {'positions':>9s} {'radDists':>8s}  folder")
-    for t in summary["types"]:
-        print(f"{t['name']:18s} {t['distType']:14s} {t['shapes']:6d} {t['start_positions']:9d} {t['radDists']:8d}  {t['folder']}")
-    verb = "Would build" if args.dry_run else "Built"
-    print(f"{verb} {summary['radDists']} radDists")
-    return 0
+                            workers=args.workers, dry_run=args.dry_run, progress=True)
+    return 1 if summary["failed"] else 0
 
 
 def cmd_check(args) -> int:

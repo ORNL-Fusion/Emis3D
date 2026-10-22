@@ -43,8 +43,7 @@ def radDist_ElongatedRing_parallel(args: tuple, return_result: bool = False):  #
     elongatedRing = radDist.ElongatedRing(startR=rzArray[0], startZ=rzArray[1], config=config)
     elongatedRing.build()
 
-    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
-    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    logger.debug(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return elongatedRing
@@ -68,8 +67,7 @@ def radDist_Helical_parallel(args: tuple, return_result: bool = False):  # -> No
     helical = radDist.Helical(startR=rzArray[0], startZ=rzArray[1], config=config)
     helical.build()
 
-    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
-    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    logger.debug(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return helical
@@ -93,8 +91,7 @@ def radDist_HelicalRing_parallel(args: tuple, return_result: bool = False):  # -
     helical = radDist.HelicalRing(startR=rzArray[0], startZ=rzArray[1], config=config)
     helical.build()
 
-    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
-    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    logger.debug(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return helical
@@ -117,8 +114,7 @@ def radDist_SquareTube_parallel(args: tuple, return_result: bool = False):  # ->
     squareTube = radDist.SquareTube(startR=rzArray[0], startZ=rzArray[1], config=config)
     squareTube.build()
 
-    logger.info(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
-    print(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
+    logger.debug(f"DONE with elongatedRing radDist, R = {rzArray[0]:.2f}, z = {rzArray[1]:.2f}")
 
     if return_result:
         return squareTube
@@ -141,8 +137,7 @@ def radDist_NIMROD_parallel(args: tuple, return_result: bool = False):
     nimrod = radDist.NIMROD(nimrodFile=nimrodFile, timestep=timestep, config=config)
     nimrod.build()
 
-    logger.info("DONE with NIMROD radDist")
-    print("DONE with NIMROD radDist")
+    logger.debug("DONE with NIMROD radDist")
 
     if return_result:
         return nimrod
@@ -165,8 +160,7 @@ def radDist_M3DC1_parallel(args: tuple, return_result: bool = False):
     m3dc1 = radDist.M3DC1(m3dc1File=m3dc1File, timestep=timestep, config=config)
     m3dc1.build()
 
-    logger.info("DONE with M3DC1 radDist")
-    print("DONE with M3DC1 radDist")
+    logger.debug("DONE with M3DC1 radDist")
 
     if return_result:
         return m3dc1

@@ -56,25 +56,111 @@ def start_positions(lib, t, ws):
     return rz
 
 
-def make_raddists(config, tokamak: str | None = None, workspace=None, only=None, workers: int | None = None, dry_run: bool = False) -> dict:
+# Tidy names for reports (the radDist classes use a few different ones)
+_REPORT_NAMES = {"numTransists": "numTransits"}
+
+
+def describe_shape(shape: dict) -> str:
+    """One radDist's shape parameters, with the library config's names."""
+    if "sourceFile" in shape:
+        return f"{Path(str(shape['sourceFile'])).name}, timestep {shape['timestep']}"
+    return ", ".join(f"{_REPORT_NAMES.get(k, k)} {v:g}" if isinstance(v, (int, float)) else f"{_REPORT_NAMES.get(k, k)} {v}"
+                     for k, v in shape.items())
+
+
+def _values(v) -> str:
+    vals = v if isinstance(v, (list, tuple)) else [v]
+    text = ", ".join(f"{x:g}" if isinstance(x, (int, float)) else str(x) for x in vals[:8])
+    return text + (f", ... ({len(vals)} values)" if len(vals) > 8 else "")
+
+
+def _plan_lines(lib, plans, root, workers_override) -> list[str]:
+    """What will be built, before anything is built."""
+    lines = [f"radDist library: {lib.path} ({lib.tokamakName}, shot {lib.shot}), into {root / lib.folder}"]
+    for t, jobs, info, shapes in plans:
+        rays = {**{"pixelSamples": 1000, "integrationStep": 0.01}, **(t.settings.get("rays") or {})}
+        lines.append(f"  {t.name} ({t.distType}) -> {lib.folder_for(t)}")
+        if t.is_simulation:
+            lines.append(f"      files: {_values([Path(str(f)).name for f in (t.shape['files'] if isinstance(t.shape['files'], list) else [t.shape['files']])])}"
+                         f" | timesteps: {_values(t.shape['timesteps'])}")
+            lines.append(f"      {len(jobs)} radDists (one per file and timestep)")
+        else:
+            lines.append("      " + " | ".join(f"{k}: {_values(v)}" for k, v in t.shape.items()))
+            combos = 1
+            for v in t.shape.values():
+                combos *= len(v) if isinstance(v, (list, tuple)) else 1
+            dedup = f" (of {combos} combinations)" if combos != len(shapes) else ""
+            g = t.settings["grid"]
+            where = "inside the wall" if not g.get("rLimits") else f"R {g['rLimits']}, z {g['zLimits']}"
+            lines.append(f"      {len(shapes)} distinct shape(s){dedup} x {info['start_positions']} start position(s) "
+                         f"(grid {g['NumR']} x {g['NumZ']}, {where}) = {len(jobs)} radDists")
+        lines.append(f"      rays: {rays['pixelSamples']} per channel, step {rays['integrationStep']} m; "
+                     f"workers: {workers_override or t.settings.get('workers') or 1}")
+    lines.append(f"Total: {sum(len(p[1]) for p in plans)} radDists")
+    return lines
+
+
+def _build_one(task):
+    """
+    Worker: build and save one radDist, returning (seconds, error or None).
+    A failure is reported, not raised, so the other radDists still build;
+    make_raddists lists the failures at the end. Defined at module level so
+    worker processes can import it.
+    """
+    import contextlib
+    import io
+    import time
+
+    import emis3d.util_radDist as Util_radDist
+
+    builder_name, job = task
+    t0 = time.perf_counter()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):  # the progress report is printed by the main process
+            getattr(Util_radDist, builder_name)(job)
+        return time.perf_counter() - t0, None
+    except Exception as e:  # noqa: BLE001  boundary: any failure of one radDist is reported, the rest continue
+        return time.perf_counter() - t0, f"{type(e).__name__}: {e}"
+
+
+def _clock(seconds: float) -> str:
+    seconds = int(round(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def make_raddists(config, tokamak: str | None = None, workspace=None, only=None, workers: int | None = None,
+                  dry_run: bool = False, progress: bool = False) -> dict:
     """
     Build the radDists of a library config (emis3d.raddist_library), every
     enabled type or only those named in `only`.
 
-    config  : a path, or a name in the workspace's raddists/<tokamak> folder
-    workers : radDists built in parallel (default: the config's workers, else 1)
-    dry_run : only count what would be built
+    config   : a path, or a name in the workspace's raddists/<tokamak> folder
+    workers  : radDists built in parallel (default: the config's workers, else 1)
+    dry_run  : only plan; nothing is built
+    progress : print the plan first, a line per radDist as it finishes
+               (count, parameters, start position, time, time left) and a
+               summary at the end
 
-    Each type is built into raddists/<tokamak>/<folder>/<type name>; after a
-    build, manifest.yaml in raddists/<tokamak>/<folder> records the config,
-    the counts and the code version. Returns
-    {"types": [{name, distType, shapes, start_positions, radDists, folder}], "radDists": total}.
+    Each type is built into raddists/<tokamak>/<folder>/<type name>. A radDist
+    that fails is reported and the others still build. After a build,
+    manifest.yaml in raddists/<tokamak>/<folder> records the config, the
+    counts, any failures and the code version. Returns
+    {"types": [{name, distType, shapes, start_positions, radDists, folder}],
+     "radDists": total, "built": n, "failed": [{type, parameters, error}], "seconds": t}.
     """
+    import time
+    from concurrent.futures import as_completed
+
     import yaml
 
-    import emis3d.util_radDist as Util_radDist
     from emis3d.raddist_library import RadDistLibrary
     from emis3d.workspace import Workspace, set_workspace
+
+    def say(text=""):
+        if progress:
+            print(text, flush=True)
 
     ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(workspace=workspace)
     set_workspace(ws)
@@ -85,50 +171,88 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
     if tokamak and tokamak != lib.tokamakName:
         raise ValueError(f"{path} is for {lib.tokamakName}, not {tokamak}")
     selected = lib.select(only)
+    root = ws.path("raddists", tokamak=lib.tokamakName)
 
     builders = {
-        "ElongatedRing": Util_radDist.radDist_ElongatedRing_parallel,
-        "Helical": Util_radDist.radDist_Helical_parallel,
-        "HelicalRing": Util_radDist.radDist_HelicalRing_parallel,
-        "SquareTube": Util_radDist.radDist_SquareTube_parallel,
-        "NIMROD": Util_radDist.radDist_NIMROD_parallel,
-        "M3DC1": Util_radDist.radDist_M3DC1_parallel,
+        "ElongatedRing": "radDist_ElongatedRing_parallel",
+        "Helical": "radDist_Helical_parallel",
+        "HelicalRing": "radDist_HelicalRing_parallel",
+        "SquareTube": "radDist_SquareTube_parallel",
+        "NIMROD": "radDist_NIMROD_parallel",
+        "M3DC1": "radDist_M3DC1_parallel",
     }
-    root = ws.path("raddists", tokamak=lib.tokamakName)
 
     plans = []
     for t in selected:
         shapes = lib.shape_sets(t)
         if t.is_simulation:
-            jobs = [(shape["sourceFile"], shape["timestep"], lib.radDist_config(t, shape)) for shape in shapes]
+            jobs = [((shape["sourceFile"], shape["timestep"], lib.radDist_config(t, shape)), shape, None) for shape in shapes]
             positions = 1
         else:
             rz = start_positions(lib, t, ws)
-            jobs = [(val, lib.radDist_config(t, shape)) for shape in shapes for val in rz]
+            jobs = [((val, lib.radDist_config(t, shape)), shape, val) for shape in shapes for val in rz]
             positions = len(rz)
-        plans.append((t, jobs, {"name": t.name, "distType": t.distType, "shapes": len(shapes), "start_positions": positions,
-                                "radDists": len(jobs), "folder": str(root / lib.folder_for(t))}))
+        info = {"name": t.name, "distType": t.distType, "shapes": len(shapes), "start_positions": positions,
+                "radDists": len(jobs), "folder": str(root / lib.folder_for(t))}
+        plans.append((t, jobs, info, shapes))
 
-    summary = {"types": [p[2] for p in plans], "radDists": sum(p[2]["radDists"] for p in plans)}
+    for line in _plan_lines(lib, plans, root, workers):
+        say(line)
+    summary = {"types": [p[2] for p in plans], "radDists": sum(p[2]["radDists"] for p in plans), "built": 0, "failed": [], "seconds": 0.0}
     if dry_run:
+        say("Dry run: nothing built")
         return summary
 
-    for t, jobs, _ in plans:
-        n_workers = max(1, int(workers or t.settings.get("workers") or 1))
-        logger.info("Building %d %s radDists (%s) with %d worker(s)", len(jobs), t.distType, t.name, n_workers)
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            for _ in executor.map(builders[t.distType], jobs):  # consume, so worker errors surface
-                pass
+    total, done, start = summary["radDists"], 0, time.perf_counter()
+    width = len(str(total))
 
+    def report(t, jobs, k, seconds, error):
+        """One line per finished radDist; records failures."""
+        nonlocal done
+        done += 1
+        _, shape, rz = jobs[k]
+        where = f" | R {rz[0]:.3f}, z {rz[1]:.3f}" if rz is not None else ""
+        elapsed = time.perf_counter() - start
+        left = elapsed / done * (total - done)
+        status = f"FAILED: {error}" if error else f"{seconds:.1f} s"
+        say(f"[{done:>{width}}/{total} {100 * done / total:5.1f}%] {t.name}: {describe_shape(shape)}{where} | {status}"
+            f" | elapsed {_clock(elapsed)}, left ~{_clock(left)}")
+        if error:
+            summary["failed"].append({"type": t.name, "parameters": describe_shape(shape) + where, "error": error})
+        else:
+            summary["built"] += 1
+
+    for t, jobs, _, _ in plans:
+        n_workers = max(1, int(workers or t.settings.get("workers") or 1))
+        say(f"\nBuilding {t.name}: {len(jobs)} radDists with {n_workers} worker(s)")
+        tasks = [(builders[t.distType], job) for job, _, _ in jobs]
+        if n_workers == 1:
+            for k, task in enumerate(tasks):
+                report(t, jobs, k, *_build_one(task))
+        else:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(_build_one, task): k for k, task in enumerate(tasks)}
+                for fut in as_completed(futures):
+                    report(t, jobs, futures[fut], *fut.result())
+
+    summary["seconds"] = time.perf_counter() - start
     manifest = {
         "config": str(path.resolve()),
         "built": summary["types"],
+        "failed": summary["failed"],
+        "seconds": round(summary["seconds"], 1),
         "provenance": ws.provenance(),
         "library": yaml.safe_load(path.read_text()),
     }
     out = root / lib.folder / "manifest.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yaml.safe_dump(manifest, sort_keys=False))
+
+    say(f"\nBuilt {summary['built']} of {total} radDists in {_clock(summary['seconds'])}"
+        + (f"; {len(summary['failed'])} failed:" if summary["failed"] else ""))
+    for f in summary["failed"]:
+        say(f"  {f['type']}: {f['parameters']}: {f['error']}")
+    say(f"Manifest: {out}")
     return summary
 
 

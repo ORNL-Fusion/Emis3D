@@ -72,7 +72,7 @@ def test_missing_config_is_reported(ws_dir):
 def test_make_raddists_command_dry_run(ws_dir, capsys):
     assert main(["make-raddists", str(write_cfg(ws_dir, LIBRARY)), "--workspace", str(ws_dir), "--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert "ring" in out and "Would build" in out
+    assert "ring (ElongatedRing)" in out and "Dry run: nothing built" in out
 
 
 @pytest.mark.cherab
