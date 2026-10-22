@@ -89,6 +89,7 @@ from lmfit import report_fit
 
 import emis3d.util_emis3D as Util_emis3D
 import emis3d.uncertainty as uncertainty
+import emis3d.radDist as radDist_module
 
 logger = logging.getLogger(__name__)
 from dataclasses import asdict
@@ -105,7 +106,7 @@ from emis3d.util import (
     read_h5,
 )
 from emis3d.radDistFitting import RadDistFitting
-from emis3d.radDist import Helical, ElongatedRing, HelicalRing
+from emis3d.radDist import Helical, HelicalRing
 
 # --- Fit weight assigned to dead / zero-signal channels so the minmizer ignores
 # them.
@@ -870,17 +871,8 @@ class Emis3D:
 
         info = rad_.info
 
-        # --- Create the radDist
-        if info["distType"].lower() == "helical":
-            radDist_ = Helical(config=rad_.info, startR=rad_.info["startR"], startZ=rad_.info["startZ"])
-
-        elif info["distType"].lower() == "elongatedring":
-            radDist_ = ElongatedRing(config=rad_.info)
-        elif info["distType"].lower() == "helicalring":
-            radDist_ = HelicalRing(config=rad_.info, startR=rad_.info["startR"], startZ=rad_.info["startZ"])
-        else:
-            logger.info(f"_rebuild_radDist() only supports Helical, ElongatedRing, or HelicalRing")
-            return None
+        # --- Create the radDist (any type, simulation radDists included)
+        radDist_ = radDist_module.from_info(info)
 
         # --- Update the information
         if radDist_.info is not None:

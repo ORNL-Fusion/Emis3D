@@ -891,6 +891,97 @@ class Tokamak(object):
 
         return np.mean(np.array(phi))
 
+    def plot3d_wall(self, ax, angles_deg=(0.0, 90.0, 180.0, 270.0), color="0.2", lw=2.0, inner_ring=False) -> None:
+        """
+        Draw the wall's poloidal outline at the given toroidal angles, and
+        (with inner_ring=True) the centre column's edge around the midplane.
+        """
+        if self.wall is None:
+            return
+        r = np.append(self.wall["wallcurve"].vertices[:, 0], self.wall["wallcurve"].vertices[0, 0])
+        z = np.append(self.wall["wallcurve"].vertices[:, 1], self.wall["wallcurve"].vertices[0, 1])
+        for a in np.deg2rad(angles_deg):
+            ax.plot(r * np.cos(a), r * np.sin(a), z, color=color, lw=lw)
+        if inner_ring:
+            t = np.linspace(0.0, 2.0 * np.pi, 181)
+            R = r.min()
+            ax.plot(R * np.cos(t), R * np.sin(t), np.zeros_like(t), color=color, lw=0.5 * lw, alpha=0.6)
+
+    def _chord_end_at_wall(self, origin, hit, n: int = 800):
+        """
+        Where a straight chord from origin towards hit leaves the vessel: the
+        first exit from inside the wall after it has entered. Falls back to hit.
+        """
+        o = np.array([origin[0], origin[1], origin[2]], dtype=float)
+        h = np.array([hit[0], hit[1], hit[2]], dtype=float)
+        t = np.linspace(0.0, 1.0, n)
+        pts = o[None, :] + t[:, None] * (h - o)[None, :]
+        inside = self._inside_tokamak(np.column_stack([np.hypot(pts[:, 0], pts[:, 1]), pts[:, 2]]))
+        if not inside.any():
+            return h
+        first_in = int(np.argmax(inside))
+        exits = np.flatnonzero(~inside[first_in:])
+        return pts[first_in + exits[0]] if exits.size else h
+
+    HEIGHT_COLORS = {"above": "tab:gray", "midplane": "tab:gray", "below": "black"}
+
+    def camera_height_class(self, bolo, midplane_tol: float | None = None) -> str:
+        """
+        "above", "midplane" or "below": where the camera sits relative to z = 0.
+        Within midplane_tol [m] of z = 0 counts as the midplane (default: 10%
+        of the vessel's half-height).
+        """
+        if midplane_tol is None:
+            midplane_tol = 0.1 * 0.5 * (self.wall["maxz"] - self.wall["minz"]) if self.wall else 0.1
+        z = float(bolo.info["CAMERA_POSITION_R_Z_PHI"][1])
+        return "midplane" if abs(z) <= midplane_tol else ("above" if z > 0 else "below")
+
+    def plot3d_chords(self, ax, cameras=None, colors=None, label_cameras=True, lw=0.6, color_by: str = "height", midplane_tol: float | None = None, legend: bool = True) -> dict:
+        """
+        Draw each camera's chords, from the foil to where the central sightline
+        leaves the wall. color_by="height" colours cameras above, at and below
+        the midplane (HEIGHT_COLORS, with a legend); color_by="camera" gives
+        each camera its own colour. cameras: names to draw (default all).
+        Returns {camera: colour}. Needs the tokamak built (mode "Build").
+        """
+        drawn = {}
+        if not getattr(self, "bolometers", None) or self.world is None:
+            return drawn
+        palette = colors or plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        selected = [b for b in self.bolometers if cameras is None or b.name in cameras]
+        heights = {b.name: self.camera_height_class(b, midplane_tol) for b in selected}
+
+        # Trace each camera on its own, so other cameras' housings do not block its sightlines
+        for bolo in self.bolometers:
+            bolo._change_parent(value=None)
+        try:
+            for k, bolo in enumerate(selected):
+                colour = self.HEIGHT_COLORS[heights[bolo.name]] if color_by == "height" else palette[k % len(palette)]
+                bolo._change_parent(value=self.world)
+                for foil in bolo.bolometer_camera:
+                    origin, hit, _ = foil.trace_sightline()
+                    end = self._chord_end_at_wall(origin, hit)
+                    ax.plot([origin[0], end[0]], [origin[1], end[1]], [origin[2], end[2]], color=colour, lw=lw)
+                pos = bolo.bolometer_camera[0].centre_point
+                ax.plot([pos[0]], [pos[1]], [pos[2]], marker="s", color=colour, ms=5)
+                if label_cameras:
+                    # label above and outside the camera, so the emission does not hide it
+                    R = float(np.hypot(pos[0], pos[1]))
+                    out = 1.0 + 0.18 / max(R, 1e-6)
+                    ax.text(pos[0] * out, pos[1] * out, pos[2] + 0.18, bolo.name, color=colour, fontsize=9, ha="center", bbox={"facecolor": "white", "alpha": 0.7, "lw": 0, "pad": 1})
+                bolo._change_parent(value=None)
+                drawn[bolo.name] = colour
+        finally:
+            for bolo in self.bolometers:
+                bolo._change_parent(value=self.world)
+        if legend and color_by == "height" and drawn:
+            from matplotlib.lines import Line2D
+
+            labels = {"above": "above the midplane", "midplane": "at the midplane", "below": "below the midplane"}
+            present = [h for h in ("above", "midplane", "below") if h in heights.values()]
+            ax.legend([Line2D([], [], color=self.HEIGHT_COLORS[h], lw=2) for h in present], [f"cameras {labels[h]}" for h in present], loc="upper left", fontsize=8)
+        return drawn
+
     def plot(self, fieldLineStartPhi=None, return_fig: bool = False):
         """
         Plot the tokamak configuration in 3D

@@ -31,6 +31,7 @@ from emis3d.util import (
     XY_To_RPhi,
     convert_arrays_to_list,
     save_json,
+    load_json,
     # phase_timer,
     fieldline_key,
 )
@@ -41,6 +42,7 @@ from pathlib import Path
 
 # For NIMROD class
 import json
+from typing import Any, cast
 from cherab.core.math.interpolators.interpolators3d import Interpolate3DLinear
 
 
@@ -327,9 +329,7 @@ class RadDist(ABC):
         self.data = {}
         self.data["toroidalRadiatedPower"] = {}
         for emissionName in self.info["emissionNames"]:
-            self.data["toroidalRadiatedPower"][emissionName] = self._total_radiated_power(
-                emissionName=emissionName, n_phi=int(self.info.get("numBins", 100))
-            )
+            self.data["toroidalRadiatedPower"][emissionName] = self._total_radiated_power(emissionName=emissionName, n_phi=int(self.info.get("numBins", 100)))
 
     def power_per_bin_calc(self, Errfrac: float = 0.01, Pointsupdate: int = int(1e5)) -> None:
         """
@@ -617,6 +617,150 @@ class RadDist(ABC):
             # --- Add each bolometer back to the world
             for bolo_ in boloCameras:
                 bolo_._change_parent(value=self.tokamak.world)
+
+    def emission_cloud(
+        self,
+        emissionNames=None,
+        n_points: int = 20000,
+        n_phi: int = 120,
+        spacing: float = 0.02,
+        toroidal_scale=None,
+        seed: int = 0,
+    ) -> dict:
+        """
+        Sample points in 3-D with probability proportional to emissivity, for
+        drawing the radDist as a volumetric cloud.
+
+        The emissivity is evaluated plane by plane on an (R, z) grid of the
+        given spacing [m] at n_phi toroidal angles, summed over emissionNames
+        (default: all), optionally multiplied by toroidal_scale(phi_rad) (for
+        example a fitted toroidal profile). Points are drawn from the grid cells
+        with probability proportional to emissivity and jittered within their
+        cell. Returns x, y, z and the emissivity at each point.
+        """
+        if self.tokamak is None or self.tokamak.wall is None:
+            raise RuntimeError("Build the tokamak before sampling the emission")
+        names = list(emissionNames or self.info["emissionNames"])
+        w = self.tokamak.wall
+        Rg = np.arange(w["minr"], w["maxr"] + spacing, spacing)
+        Zg = np.arange(w["minz"], w["maxz"] + spacing, spacing)
+        RR, ZZ = np.meshgrid(Rg, Zg, indexing="ij")
+        inside = self.tokamak._inside_tokamak(np.column_stack([RR.ravel(), ZZ.ravel()]))
+        R_in, Z_in = RR.ravel()[inside], ZZ.ravel()[inside]
+        phis = np.linspace(0.0, 2.0 * np.pi, n_phi, endpoint=False)
+
+        emis = np.zeros((n_phi, R_in.size))
+        for k, phi in enumerate(phis):  # one plane at a time: every class takes a single phi
+            for name in names:
+                emis[k] += np.asarray(self.calc_emissivity(R_in, Z_in, phi=np.array([phi]), emissionName=name)[name], dtype=float)
+            if toroidal_scale is not None:
+                emis[k] *= float(toroidal_scale(phi))
+        emis = np.clip(np.nan_to_num(emis), 0.0, None)
+        total = emis.sum()
+        if total <= 0:
+            return {"x": np.array([]), "y": np.array([]), "z": np.array([]), "emissivity": np.array([])}
+
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(emis.size, size=n_points, p=(emis / total).ravel())
+        k, j = np.unravel_index(idx, emis.shape)
+        dphi = 2.0 * np.pi / n_phi
+        R = R_in[j] + rng.uniform(-0.5, 0.5, n_points) * spacing
+        Z = Z_in[j] + rng.uniform(-0.5, 0.5, n_points) * spacing
+        P = phis[k] + rng.uniform(-0.5, 0.5, n_points) * dphi
+        return {"x": R * np.cos(P), "y": R * np.sin(P), "z": Z, "emissivity": emis[k, j]}
+
+    def plot3D(
+        self,
+        ax=None,
+        emissionNames=None,
+        cameras=None,
+        n_points: int = 60000,
+        toroidal_scale=None,
+        show_injector: bool = True,
+        show_field_lines: bool = True,
+        view=(28.0, -60.0),
+        cmap: str = "RdYlBu_r",  # "plasma",
+        chord_colors: str = "height",
+        point_size: float = 0.6,
+        point_alpha: float = 0.3,
+    ):
+        """
+        3-D view of the radDist (a point cloud whose density follows the
+        emissivity) with the wall and the cameras' chords.
+
+        emissionNames : components to draw (default all, summed)
+        cameras       : camera names whose chords to draw (default all; [] for none)
+        toroidal_scale: optional callable phi_rad -> factor, e.g. a fitted profile
+        show_field_lines: draw the traced field lines' centre-lines (helical radDists)
+        chord_colors  : "height" (above / at / below the midplane) or "camera"
+        n_points, point_size, point_alpha: density and look of the cloud; more
+                        points with smaller, fainter markers give a smoother cloud
+        Returns the axes.
+        """
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            fig = plt.figure(figsize=(9, 8))
+            ax = fig.add_subplot(1, 1, 1, projection="3d")
+
+        cloud = self.emission_cloud(emissionNames, n_points=n_points, toroidal_scale=toroidal_scale)
+        if cloud["x"].size:
+            order = np.argsort(cloud["emissivity"])  # brightest drawn last, on top
+            e = cloud["emissivity"][order]
+            ax.scatter(
+                cloud["x"][order],
+                cloud["y"][order],
+                cloud["z"][order],
+                c=e,
+                cmap=cmap,
+                vmin=float(np.percentile(e, 5)),
+                vmax=float(np.percentile(e, 99)),
+                alpha=point_alpha,
+                linewidths=0,
+                depthshade=False,
+                s=cast(Any, point_size),
+            )  # matplotlib's stubs type s as int; sizes below 1 are wanted
+
+        # --- Centre-lines of the traced field lines (helical radDists)
+        if show_field_lines and getattr(self.tokamak, "fieldLines", None):
+            fl = self.tokamak.fieldLines[next(iter(self.tokamak.fieldLines))]
+            for name in fl.get("directionNames", []):
+                line = fl[name]
+                x, y, z = (np.asarray(line[k]) for k in ("x", "y", "z"))
+                if x.ndim > 1:  # one row per traced field line: draw the one nearest the start point
+                    x, y, z = x[0], y[0], z[0]
+                ax.plot(x, y, z, color="black", lw=0.8, alpha=0.7)
+
+        self.tokamak.plot3d_wall(ax)
+        if cameras is None or len(cameras):
+            self.tokamak.plot3d_chords(ax, cameras=cameras, color_by=chord_colors)
+
+        wall = self.tokamak.wall
+        if wall is None:
+            raise RuntimeError("The tokamak has no wall to draw")
+        if show_injector and "injectionLocation" in self.info:
+            a = np.deg2rad(float(self.info["injectionLocation"]))
+            R_out = wall["maxr"] + 0.25
+            ax.plot([R_out * np.cos(a)], [R_out * np.sin(a)], [0.0], marker="v", color="tab:red", ms=10)
+            ax.text(R_out * np.cos(a), R_out * np.sin(a), 0.15, "injector", color="tab:red", fontsize=9, ha="center")
+
+        span = wall["maxr"] + 0.3
+        ax.set_xlim(-span, span)
+        ax.set_ylim(-span, span)
+        ax.set_zlim(wall["minz"] - 0.1, wall["maxz"] + 0.1)
+        ax.set_box_aspect((2 * span, 2 * span, wall["maxz"] - wall["minz"] + 0.2))
+        ax.view_init(elev=view[0], azim=view[1])
+        ax.set_xlabel("x [m]")
+        ax.set_ylabel("y [m]")
+        ax.set_zlabel("z [m]")
+        ax.set_title(self._plot_title())
+        return ax
+
+    def _plot_title(self) -> str:
+        name = self.info.get("distType", type(self).__name__)
+        if "sourceFile" in self.info:  # simulation radDists
+            return f"{name} radDist: {Path(str(self.info['sourceFile'])).stem}, timestep {self.info.get('timestep')}"
+        return f"{name} radDist at R {float(self.info.get('startR', 0)):.2f}, z {float(self.info.get('startZ', 0)):.2f} m"
 
     def plotCrossSection(self, phi: float = 0.0, ax=None):
         """
@@ -1486,3 +1630,25 @@ class M3DC1(SimulationRadDist):
 
     def __init__(self, m3dc1File, timestep, config=None):
         super().__init__(m3dc1File, timestep, config=config)
+
+
+def from_info(info: dict) -> "RadDist":
+    """
+    Rebuild a radDist (emission included) from its saved settings, e.g. to
+    plot it. Simulation radDists re-read their sourceFile at their timestep;
+    helical ones re-trace their field lines.
+    """
+    kind = str(info.get("distType", "")).lower()
+    config = dict(info)
+    if kind in ("nimrod", "m3dc1"):
+        cls = NIMROD if kind == "nimrod" else M3DC1
+        return cls(config["sourceFile"], config["timestep"], config=config)
+    classes = {"elongatedring": ElongatedRing, "squaretube": SquareTube, "helical": Helical, "helicalring": HelicalRing}
+    if kind not in classes:
+        raise ValueError(f"Cannot rebuild radDist of type {info.get('distType')!r}")
+    return classes[kind](startR=config.get("startR"), startZ=config.get("startZ"), config=config)
+
+
+def load(path) -> "RadDist":
+    """Rebuild the radDist saved in a radDist file (from_info on its settings)."""
+    return from_info(load_json(str(path))["info"])
