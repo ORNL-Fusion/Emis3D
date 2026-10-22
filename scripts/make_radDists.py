@@ -37,6 +37,7 @@ to Util and Util_radDist files
 TODO:
 
 Equivalent command: emis3d make-raddists <library config> [--only TYPES] [--workers N] [--dry-run]
+Example: emis3d make-raddists 95709/raddists_95709.yaml --tokamak JET --only helical
 
 The library config describes every radDist type for a shot in one file; see
 emis3d/raddist_library.py and examples/radDist/raddists_example.yaml.
@@ -61,5 +62,4 @@ if __name__ == "__main__":  # required: worker processes re-import this file on 
     args = parser.parse_args()
 
     only = [n.strip() for n in args.only.split(",")] if args.only else None
-    make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only, workers=args.workers,
-                  dry_run=args.dry_run, progress=True)
+    make_raddists(args.config, tokamak=args.tokamak, workspace=args.workspace, only=only, workers=args.workers, dry_run=args.dry_run, progress=True)
