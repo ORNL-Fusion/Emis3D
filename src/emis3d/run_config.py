@@ -170,8 +170,8 @@ class RunConfig:
                             raise ValueError(f"parametric.bounds.{model}.{name} must be [low, high] with low < high, got {v!r}")
         if "shell" in models and not p.get("equilibrium"):
             raise ValueError("parametric.equilibrium (a g-file name) is required for the shell model")
-        if self.scale_def.lower() not in ("constant", "exponential", "linear"):
-            raise ValueError("the parametric solver supports scale_def constant, exponential or linear")
+        if self.scale_def.lower() not in ("constant", "exponential", "linear", "step"):
+            raise ValueError("the parametric solver supports scale_def constant, exponential, linear or step")
 
     def eval_times(self) -> list[float]:
         """

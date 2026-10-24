@@ -174,6 +174,10 @@ class Emis3D:
         self._create_master_channel_order()
         if self.config is not None and self.config.solver == "parametric":
             self.data.setdefault("synthetic", {"locIndependent": {}, "locDependent": {}})  # filled per time by the fit
+            if self.config.scale_def.lower() == "step":
+                # the fitted step is built into the candidate (_apply_fitted_step); its amplitude
+                # is then the pipeline's only toroidal parameter
+                self.info["scale_def"] = "constant"
         else:
             self._load_radDists()
             self._prune_channel_order_to_radDists()
@@ -222,6 +226,7 @@ class Emis3D:
         self._post_process_bolo_locations(evalTime=evalTime)
         self._post_process_calculations(evalTime=evalTime)
         self._post_process_uncertainty(evalTime=evalTime)  # needs the other candidates
+        self._step_ranges(evalTime=evalTime)
         logger.info(f"→ Post-processing done in {time.time() - t_start:.2f} seconds")
 
         if cleanup:
@@ -289,7 +294,7 @@ class Emis3D:
                 warnings.simplefilter("ignore")
                 template = radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
 
-            fit = ParametricFit(model, template, matrices, data, self.info["scale_def"], float(self.info["injectionLocation"]),
+            fit = ParametricFit(model, template, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
                                 bounds=(cfg.get("bounds") or {}).get(model), fixed=fixed, supersample=cfg.get("supersample"),
                                 a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds())
             logger.info("→ Parametric fit (%s) at t=%s through %s", model, evalTime, ", ".join(names))
@@ -315,6 +320,8 @@ class Emis3D:
         template.calc_radiated_power()
         template.observe_with_matrix(matrices[-1])
         template._get_observed_phi_loc()
+        if result.toroidal:
+            self._apply_fitted_step(template, result.toroidal)
         template.info["radDistFormat"] = RADDIST_FORMAT
         template.info["parametric"] = {"model": result.model, "values": result.values, "stderr": result.stderr, "at_bounds": result.at_bounds,
                                        "compared": {r.model: {"aic": r.aic, "chi2": r.chi2} for r in results}}
@@ -324,6 +331,94 @@ class Emis3D:
         candidate._load_ok = True
         candidate._map_signals()
         self.data["synthetic"] = {"locIndependent": {0: candidate}, "locDependent": {}}
+
+    def _step_ranges(self, evalTime: float) -> None:
+        """
+        For a parametric step fit, the TPF, total-power and profile ranges come
+        from the step amplitudes' covariance (the parametric fit's): the step
+        is built into the candidate, so the pipeline's own ranges only see an
+        overall amplitude, which cannot change the TPF. Each sample's profile
+        is the best fit's, rescaled location by location by the sampled
+        amplitudes.
+        """
+        result = getattr(self, "parametric", {}).get(evalTime)
+        best = self.bestFits.get(evalTime, {}) if hasattr(self, "bestFits") else {}
+        if result is None or not result.toroidal or "ranges" not in best or result.fit is None:
+            return
+        cfg = uncertainty.UncertaintyConfig.from_info(self.info)
+        samples, flags = uncertainty.sample_parameters(result.fit, cfg.n_samples, np.random.default_rng(cfg.seed))
+        names = [f"a_{int(round(d))}" for d in result.toroidal["locations_deg"]]
+        locs = np.deg2rad(np.asarray(result.toroidal["locations_deg"], dtype=float))
+        best_rel = np.asarray(result.toroidal["amplitudes"], dtype=float)
+
+        rad = best["radiation_distribution"]
+        phi = np.asarray(rad["phi"], dtype=float)
+        P_best = np.asarray(rad["total_power"], dtype=float)
+        gap = np.abs((phi[:, None] - locs + np.pi) % (2.0 * np.pi) - np.pi)
+        nearest = np.argmin(gap, axis=1)
+        f_best = best_rel[nearest]
+        profiles, tpf, total = [], [], []
+        total_best = float(rad.get("quantities", {}).get("total_power", np.mean(P_best) * 2.0 * np.pi))
+        for smp in samples:
+            rel = np.array([smp[n] for n in names])
+            P = P_best * np.divide(rel[nearest], f_best, out=np.zeros_like(f_best), where=f_best > 0)
+            if P.mean() <= 0:
+                continue
+            profiles.append(P)
+            tpf.append(P.max() / P.mean())
+            total.append(total_best * P.mean() / P_best.mean())
+        if not profiles:
+            return
+
+        def entry(v):
+            v = np.asarray(v)
+            out = {"median": float(np.median(v)), "n": int(v.size)}
+            for c in cfg.intervals:
+                lo, hi = np.percentile(v, [50 * (1 - c), 50 * (1 + c)])
+                out[f"{int(round(100 * c))}%"] = (float(lo), float(hi))
+            return out
+
+        ranges = best["ranges"]
+        for key in ("total", "statistical"):
+            ranges[key]["tpf"] = entry(tpf)
+            ranges[key]["total_power"] = entry(total)
+        prof = np.asarray(profiles)
+        band = {"phi": phi, "median": np.median(prof, axis=0)}
+        for c in (0.68, 0.95):
+            lo, hi = np.percentile(prof, [50 * (1 - c), 50 * (1 + c)], axis=0)
+            band[f"{int(round(100 * c))}%"] = (lo, hi)
+        ranges["profile_band"] = band
+        ranges["note"] = "step scale: TPF, total power and profile ranges from the step amplitudes' covariance (parametric fit)"
+        for flag in flags:
+            logger.info("Step ranges at t=%s: %s", evalTime, flag)
+
+    @staticmethod
+    def _apply_fitted_step(radDist, toroidal: dict) -> None:
+        """
+        Build a fitted step scale into a radDist: every toroidal segment of its
+        signals, and its toroidal power profile, is multiplied by the relative
+        amplitude of the nearest camera location (normalized to the largest).
+        The pipeline then treats it with a constant scale, so the profile, TPF,
+        ranges and figure show the step.
+        """
+        locs = np.deg2rad(np.asarray(toroidal["locations_deg"], dtype=float))
+        amps = np.asarray(toroidal["amplitudes"], dtype=float)
+        amps = amps / amps.max() if amps.max() > 0 else np.ones_like(amps)
+
+        def factor(phi):
+            phi = np.asarray(phi, dtype=float)
+            gap = np.abs((phi[..., None] - locs + np.pi) % (2.0 * np.pi) - np.pi)
+            return amps[np.argmin(gap, axis=-1)]
+
+        units = radDist.info["units"]
+        for name in radDist.info["emissionNames"]:
+            sig, phis = radDist.data[units][name], radDist.data["observed_phi_loc"][name]
+            for cam in sig:
+                sig[cam] = [list(np.asarray(v, dtype=float) * factor(p)) for v, p in zip(sig[cam], phis[cam], strict=True)]
+            prof = radDist.data["toroidalRadiatedPower"][name]
+            prof["P_pol"] = list(np.asarray(prof["P_pol"], dtype=float) * factor(prof["phi_array"]))
+            if "P_total" in prof:
+                prof["P_total"] = float(np.mean(prof["P_pol"]) * 2.0 * np.pi)
 
     # ------------------------------------------------------------------
     # Configuration / data loading
@@ -1398,7 +1493,7 @@ class Emis3D:
             chosen = f"{best['parametric'].model} model (parametric, {len(best.get('parametric_models', []))} compared)"
         title = (
             f"{self.info['tokamakName']} {self.info['shot']}   t = {evalTime:g}   best radDist: {chosen}\n"
-            f"scale_def: {self.info['scale_def']}   errors: {self.info['error_definition']}   "
+            f"scale_def: {self.config.scale_def if 'parametric' in best and self.config else self.info['scale_def']}   errors: {self.info['error_definition']}   "
             f"fit: {self.info['fit_method']}   AIC = {score:.1f}"
         )
         if best.get("at_bounds"):

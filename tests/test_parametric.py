@@ -325,3 +325,102 @@ def test_a_camera_missing_from_the_matrix_is_an_error(rings, tmp_path):
     e = Emis3D(runConfigName=str(run))
     with pytest.raises(ValueError, match="camera SKEW has no channels in the geometry matrices"):
         e._fit_parametric(evalTime=10.0)
+
+
+# ---------------------------------------------------------------------------
+# The step scale: one amplitude per camera location
+# ---------------------------------------------------------------------------
+
+STEP_TRUE = {20.0: 0.5, 45.0: 1.0, 165.0: 0.8, 285.0: 0.3}   # MOCK's camera angles (POL_B and SKEW share 165)
+
+
+def step_data(fit, G, shape):
+    X = fit.design(G, shape)
+    A = np.array([STEP_TRUE[d] for d in fit.step_deg])
+    signal = X @ A
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    _, rows_d, _ = fit._rows[id(G)]
+    tags = [G.channels[k] for k in fit._rows[id(G)][0]]
+    return {t: (float(s), float(e)) for t, s, e in zip(tags, signal, sigma, strict=True)}
+
+
+def test_step_solves_one_amplitude_per_camera_location(rings):
+    _, truth, template = rings
+    G = matrix_for(rings)
+    shape = {k: TRUE[k] for k in ("startR", "startZ", "sigma_R", "sigma_z", "rotationAngle")}
+    data0 = {t: (1.0, 1.0) for t in G.channels}
+    probe = ParametricFit("ring", template, [G], data0, "step", 225.0, fixed=shape)
+    assert probe.step_deg == [20.0, 45.0, 165.0, 285.0] and probe.amp_names == ["a_20", "a_45", "a_165", "a_285"]
+    assert "b" not in probe.names
+    data = step_data(probe, G, {})
+    fit = ParametricFit("ring", template, [G], data, "step", 225.0, fixed=shape)
+    chi2, a = fit.chi2(G, {})
+    assert chi2 < 1e-10
+    want = np.array([STEP_TRUE[d] for d in fit.step_deg])
+    np.testing.assert_allclose(np.asarray(a) / np.max(a), want / want.max(), rtol=1e-6)      # the ratios, exactly
+
+
+def test_step_search_reports_every_amplitude(rings):
+    _, truth, template = rings
+    G = matrix_for(rings)
+    fixed = {k: TRUE[k] for k in ("startZ", "sigma_R", "sigma_z", "rotationAngle")}
+    probe = ParametricFit("ring", template, [G], {t: (1.0, 1.0) for t in G.channels}, "step", 225.0, fixed={**fixed, "startR": TRUE["startR"]})
+    data = step_data(probe, G, {})
+    fit = ParametricFit("ring", template, [G], data, "step", 225.0, fixed=fixed, bounds={"startR": (1.6, 1.9)})
+    res = fit.search(seed=0, maxiter=15)
+    assert res.values["startR"] == pytest.approx(TRUE["startR"], abs=0.02)
+    assert set(res.amplitude) == {"a_20", "a_45", "a_165", "a_285"} and res.n_params == 1 + 4
+    assert res.toroidal["locations_deg"] == [20.0, 45.0, 165.0, 285.0]
+    rel = np.array(res.toroidal["amplitudes"])
+    want = np.array([STEP_TRUE[d] for d in res.toroidal["locations_deg"]])
+    np.testing.assert_allclose(rel / rel.max(), want / want.max(), rtol=0.02)
+
+
+def test_fitted_step_is_built_into_the_candidate(rings):
+    from emis3d.emis3D import Emis3D
+
+    _, truth, template = rings
+    G = matrix_for(rings)
+    template.info.update({k: TRUE[k] for k in ("startR", "startZ", "sigma_R", "sigma_z", "rotationAngle")})
+    template.calc_radiated_power()
+    template.observe_with_matrix(G)
+    before = {cam: [np.array(v, float) for v in segs] for cam, segs in template.data["Brightness"]["elongatedRing"].items()}
+    Emis3D._apply_fitted_step(template, {"locations_deg": [45.0, 225.0], "amplitudes": [2.0, 1.0]})
+    prof = template.data["toroidalRadiatedPower"]["elongatedRing"]
+    phi = np.rad2deg(np.asarray(prof["phi_array"]))
+    P = np.asarray(prof["P_pol"])
+    near_45 = np.abs(((phi - 45 + 180) % 360) - 180) < 90
+    assert np.allclose(P[~near_45] / P[near_45].mean(), 0.5, rtol=1e-6)                       # two levels, ratio 1 : 0.5
+    phis = template.data["observed_phi_loc"]["elongatedRing"]
+    for cam, segs in template.data["Brightness"]["elongatedRing"].items():
+        for v, v0, p in zip(segs, before[cam], phis[cam], strict=True):
+            d = np.rad2deg(np.asarray(p))
+            f = np.where(np.abs(((d - 45 + 180) % 360) - 180) <= 90 + 1e-9, 1.0, 0.5)   # a tie goes to the first location
+            np.testing.assert_allclose(v, v0 * f, rtol=1e-12)
+
+
+def test_step_end_to_end_through_emis3d(rings, tmp_path):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], solver="parametric", scale_def="step",
+                          error_definition="floor_relative",
+                          parametric={"models": ["ring"], "matrices": ["low"], "maxiter": 5,
+                                      "bounds": {"ring": {"startR": [1.6, 1.9], "startZ": [0.0, 0.3]}}})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings).save(matrix_path(ws, "MOCK", "low"))
+    e = Emis3D(runConfigName=str(run))
+    assert e.info["scale_def"] == "constant" and e.config.scale_def == "step"
+    e._perform_fits()
+    best = e.bestFits[10.0]
+    res = best["parametric"]
+    assert res.toroidal["locations_deg"] == [20.0, 45.0, 165.0, 285.0]
+    P = np.asarray(best["radiation_distribution"]["total_power"])
+    assert len(np.unique(np.round(P / P.max(), 9))) <= 4                                        # a step profile
+    assert best["radiation_distribution"]["toroidal_peaking_factor"] == pytest.approx(P.max() / P.mean())
+    assert "scale_def: step" in e._figure_title(10.0)
+    lo, hi = best["ranges"]["total"]["tpf"]["68%"]
+    tpf = best["radiation_distribution"]["toroidal_peaking_factor"]
+    assert hi > lo and lo - 1e-9 <= tpf <= hi + 1e-9                                         # a real range, containing the best fit
+    assert "step amplitudes" in best["ranges"]["note"]
