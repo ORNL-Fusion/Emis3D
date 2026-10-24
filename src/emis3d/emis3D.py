@@ -251,6 +251,17 @@ class Emis3D:
                                         f"build it with: emis3d build-matrix {self.info['tokamakName']} --resolution {name}")
             matrices.append(cached_matrix(path))
 
+        # --- Only channels with a row in every matrix can be modelled. Channels in
+        # the data files but not in the machine's camera configs (left out on
+        # purpose, e.g. broken) are dropped with a warning, as the library path
+        # does; a whole camera missing from the matrix is an error.
+        in_every = set.intersection(*(set(G.channels) for G in matrices))
+        for ii, bolo in enumerate(self.channel_order["bolometer_order"]):
+            if not in_every & set(self.channel_order["channel_list"][ii]):
+                raise ValueError(f"camera {bolo} has no channels in the geometry matrices {names}; rebuild them with it "
+                                 f"(emis3d build-matrix {self.info['tokamakName']} --resolution <name>, without --cameras or including {bolo})")
+        self._prune_channel_order(in_every, "the geometry matrices")
+
         self._check_time_in_data(evalTime)
         self._prepare_data_for_fit(evalTime=evalTime)
         data = {}
@@ -543,9 +554,15 @@ class Emis3D:
 
         if available is None:
             return
+        self._prune_channel_order(available, "the radDist synthetic data")
 
-        # --- Prune the master order, dropping emptied bolometers and keeping
-        # bolometer_order parallel to channel_list.
+    def _prune_channel_order(self, available: set, source: str) -> list:
+        """
+        Drop data channels that are not in `available` (channels the model can
+        predict: in the radDists, or rows of the geometry matrix), dropping
+        emptied bolometers and keeping bolometer_order parallel to
+        channel_list. Returns the dropped channels; logs a warning naming them.
+        """
         dropped = []
         new_channel_list = []
         new_bolometer_order = []
@@ -561,10 +578,12 @@ class Emis3D:
 
         if dropped:
             logger.warning(
-                "Dropped %d channel(s) absent from the radDist synthetic data; " "they will not be passed to the minimizer: %s",
+                "Dropped %d channel(s) absent from %s; they will not be passed to the minimizer: %s",
                 len(dropped),
+                source,
                 ", ".join(str(ch) for ch in dropped),
             )
+        return dropped
 
     # ------------------------------------------------------------------
     # Fit preparation

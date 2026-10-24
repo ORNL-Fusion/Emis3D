@@ -183,3 +183,61 @@ def test_check_reports_missing_matrices(tmp_path):
                           parametric={"model": "ring", "matrices": ["nope"]})
     msgs = [f.message for f in check(run) if f.level == "error"]
     assert any("geometry matrix 'nope' not found" in m and "emis3d build-matrix MOCK --resolution nope" in m for m in msgs)
+
+
+# ---------------------------------------------------------------------------
+# Data channels that the geometry matrix does not have
+# ---------------------------------------------------------------------------
+
+def matrix_for(rings, drop=(), cameras=None):
+    """A synthetic matrix with MOCK's real channel names, minus `drop`."""
+    from test_calibration import CAMS, cam_info
+
+    _, truth, _ = rings
+    g = GridSpec.from_wall(truth.tokamak.wall, {"dR": 0.1, "dz": 0.1, "n_phi": 12})
+    tags, cam_rows = [], []
+    for ci, cam in enumerate(cameras or CAMS):
+        for t in cam_info(cam)[0]:
+            if t not in drop:
+                tags.append(str(t))
+                cam_rows.append(ci)
+    rng = np.random.default_rng(0)
+    rows = sp.random(len(tags), g.n_voxels, density=0.05, random_state=rng, format="csr")
+    return GeometryMatrix(machine="MOCK", grid=g, rows=rows, cameras=list(cameras or CAMS), channels=tags,
+                          camera_of_row=np.array(cam_rows), etendues=np.full(len(tags), 1e-7),
+                          inside_wall=np.ones(g.n_voxels, bool), samples=1)
+
+
+def test_channels_missing_from_the_matrix_are_dropped(rings, tmp_path, caplog):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import CAMS, cam_info, write_workspace
+
+    missing = str(cam_info("POL_A")[0][3])
+    bad = str(cam_info("POL_C")[0][2])
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], scale_def="exponential",
+                          error_definition="floor_relative", parametric={"model": "ring", "matrices": ["low"], "maxiter": 3},
+                          BOLOMETERS={c: {"dataFileName": f"1/{c}.h5", **({"badChannels": [bad]} if c == "POL_C" else {})} for c in CAMS})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings, drop={missing}).save(matrix_path(ws, "MOCK", "low"))
+
+    e = Emis3D(runConfigName=str(run))
+    e._fit_parametric(evalTime=10.0)                                     # used to raise: channel not in the matrix
+    assert missing in caplog.text and "Dropped 1 channel" in caplog.text
+    kept = [ch for chans in e.channel_order["channel_list"] for ch in chans]
+    assert missing not in kept and bad in kept                           # a bad channel stays (excluded by its error)
+    assert e.parametric[10.0].n_data == len(kept) - 1                    # ... but is not fitted
+
+
+def test_a_camera_missing_from_the_matrix_is_an_error(rings, tmp_path):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], scale_def="exponential",
+                          parametric={"model": "ring", "matrices": ["low"], "maxiter": 3})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings, cameras=["POL_A", "POL_B", "POL_C", "WRAP"]).save(matrix_path(ws, "MOCK", "low"))   # no SKEW
+    e = Emis3D(runConfigName=str(run))
+    with pytest.raises(ValueError, match="camera SKEW has no channels in the geometry matrices"):
+        e._fit_parametric(evalTime=10.0)

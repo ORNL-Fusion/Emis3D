@@ -101,10 +101,11 @@ class ParametricFit:
         self._rows = {}
         for G in self.matrices:
             tags = {t: i for i, t in enumerate(G.channels)}
-            missing = sorted(set(data) - set(tags))
+            keep = [t for t in data if np.isfinite(data[t][1]) and data[t][1] > 0]  # bad channels (infinite error) are left out
+            missing = sorted(set(keep) - set(tags))
             if missing:
-                raise ValueError(f"channels not in the geometry matrix ({G.grid.describe()}): {missing}")
-            keep = [t for t in data if np.isfinite(data[t][1]) and data[t][1] > 0]
+                raise ValueError(f"channels not in the geometry matrix ({G.grid.describe()}): {missing}; "
+                                 "drop them from the data (Emis3D does this) or rebuild the matrix with their cameras")
             self._rows[id(G)] = (np.array([tags[t] for t in keep]), np.array([data[t][0] for t in keep], dtype=float),
                                  np.array([data[t][1] for t in keep], dtype=float))
         self.n_data = len(self._rows[id(self.matrices[0])][0])
