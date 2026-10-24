@@ -10,6 +10,8 @@ The ``emis3d`` command.
                                            cross-calibrate cameras (emis3d.calibration)
     emis3d make-raddists CONFIG [--only TYPES] [--workers N] [--dry-run]
                                            build the radDists of a library config
+    emis3d build-matrix MACHINE [--cameras C,C] [--resolution low|medium|high] [--samples N]
+                                           build the geometry matrix (voxel forward model) into the cache
     emis3d check RUN                       find problems in a run config and its files
     emis3d run RUN [--times T ...] [--workers N] [--no-plots]
                                            fit every evaluation time, save figures and results
@@ -182,6 +184,15 @@ def cmd_make_raddists(args) -> int:
     return 1 if summary["failed"] else 0
 
 
+def cmd_build_matrix(args) -> int:
+    from emis3d.pipeline import build_matrix
+
+    cameras = [n.strip() for n in args.cameras.split(",")] if args.cameras else None
+    build_matrix(args.machine, cameras=cameras, resolution=args.resolution, samples=args.samples,
+                 workspace=args.workspace, name=args.name, progress=True)
+    return 0
+
+
 def cmd_check(args) -> int:
     from emis3d.pipeline import check
 
@@ -257,6 +268,15 @@ def main(argv=None) -> int:
     pr.add_argument("--dry-run", action="store_true", help="only count what would be built")
     pr.add_argument("--workspace")
     pr.set_defaults(func=cmd_make_raddists)
+
+    pm = sub.add_parser("build-matrix", help="build a machine's geometry matrix (the voxel forward model) into the cache")
+    pm.add_argument("machine", help="machine name, e.g. JET")
+    pm.add_argument("--cameras", help="comma-separated camera names (default: all)")
+    pm.add_argument("--resolution", default="medium", choices=["low", "medium", "high"], help="voxel grid preset (default medium)")
+    pm.add_argument("--samples", type=int, help="rays per channel (default: the preset's)")
+    pm.add_argument("--name", help="file name in the cache (default: the resolution)")
+    pm.add_argument("--workspace")
+    pm.set_defaults(func=cmd_build_matrix)
 
     pk = sub.add_parser("check", help="find problems in a run config and its files before a long run")
     pk.add_argument("config", help="run config")

@@ -257,6 +257,39 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
 
 
 # ---------------------------------------------------------------------------
+# Geometry matrices
+# ---------------------------------------------------------------------------
+
+
+def build_matrix(machine: str, cameras=None, resolution: str = "medium", samples: int | None = None, workspace=None,
+                 name: str | None = None, progress: bool = False) -> Path:
+    """
+    Build the geometry matrix of a machine's cameras (emis3d.geometry) and
+    save it in the workspace's cache as <cache>/<machine>/geometry/<name>.npz
+    (name defaults to the resolution, plus the camera names when a subset).
+    Returns the file's path.
+    """
+    from emis3d.geometry import build_geometry_matrix, matrix_path
+    from emis3d.tokamak import Tokamak
+    from emis3d.workspace import Workspace, set_workspace
+
+    ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(workspace=workspace)
+    set_workspace(ws)
+    say = (lambda text: print(text, flush=True)) if progress else (lambda text: None)
+
+    tok = Tokamak(tokamakName=machine, mode="Build", reflections=False, loadBolometers=True, workspace=ws)
+    if tok.info is None:
+        raise RuntimeError(f"machine {machine} did not load")
+    G = build_geometry_matrix(tok, cameras=cameras, resolution=resolution, samples=samples, progress=say)
+    G.provenance.update(ws.provenance())
+    if name is None:
+        name = resolution + ("_" + "_".join(G.cameras) if cameras else "")
+    out = G.save(matrix_path(ws, machine, name))
+    say(f"saved {out} ({len(G.channels)} channels, {G.rows.nnz:,} nonzeros, built in {G.provenance.get('built_in', 0):.0f} s)")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Running an analysis
 # ---------------------------------------------------------------------------
 
