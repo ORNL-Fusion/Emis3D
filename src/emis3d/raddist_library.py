@@ -12,6 +12,7 @@ for a shot, with shared settings at the top and one block per type.
     numBins: 100
     workers: 7
     rays: {pixelSamples: 1000, seed: 0, integrationStep: 0.01, method: compiled}
+        # or method: matrix, matrix: medium  (a geometry matrix from emis3d build-matrix; no ray tracing)
     grid: {rLimits: [], zLimits: [], NumR: 10, NumZ: 20}
 
     types:
@@ -47,8 +48,8 @@ from emis3d.util import config_loader
 # --- Settings shared by every type (any of OVERRIDABLE can be set again inside a type)
 SHARED_KEYS = {"tokamakName", "shot", "folder", "injectionLocation", "units", "eqFileName", "numBins", "workers", "rays", "grid", "types"}
 OVERRIDABLE = {"injectionLocation", "units", "eqFileName", "numBins", "workers", "rays", "grid"}
-RAYS_KEYS = {"pixelSamples", "seed", "integrationStep", "method", "gridSpacing"}
-RAY_METHODS = ("compiled", "python")
+RAYS_KEYS = {"pixelSamples", "seed", "integrationStep", "method", "gridSpacing", "matrix", "supersample"}
+RAY_METHODS = ("compiled", "python", "matrix")
 GRID_KEYS = {"rLimits", "zLimits", "NumR", "NumZ"}
 UNITS = ("Power", "Radiance", "Brightness")
 
@@ -183,6 +184,10 @@ class RadDistLibrary:
         }
         if rays.get("gridSpacing"):
             cfg["gridSpacing"] = float(rays["gridSpacing"])
+        if rays["method"] == "matrix":
+            cfg["matrixName"] = str(rays.get("matrix", "medium"))  # a matrix in the cache (emis3d build-matrix)
+            if rays.get("supersample"):
+                cfg["supersample"] = int(rays["supersample"])
         cfg.update(shape)
         return cfg
 
@@ -213,6 +218,8 @@ def _check_shared(s: dict, where: str) -> list[str]:
                 errors.append(f"{where}rays.method must be one of {RAY_METHODS}, got {s['rays']['method']!r}")
             if "gridSpacing" in s["rays"] and not (isinstance(s["rays"]["gridSpacing"], (int, float)) and s["rays"]["gridSpacing"] > 0):
                 errors.append(f"{where}rays.gridSpacing must be a positive length in metres")
+            if "supersample" in s["rays"] and not (isinstance(s["rays"]["supersample"], int) and 1 <= s["rays"]["supersample"] <= 6):
+                errors.append(f"{where}rays.supersample must be a whole number from 1 to 6")
     if "grid" in s:
         if not isinstance(s["grid"], dict):
             errors.append(f"{where}grid must be a mapping, e.g. {{rLimits: [], zLimits: [], NumR: 10, NumZ: 20}}")

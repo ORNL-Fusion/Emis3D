@@ -147,3 +147,90 @@ def test_build_matrix_command_saves_to_the_cache(tmp_path, capsys):
     G = GeometryMatrix.load(path)
     assert G.cameras == ["POL_A", "SKEW"] and G.rows.shape[0] == 16 and G.samples == 500
     assert "commit" in G.provenance or "emis3d" in str(G.provenance)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: libraries built through the matrix
+# ---------------------------------------------------------------------------
+
+class _Fake:
+    """A stand-in radDist whose emissivity is a step in R: supersampling must average it."""
+
+    TOROIDALLY_UNIFORM = True
+
+    def __init__(self, info):
+        self.info = info
+
+    def calc_emissivity(self, R, Z, phi=None, emissionName=None):
+        return {emissionName: np.where(np.asarray(R) < 1.9, 1.0, 0.0)}
+
+
+def test_supersampling_follows_the_voxel_to_width_ratio(tmp_path):
+    G = synthetic_matrix(tmp_path)                                   # 40 cm x 50 cm voxels
+    assert G.supersampling(_Fake({"sigma_R": 0.5, "sigma_z": 0.5})) == (1, 1)
+    assert G.supersampling(_Fake({"sigma_R": 0.1})) == (3, 1)         # uniform type: none in phi
+    assert G.supersampling(_Fake({"sigma_R": 0.01})) == (4, 1)        # capped
+    assert G.supersampling(_Fake({"supersample": 2})) == (2, 1)
+    assert G.supersampling(_Fake({})) == (1, 1)
+
+
+def test_supersampling_averages_within_a_voxel(tmp_path):
+    G = synthetic_matrix(tmp_path)
+    G.rows = sp.csr_matrix(np.ones((3, G.grid.n_voxels)))             # every voxel is seen
+    G.__post_init__()
+    fake = _Fake({})
+    centre = G.emissivity_on_grid(fake, "e", supersample=(1, 1))
+    averaged = G.emissivity_on_grid(fake, "e", supersample=(4, 1))
+    i = int(np.argmin(np.abs(G.grid.r_centers - 1.9)))                 # the voxel the step falls in
+    sel = G.eps_index(i, 0, np.arange(G.grid.n_z))
+    assert set(np.unique(centre[sel])) <= {0.0, 1.0}
+    assert np.all((averaged[sel] > 0.1) & (averaged[sel] < 0.9))     # a fraction, not a point sample
+
+
+def test_missing_matrix_is_a_clear_error(tmp_path):
+    import yaml
+
+    from emis3d.pipeline import make_raddists
+
+    (tmp_path / "emis3d.yaml").write_text("version: 1\n")
+    (tmp_path / "raddists" / "MOCK").mkdir(parents=True)
+    cfg = {"tokamakName": "MOCK", "shot": 1, "injectionLocation": 225, "rays": {"method": "matrix", "matrix": "nope"},
+           "grid": {"NumR": 2, "NumZ": 2}, "types": {"r": {"distType": "ElongatedRing", "sigma_R": 0.2, "sigma_z": 0.2}}}
+    path = tmp_path / "raddists" / "MOCK" / "raddists.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(FileNotFoundError, match="emis3d build-matrix MOCK --resolution nope"):
+        make_raddists(path, workspace=tmp_path, dry_run=True)
+
+
+@pytest.mark.cherab
+def test_library_built_through_the_matrix(mock_G):
+    import yaml
+
+    from emis3d.pipeline import make_raddists
+    from emis3d.radDistFitting import RadDistFitting
+
+    tmp, ring, G = mock_G
+    ws = Workspace.resolve(workspace=tmp, env={}, user_config=tmp / "none.yaml")
+    G.save(matrix_path(ws, "MOCK", "test"))
+    (tmp / "raddists" / "MOCK").mkdir(parents=True, exist_ok=True)
+    cfg = {"tokamakName": "MOCK", "shot": 1, "folder": "viaG", "injectionLocation": 225, "workers": 1,
+           "rays": {"method": "matrix", "matrix": "test"},
+           "grid": {"rLimits": [1.85, 1.85], "zLimits": [0.1, 0.1], "NumR": 1, "NumZ": 1},
+           "types": {"ring": {"distType": "ElongatedRing", "sigma_R": 0.15, "sigma_z": 0.2, "rotationAngle": 30}}}
+    path = tmp / "raddists" / "MOCK" / "raddists.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    summary = make_raddists(path, workspace=ws)
+    assert summary["built"] == 1 and summary["failed"] == []
+    files = list((tmp / "raddists" / "MOCK" / "viaG" / "ring").rglob("*.json"))
+    assert len(files) == 1
+    manifest = yaml.safe_load((tmp / "raddists" / "MOCK" / "viaG" / "manifest.yaml").read_text())
+    assert manifest["matrices"]["ring"].endswith("test.npz")
+
+    # The saved file loads like any radDist, and holds the matrix's signals
+    rd = RadDistFitting(str(files[0]))
+    assert rd.load_error is None and rd.info["geometryMatrix"]["samples"] == G.samples
+    saved = rd.data["Brightness"]["elongatedRing"]
+    expected = G.observe(ring)["elongatedRing"]
+    for cam in G.cameras:
+        np.testing.assert_allclose([v[0] for v in saved[cam]], expected[cam], rtol=1e-9)
+    assert list(rd.data["Brightness"]["channelOrder"]["POL_A"]) == [c for c, k in zip(G.channels, G.camera_of_row, strict=True) if k == 0]

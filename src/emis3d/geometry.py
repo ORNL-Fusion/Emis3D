@@ -131,15 +131,39 @@ class GeometryMatrix:
             return b * self.etendues / (4.0 * np.pi)
         raise ValueError(f"units must be Power, Radiance or Brightness, got {units!r}")
 
-    def emissivity_on_grid(self, radDist, emissionName: str, only_seen: bool = True) -> np.ndarray:
+    def supersampling(self, radDist) -> tuple[int, int]:
         """
-        A radDist's emissivity at the voxel centres (zero outside the wall),
-        one toroidal plane at a time (every radDist type takes a single
-        angle per call). With only_seen, only the voxels some channel sees
-        are evaluated; the rest are zero.
+        Sub-samples per voxel edge in (R, z) and in phi for a radDist, so a
+        structure narrower than a voxel is averaged over the voxel instead of
+        sampled at its centre: 1 when the voxel is finer than the narrowest
+        width, more (up to 4) as the voxel gets coarser. rays.supersample in
+        the settings fixes it. Toroidally uniform types need none in phi.
+        """
+        fixed = radDist.info.get("supersample")
+        if fixed:
+            n = int(fixed)
+            return n, (1 if radDist.TOROIDALLY_UNIFORM else n)
+        widths = [float(radDist.info[k]) for k in ("sigma_R", "sigma_z", "sigmaKernel", "dR", "dz")
+                  if isinstance(radDist.info.get(k), (int, float)) and radDist.info[k] > 0]
+        if not widths:
+            return 1, 1
+        voxel = max(np.diff(self.grid.r_edges).mean(), np.diff(self.grid.z_edges).mean())
+        n = int(np.clip(np.ceil(voxel / (2.0 * min(widths))), 1, 4))
+        return n, (1 if radDist.TOROIDALLY_UNIFORM else n)
+
+    def emissivity_on_grid(self, radDist, emissionName: str, only_seen: bool = True, supersample=None) -> np.ndarray:
+        """
+        A radDist's emissivity averaged over each voxel (zero outside the
+        wall), evaluated one toroidal plane at a time (every radDist type
+        takes a single angle per call). supersample = (n_rz, n_phi): points
+        per voxel edge (default: supersampling(radDist)). With only_seen,
+        only the voxels some channel sees are evaluated; the rest are zero.
         """
         g = self.grid
+        n_rz, n_ph = supersample if supersample is not None else self.supersampling(radDist)
         eps = np.zeros(g.n_voxels)
+        dR, dz, dphi = np.diff(g.r_edges).mean(), np.diff(g.z_edges).mean(), 2.0 * np.pi / g.n_phi
+        off = lambda n: (np.arange(n) + 0.5) / n - 0.5  # noqa: E731  sub-sample offsets in [-0.5, 0.5)
         RR, ZZ = np.meshgrid(g.r_centers, g.z_centers, indexing="ij")
         for k, phi in enumerate(g.phi_centers):
             idx = self.eps_index(np.arange(g.n_r)[:, None], k, np.arange(g.n_z)[None, :]).ravel()
@@ -148,8 +172,14 @@ class GeometryMatrix:
                 use &= np.isin(idx, self._seen, assume_unique=False)
             if not use.any():
                 continue
-            vals = radDist.calc_emissivity(RR.ravel()[use], ZZ.ravel()[use], phi=np.array([phi]), emissionName=emissionName)[emissionName]
-            eps[idx[use]] = np.asarray(vals, dtype=float)
+            R0, Z0 = RR.ravel()[use], ZZ.ravel()[use]
+            total = np.zeros(R0.size)
+            for a in off(n_rz):
+                for b in off(n_rz):
+                    for c in off(n_ph):
+                        vals = radDist.calc_emissivity(R0 + a * dR, Z0 + b * dz, phi=np.array([phi + c * dphi]), emissionName=emissionName)[emissionName]
+                        total += np.asarray(vals, dtype=float)
+            eps[idx[use]] = total / (n_rz * n_rz * n_ph)
         return eps
 
     def observe(self, radDist, units: str | None = None) -> dict:
@@ -294,7 +324,9 @@ def build_geometry_matrix(tokamak, cameras=None, resolution="medium", samples: i
                 foil.quiet = True
                 foil.observe()
                 row_bins = np.asarray(foil.pipelines[0].matrix, dtype=float)  # per spectral bin [m^3 sr]
-                row = row_bins[bin_of_voxel] / max(float(bolo.etendues[fi]), 1e-300)  # brightness per W/m^3
+                # brightness per W/m^3, with the camera's FOIL_SLIT_ANGLE_FACTOR as bolos_observe applies it
+                factor = float(bolo.info.get("FOIL_SLIT_ANGLE_FACTOR", 1.0))
+                row = factor * row_bins[bin_of_voxel] / max(float(bolo.etendues[fi]), 1e-300)
                 rows.append(sp.csr_matrix(row))
                 channels.append(str(tags[fi]))
                 cam_of_row.append(ci)
@@ -324,3 +356,14 @@ def build_geometry_matrix(tokamak, cameras=None, resolution="medium", samples: i
         samples=int(samples),
         provenance={"built_in": round(time.perf_counter() - t0, 1), "resolution": resolution if isinstance(resolution, str) else "custom"},
     )
+
+
+_LOADED: dict = {}
+
+
+def cached_matrix(path) -> GeometryMatrix:
+    """A matrix loaded once per process (worker processes building many radDists share it)."""
+    key = str(Path(path).resolve())
+    if key not in _LOADED:
+        _LOADED[key] = GeometryMatrix.load(key)
+    return _LOADED[key]

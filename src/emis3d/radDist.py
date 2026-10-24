@@ -250,12 +250,13 @@ class RadDist(ABC):
         (helical, elongated ring, etc.) during startup.
         """
 
-        # self.power_per_bin_calc()
-        # TIMER ADDITION
-        # with phase_timer("build/calc_radiated_power"):
         self.calc_radiated_power()
-        # with phase_timer("build/bolos_observe"):
-        self.bolos_observe()
+        if str(self.info.get("rayMethod", "compiled")).lower() == "matrix":
+            from emis3d.geometry import cached_matrix
+
+            self.observe_with_matrix(cached_matrix(self.info["matrixPath"]))
+        else:
+            self.bolos_observe()
         self._get_observed_phi_loc()
         # with phase_timer("build/saveRadDist"):
         self.saveRadDist()
@@ -541,6 +542,38 @@ class RadDist(ABC):
         if span > self.POLOIDAL_SPAN_DEG:
             return self._evaluate_cherab, "python"  # a skewed camera sees many toroidal angles
         return self._compiled_emission(emissionName, phi), "plane"
+
+    def observe_with_matrix(self, G) -> None:
+        """
+        The cameras' signals from a geometry matrix (emis3d.geometry) instead
+        of ray tracing: one matrix-vector product per emission. Fills
+        self.data exactly as bolos_observe does (one segment per channel,
+        no Monte Carlo error: the matrix's own noise is fixed and shared by
+        every radDist built with it) and records the matrix in self.info.
+        """
+        if G.machine != self.info["tokamakName"]:
+            raise ValueError(f"geometry matrix is for {G.machine}, not {self.info['tokamakName']}")
+        units = self.info["units"]
+        self.data["units"] = {"Power": "Power [W]", "Radiance": "Radiance [W / (m2 sr)]", "Brightness": "Brightness [W / m2]"}[units]
+        self.data[units] = {"channelOrder": {}}
+        self.data[f"{units}_error"] = {}
+        cameras = {b.name: b for b in self.tokamak.bolometers if b.name in G.cameras}
+        missing = [b.name for b in self.tokamak.bolometers if b.name not in G.cameras]
+        if missing:
+            raise ValueError(f"geometry matrix has no rows for camera(s) {missing}; rebuild it with them (emis3d build-matrix)")
+        for emissionName in self.info["emissionNames"]:
+            signals = G.signals(G.emissivity_on_grid(self, emissionName), units)
+            self.data[units][emissionName] = {}
+            self.data[f"{units}_error"][emissionName] = {}
+            for ci, cam in enumerate(G.cameras):
+                if cam not in cameras:
+                    continue
+                vals = signals[G.camera_of_row == ci]
+                tags = [G.channels[k] for k in np.flatnonzero(G.camera_of_row == ci)]
+                self.data[units][emissionName][cam] = [[float(v)] for v in vals]
+                self.data[f"{units}_error"][emissionName][cam] = [[0.0] for _ in vals]
+                self.data[units]["channelOrder"].setdefault(cam, tags)
+        self.info["geometryMatrix"] = {"machine": G.machine, "grid": G.grid.describe(), "samples": G.samples, "path": self.info.get("matrixPath")}
 
     def bolos_observe(self) -> None:
         """

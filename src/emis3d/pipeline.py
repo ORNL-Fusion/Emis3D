@@ -94,8 +94,12 @@ def _plan_lines(lib, plans, root, workers_override) -> list[str]:
             where = "inside the wall" if not g.get("rLimits") else f"R {g['rLimits']}, z {g['zLimits']}"
             lines.append(f"      {len(shapes)} distinct shape(s){dedup} x {info['start_positions']} start position(s) "
                          f"(grid {g['NumR']} x {g['NumZ']}, {where}) = {len(jobs)} radDists")
-        lines.append(f"      rays: {rays['pixelSamples']} per channel, step {rays['integrationStep']} m, {rays['method']} emission; "
-                     f"workers: {workers_override or t.settings.get('workers') or 1}")
+        if rays["method"] == "matrix":
+            lines.append(f"      geometry matrix {rays.get('matrix', 'medium')!r} (no ray tracing); "
+                         f"workers: {workers_override or t.settings.get('workers') or 1}")
+        else:
+            lines.append(f"      rays: {rays['pixelSamples']} per channel, step {rays['integrationStep']} m, {rays['method']} emission; "
+                         f"workers: {workers_override or t.settings.get('workers') or 1}")
     lines.append(f"Total: {sum(len(p[1]) for p in plans)} radDists")
     return lines
 
@@ -182,15 +186,36 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
         "M3DC1": "radDist_M3DC1_parallel",
     }
 
+    # --- Types built through a geometry matrix need it in the cache
+    from emis3d.geometry import matrix_path
+
+    matrices = {}
+    for t in selected:
+        rays = t.settings.get("rays") or {}
+        if rays.get("method") == "matrix":
+            name = str(rays.get("matrix", "medium"))
+            mpath = matrix_path(ws, lib.tokamakName, name)
+            if not mpath.is_file():
+                raise FileNotFoundError(f"types.{t.name}: no geometry matrix {name!r} for {lib.tokamakName} at {mpath}; "
+                                        f"build it with: emis3d build-matrix {lib.tokamakName} --resolution {name}")
+            matrices[t.name] = mpath
+
     plans = []
     for t in selected:
         shapes = lib.shape_sets(t)
+
+        def cfg_for(shape, t=t):
+            cfg = lib.radDist_config(t, shape)
+            if t.name in matrices:
+                cfg["matrixPath"] = str(matrices[t.name])
+            return cfg
+
         if t.is_simulation:
-            jobs = [((shape["sourceFile"], shape["timestep"], lib.radDist_config(t, shape)), shape, None) for shape in shapes]
+            jobs = [((shape["sourceFile"], shape["timestep"], cfg_for(shape)), shape, None) for shape in shapes]
             positions = 1
         else:
             rz = start_positions(lib, t, ws)
-            jobs = [((val, lib.radDist_config(t, shape)), shape, val) for shape in shapes for val in rz]
+            jobs = [((val, cfg_for(shape)), shape, val) for shape in shapes for val in rz]
             positions = len(rz)
         info = {"name": t.name, "distType": t.distType, "shapes": len(shapes), "start_positions": positions,
                 "radDists": len(jobs), "folder": str(root / lib.folder_for(t))}
@@ -238,6 +263,7 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
     summary["seconds"] = time.perf_counter() - start
     manifest = {
         "config": str(path.resolve()),
+        "matrices": {name: str(p) for name, p in matrices.items()},
         "built": summary["types"],
         "failed": summary["failed"],
         "seconds": round(summary["seconds"], 1),
