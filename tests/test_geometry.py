@@ -232,5 +232,95 @@ def test_library_built_through_the_matrix(mock_G):
     saved = rd.data["Brightness"]["elongatedRing"]
     expected = G.observe(ring)["elongatedRing"]
     for cam in G.cameras:
-        np.testing.assert_allclose([v[0] for v in saved[cam]], expected[cam], rtol=1e-9)
+        np.testing.assert_allclose([np.sum(v) for v in saved[cam]], expected[cam], rtol=1e-9)   # segments sum to the signal
     assert list(rd.data["Brightness"]["channelOrder"]["POL_A"]) == [c for c, k in zip(G.channels, G.camera_of_row, strict=True) if k == 0]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: toroidal segments (review issue 18)
+# ---------------------------------------------------------------------------
+
+def test_sector_signals_sum_to_the_channel_signal(tmp_path):
+    G = synthetic_matrix(tmp_path)
+    eps = np.random.default_rng(1).uniform(size=G.grid.n_voxels)
+    P = G.signals_by_sector(eps)
+    assert P.shape == (3, G.grid.n_phi)
+    np.testing.assert_allclose(P.sum(axis=1), G.signals(eps))
+    np.testing.assert_allclose(G.signals_by_sector(eps, "Power").sum(axis=1), G.signals(eps, "Power"))
+    assert set(np.unique(G.sector_of_voxel())) == set(range(G.grid.n_phi))
+
+
+@pytest.mark.cherab
+def test_segments_make_toroidal_scaling_exact_for_skewed_chords(mock_G):
+    import emis3d.util_emis3D as U
+
+    _, ring, G = mock_G
+    ring.info["rayMethod"] = "matrix"
+    ring.observe_with_matrix(G)
+    data, phis = ring.data["Brightness"]["elongatedRing"], ring.data["observed_phi_loc"]["elongatedRing"]
+    assert max(len(v) for v in data["SKEW"]) > 5 and max(len(v) for v in data["POL_A"]) <= 4
+    assert all(len(v) == len(p) for cam in data for v, p in zip(data[cam], phis[cam], strict=True))
+
+    eps = G.emissivity_on_grid(ring, "elongatedRing")
+    mu = np.deg2rad(225.0)
+    f = lambda phi: np.exp(-0.5 * U.find_dphi(np.atleast_1d(phi), mu, "elongatedRing") ** 2)  # noqa: E731
+    exact = G.signals(eps * f(G.grid.phi_centers[G.sector_of_voxel()]))                      # the scale applied per voxel
+    for cam in ("SKEW", "WRAP"):
+        rows = np.flatnonzero(G.camera_of_row == G.cameras.index(cam))
+        by_sector = np.array([np.sum(np.array(v) * f(np.array(p))) for v, p in zip(data[cam], phis[cam], strict=True)])
+        lit = exact[rows] > 0.05 * exact[rows].max()
+        np.testing.assert_allclose(by_sector[lit], exact[rows][lit], rtol=1e-12)
+        cam_phi = np.deg2rad(next(b for b in ring.tokamak.bolometers if b.name == cam).info["CAMERA_POSITION_R_Z_PHI"][2])
+        single = np.array([np.sum(v) for v in data[cam]]) * f(cam_phi)
+        assert np.max(np.abs(single[lit] / exact[rows][lit] - 1)) > 0.1                       # the old approximation is not
+
+
+@pytest.mark.cherab
+def test_fit_through_segmented_raddists_recovers_the_toroidal_decay(mock_G):
+    import h5py
+    import yaml
+
+    import emis3d.util_emis3D as U
+    from emis3d.emis3D import Emis3D
+    from emis3d.pipeline import make_raddists
+
+    tmp, ring, G = mock_G
+    ws = Workspace.resolve(workspace=tmp, env={}, user_config=tmp / "none.yaml")
+    G.save(matrix_path(ws, "MOCK", "seg"))
+    (tmp / "raddists" / "MOCK").mkdir(parents=True, exist_ok=True)
+    cfg = {"tokamakName": "MOCK", "shot": 1, "folder": "seglib", "injectionLocation": 225, "workers": 1,
+           "rays": {"method": "matrix", "matrix": "seg"}, "grid": {"rLimits": [1.85, 1.85], "zLimits": [0.1, 0.1], "NumR": 1, "NumZ": 1},
+           "types": {"ring": {"distType": "ElongatedRing", "sigma_R": [0.15, 0.2], "sigma_z": 0.2, "rotationAngle": 30}}}
+    (tmp / "raddists" / "MOCK" / "seg.yaml").write_text(yaml.safe_dump(cfg))
+    make_raddists(tmp / "raddists" / "MOCK" / "seg.yaml", workspace=ws)
+
+    # data: the sigma_R 0.15 ring with an exponential decay applied per voxel, 2% noise
+    eps = G.emissivity_on_grid(ring, "elongatedRing")
+    f = np.exp(-0.3 * U.find_dphi(G.grid.phi_centers[G.sector_of_voxel()], np.deg2rad(225.0), "elongatedRing") ** 2)
+    truth = G.signals(eps * f)
+    times, rng = np.linspace(9.0, 11.0, 201), np.random.default_rng(0)
+    meas = tmp / "measurements" / "MOCK" / "1"
+    meas.mkdir(parents=True, exist_ok=True)
+    for ci, cam in enumerate(G.cameras):
+        rows = np.flatnonzero(G.camera_of_row == ci)
+        clean = np.repeat(truth[rows][:, None], times.size, axis=1)
+        with h5py.File(meas / f"{cam}.h5", "w") as fh:
+            fh.create_dataset("channelOrder", data=[G.channels[k] for k in rows])
+            fh.create_dataset("TIME", data=times)
+            fh.create_dataset("DATA_CALIBRATED", data=clean * (1 + 0.02 * rng.normal(size=clean.shape)))
+    run = tmp / "runs" / "seg" / "run.yaml"
+    run.parent.mkdir(parents=True, exist_ok=True)
+    run.write_text(yaml.safe_dump({"tokamakName": "MOCK", "shot": 1, "tstart": 10.0, "dt": 0.05, "injectionLocation": 225.0,
+                                   "scale_def": "exponential", "enable_dphi_scaling": True, "error_definition": "floor_relative",
+                                   "radDistDirectories_LocIndependent": ["seglib/ring"],
+                                   "BOLOMETERS": {c: {"dataFileName": f"1/{c}.h5"} for c in G.cameras}}))
+    e = Emis3D(runConfigName=str(run))
+    e._prepare_fits(evalTime=10.0)
+    e._minimize_radDists(evalTime=10.0)
+    best = int(np.argmin(e.fits[10.0]["scores"]))
+    synth = e.fits[10.0][best]["synthetic_dict"]
+    chosen = e.data["synthetic"]["locIndependent"][e.fits[10.0][best]["info"]["radDists"]["radDistNumber"]].info
+    assert chosen["sigma_R"] == 0.15
+    assert e.fits[10.0][best]["fit"].params["b_elongatedRing_225"].value == pytest.approx(0.3, abs=0.03)
+    skew = synth["elongatedRing"]["observed_phi_loc"][G.cameras.index("SKEW")]
+    assert all(len(p) > 1 for p in skew)                                                       # SKEW fits with its sectors

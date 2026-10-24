@@ -184,6 +184,8 @@ class RadDist(ABC):
         }
         """
 
+        if getattr(self, "_phi_loc_from_segments", False):
+            return  # observe_with_matrix stored each segment's own angle
         boloCameras = self.tokamak.bolometers
         observed_phi_loc = {}
         for emissionName in self.info["emissionNames"]:
@@ -547,9 +549,15 @@ class RadDist(ABC):
         """
         The cameras' signals from a geometry matrix (emis3d.geometry) instead
         of ray tracing: one matrix-vector product per emission. Fills
-        self.data exactly as bolos_observe does (one segment per channel,
-        no Monte Carlo error: the matrix's own noise is fixed and shared by
-        every radDist built with it) and records the matrix in self.info.
+        self.data as bolos_observe does, but each channel's signal is split
+        into toroidal segments, one per sector of the grid the chord gets
+        signal from, with the sector's angle in data["observed_phi_loc"]:
+        the fit then applies its toroidal scale per sector and sums, which
+        is exact for the grid however far the chord sweeps toroidally
+        (review issue 18). A chord with no signal keeps one zero segment at
+        the camera's angle. No Monte Carlo errors: the matrix's own noise is
+        fixed and shared by every radDist built with it. Records the matrix
+        in self.info.
         """
         if G.machine != self.info["tokamakName"]:
             raise ValueError(f"geometry matrix is for {G.machine}, not {self.info['tokamakName']}")
@@ -561,18 +569,32 @@ class RadDist(ABC):
         missing = [b.name for b in self.tokamak.bolometers if b.name not in G.cameras]
         if missing:
             raise ValueError(f"geometry matrix has no rows for camera(s) {missing}; rebuild it with them (emis3d build-matrix)")
+        phi_sectors = G.grid.phi_centers
+        self.data["observed_phi_loc"] = {}
         for emissionName in self.info["emissionNames"]:
-            signals = G.signals(G.emissivity_on_grid(self, emissionName), units)
+            P = G.signals_by_sector(G.emissivity_on_grid(self, emissionName), units)  # (channels, sectors)
             self.data[units][emissionName] = {}
             self.data[f"{units}_error"][emissionName] = {}
+            self.data["observed_phi_loc"][emissionName] = {}
             for ci, cam in enumerate(G.cameras):
                 if cam not in cameras:
                     continue
-                vals = signals[G.camera_of_row == ci]
-                tags = [G.channels[k] for k in np.flatnonzero(G.camera_of_row == ci)]
-                self.data[units][emissionName][cam] = [[float(v)] for v in vals]
-                self.data[f"{units}_error"][emissionName][cam] = [[0.0] for _ in vals]
-                self.data[units]["channelOrder"].setdefault(cam, tags)
+                rows = np.flatnonzero(G.camera_of_row == ci)
+                cam_phi = float(np.deg2rad(cameras[cam].info["CAMERA_POSITION_R_Z_PHI"][2])) % (2.0 * np.pi)
+                segs, segs_phi = [], []
+                for k in rows:
+                    lit = np.flatnonzero(P[k] != 0.0)
+                    if lit.size:
+                        segs.append([float(v) for v in P[k, lit]])
+                        segs_phi.append([float(v) for v in phi_sectors[lit]])
+                    else:
+                        segs.append([0.0])
+                        segs_phi.append([cam_phi])
+                self.data[units][emissionName][cam] = segs
+                self.data[f"{units}_error"][emissionName][cam] = [[0.0] * len(s) for s in segs]
+                self.data["observed_phi_loc"][emissionName][cam] = segs_phi
+                self.data[units]["channelOrder"].setdefault(cam, [G.channels[k] for k in rows])
+        self._phi_loc_from_segments = True
         self.info["geometryMatrix"] = {"machine": G.machine, "grid": G.grid.describe(), "samples": G.samples, "path": self.info.get("matrixPath")}
 
     def bolos_observe(self) -> None:

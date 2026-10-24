@@ -182,6 +182,31 @@ class GeometryMatrix:
             eps[idx[use]] = total / (n_rz * n_rz * n_ph)
         return eps
 
+    def sector_of_voxel(self) -> np.ndarray:
+        """The toroidal sector (phi index) of every voxel."""
+        g = self.grid
+        return np.tile(np.repeat(np.arange(g.n_phi), g.n_z), g.n_r)
+
+    def signals_by_sector(self, eps: np.ndarray, units: str = "Brightness") -> np.ndarray:
+        """
+        Every channel's signal split by toroidal sector: an array
+        (channels, n_phi) whose rows sum to signals(eps). A toroidal scale
+        f(phi) applied per sector, sum_k f(phi_k) P[:, k], is then exact for
+        the grid, whatever the chord's toroidal extent.
+        """
+        if not hasattr(self, "_sector_sum"):
+            n = self.grid.n_voxels
+            self._sector_sum = sp.csr_matrix((np.ones(n), (np.arange(n), self.sector_of_voxel())), shape=(n, self.grid.n_phi))
+        contributions = sp.csr_matrix(self.rows.multiply(np.asarray(eps, dtype=float)[None, :]))  # G_ij eps_j
+        P = np.asarray(sp.csr_matrix(contributions @ self._sector_sum).toarray(), dtype=float)
+        if units == "Brightness":
+            return P
+        if units == "Radiance":
+            return P / (4.0 * np.pi)
+        if units == "Power":
+            return P * self.etendues[:, None] / (4.0 * np.pi)
+        raise ValueError(f"units must be Power, Radiance or Brightness, got {units!r}")
+
     def observe(self, radDist, units: str | None = None) -> dict:
         """
         Signals of every emission of a radDist, per camera and channel, as
