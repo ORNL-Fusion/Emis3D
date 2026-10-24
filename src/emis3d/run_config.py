@@ -12,7 +12,7 @@ workspace locations shown by `emis3d paths`.
 from dataclasses import dataclass, field, fields
 
 import numpy as np
-from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS
+from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS, SOLVERS, AMPLITUDE_BOUNDS, DECAY_BOUNDS
 
 
 @dataclass
@@ -56,9 +56,15 @@ class RunConfig:
     # --- Optional blocks
     paths: dict = field(default_factory=dict)  # override workspace locations for this run (see emis3d.workspace)
     uncertainty: dict = field(default_factory=dict)  # TPF and other ranges (see emis3d.uncertainty.UncertaintyConfig)
-    # Fit a model's parameters through geometry matrices instead of a radDist library (emis3d.parametric):
-    # {model: ring|tube|shell, matrices: [low, medium], equilibrium: <g-file>, bounds: {param: [lo, hi]},
-    #  fixed: {param: value}, maxiter, popsize, seed, supersample}
+    # --- How the fit is solved: "library" fits every radDist in the radDistDirectories;
+    # "parametric" fits each model's parameters through geometry matrices (the parametric block)
+    solver: str = "library"
+    # Bounds of the amplitude a (relative to the data's peak) and the toroidal decay b, both
+    # solvers: {a: [lo, hi], b: [lo, hi]}; defaults in emis3d.globals (AMPLITUDE_BOUNDS, DECAY_BOUNDS)
+    bounds: dict = field(default_factory=dict)
+    # The parametric solver (emis3d.parametric): {models: [ring, shell, tube], matrices: [low, medium],
+    #  equilibrium: <g-file>, bounds: {model: {param: [lo, hi]}}, fixed: {model: {param: value}},
+    #  maxiter, popsize, seed, supersample}
     parametric: dict = field(default_factory=dict)
 
     def __post_init__(self):
@@ -99,31 +105,73 @@ class RunConfig:
             raise ValueError(f"tend ({self.tend}) is before tstart ({self.tstart})")
         if self.Nt is not None and (int(self.Nt) != self.Nt or self.Nt < 1):
             raise ValueError(f"Nt must be a whole number >= 1, got {self.Nt}")
-        # --- Parametric fitting needs no radDist library; otherwise directories must be listed
-        if self.parametric:
-            from emis3d.parametric import MODELS
-
-            allowed = {"model", "matrices", "equilibrium", "bounds", "fixed", "maxiter", "popsize", "seed", "supersample"}
-            unknown = sorted(set(self.parametric) - allowed)
-            if unknown:
-                raise ValueError(f"Unknown parametric options {unknown}; the block takes {sorted(allowed)}")
-            model = self.parametric.get("model")
-            if model not in MODELS:
-                raise ValueError(f"parametric.model must be one of {sorted(MODELS)}, got {model!r}")
-            matrices = self.parametric.get("matrices") or ["medium"]
-            if not isinstance(matrices, list) or not all(isinstance(m, str) for m in matrices):
-                raise ValueError("parametric.matrices must be a list of matrix names (coarsest first), e.g. [low, medium]")
-            params = set(MODELS[model]["params"]) | {"b"}
-            for key in ("bounds", "fixed"):
-                bad = sorted(set(self.parametric.get(key) or {}) - params)
-                if bad:
-                    raise ValueError(f"parametric.{key} names parameters {bad} that the {model} model does not have ({sorted(params)})")
-            if model == "shell" and not self.parametric.get("equilibrium"):
-                raise ValueError("parametric.equilibrium (a g-file name) is required for the shell model")
-            if self.scale_def.lower() not in ("constant", "exponential", "linear"):
-                raise ValueError("the parametric fit supports scale_def constant, exponential or linear")
+        # --- The solver, and what it needs
+        if self.solver not in SOLVERS:
+            raise ValueError(f"solver must be one of {SOLVERS}, got {self.solver!r}")
+        self._check_bounds()
+        if self.solver == "parametric":
+            self._check_parametric()
         elif not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
-            raise ValueError("No radDist directories configured (or a parametric block)")
+            raise ValueError("solver: library needs radDistDirectories_LocIndependent or _LocDependent (or use solver: parametric)")
+
+    def _check_bounds(self) -> None:
+        unknown = sorted(set(self.bounds) - {"a", "b"})
+        if unknown:
+            raise ValueError(f"bounds takes a and b, not {unknown} (model parameters go under parametric.bounds)")
+        for k, v in self.bounds.items():
+            if not (isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, (int, float)) for x in v) and v[0] < v[1]):
+                raise ValueError(f"bounds.{k} must be [low, high] with low < high, got {v!r}")
+        if "a" in self.bounds and self.bounds["a"][0] < 0:
+            raise ValueError("bounds.a must not go below 0")
+
+    def amplitude_bounds(self) -> tuple[float, float]:
+        """Bounds of the amplitude a: the config's, else AMPLITUDE_BOUNDS."""
+        return tuple(self.bounds.get("a", AMPLITUDE_BOUNDS))  # type: ignore[return-value]
+
+    def decay_bounds(self) -> tuple[float, float]:
+        """Bounds of the toroidal decay b: the config's, else DECAY_BOUNDS for the scale_def."""
+        default = DECAY_BOUNDS.get(self.scale_def.lower(), DECAY_BOUNDS["exponential"])
+        return tuple(self.bounds.get("b", default))  # type: ignore[return-value]
+
+    def _check_parametric(self) -> None:
+        from emis3d.parametric import MODELS
+
+        p = self.parametric
+        if not p:
+            raise ValueError("solver: parametric needs a parametric block (models, matrices, ...)")
+        allowed = {"models", "matrices", "equilibrium", "bounds", "fixed", "maxiter", "popsize", "seed", "supersample"}
+        unknown = sorted(set(p) - allowed)
+        if unknown:
+            hint = " (use models: [ring], a list)" if "model" in unknown else ""
+            raise ValueError(f"Unknown parametric options {unknown}{hint}; the block takes {sorted(allowed)}")
+        models = p.get("models")
+        if not isinstance(models, list) or not models:
+            raise ValueError(f"parametric.models must be a list of models to fit and compare, from {sorted(MODELS)}")
+        bad = sorted(set(models) - set(MODELS))
+        if bad:
+            raise ValueError(f"parametric.models: unknown model(s) {bad}; choose from {sorted(MODELS)}")
+        matrices = p.get("matrices") or ["medium"]
+        if not isinstance(matrices, list) or not all(isinstance(m, str) for m in matrices):
+            raise ValueError("parametric.matrices must be a list of matrix names (coarsest first), e.g. [low, medium]")
+        for key in ("bounds", "fixed"):
+            block = p.get(key) or {}
+            stray = sorted(set(block) - set(MODELS))
+            if stray:
+                raise ValueError(f"parametric.{key} is per model ({sorted(MODELS)}): {{ring: {{sigma_R: ...}}}}; "
+                                 f"{stray} are not models (a and b go under the top-level bounds)")
+            for model, params in block.items():
+                names = set(MODELS[model]["params"])
+                extra = sorted(set(params or {}) - names)
+                if extra:
+                    raise ValueError(f"parametric.{key}.{model} names {extra}, which the {model} model does not have ({sorted(names)})")
+                if key == "bounds":
+                    for name, v in (params or {}).items():
+                        if not (isinstance(v, (list, tuple)) and len(v) == 2 and v[0] < v[1]):
+                            raise ValueError(f"parametric.bounds.{model}.{name} must be [low, high] with low < high, got {v!r}")
+        if "shell" in models and not p.get("equilibrium"):
+            raise ValueError("parametric.equilibrium (a g-file name) is required for the shell model")
+        if self.scale_def.lower() not in ("constant", "exponential", "linear"):
+            raise ValueError("the parametric solver supports scale_def constant, exponential or linear")
 
     def eval_times(self) -> list[float]:
         """

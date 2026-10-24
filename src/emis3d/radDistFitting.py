@@ -177,11 +177,20 @@ class RadDistFitting:
         vary_peak_rad_location: bool = False,
         scale_def: str = "",
         peak_shift_max_degrees: float = 180.0,
+        a_bounds: tuple | None = None,
+        b_bounds: tuple | None = None,
     ) -> None:
         """
         Creates the LMFIT parameters for the radDist. peak_shift_max_degrees
         limits how far a fitted peak may move from the injector (run config).
+        a_bounds, b_bounds: bounds of the amplitude and the toroidal decay
+        (the run config's `bounds`; defaults in emis3d.globals).
         """
+        from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
+
+        a_lo, a_hi = a_bounds if a_bounds is not None else AMPLITUDE_BOUNDS
+        b_default = DECAY_BOUNDS.get(scale_def.lower(), DECAY_BOUNDS["exponential"])
+        b_lo, b_hi = b_bounds if b_bounds is not None else b_default
         self.fitSynthetic["params"] = {}
         self.fitSynthetic["params"]["paramName"] = []
         params = Parameters()
@@ -191,7 +200,7 @@ class RadDistFitting:
         self.fitSynthetic["params"]["paramName"].append(paramName)
         # Start at 1 (model peak = data peak); allow scaling down for
         # multi-component radDists and up for strong toroidal decay
-        params.add(paramName, value=1.0, min=0.05, max=20.0)
+        params.add(paramName, value=float(np.clip(1.0, a_lo, a_hi)), min=a_lo, max=a_hi)
 
         # --- Create a peak radiation variable if vary_peak_rad_location is True:
         if vary_peak_rad_location:
@@ -205,14 +214,8 @@ class RadDistFitting:
 
         # --- The exponential decay factor for each emission, only do one for helical directions
         for emissionName in self.info["emissionNames"]:
-            paramName = None
-            min_ = 0.0
-            max_ = 10.0
+            min_, max_ = b_lo, b_hi
             paramName = f"b_{emissionName}_{loc_tag(self.info['injectionLocation'])}"
-
-            if scale_def.upper() == "LINEAR":
-                min_ = 0.01
-                max_ = 0.4
 
             # --- Add it to the params pool
             if paramName is not None and paramName not in self.fitSynthetic["params"]["paramName"]:

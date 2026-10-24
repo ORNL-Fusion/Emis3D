@@ -453,8 +453,10 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
         else:
             ok(f"{cam}: {f.name}, {len(chans)} channels, data from {t.min():g} to {t.max():g}")
 
+    ok(f"solver: {cfg.solver}; bounds a {cfg.amplitude_bounds()}, b {cfg.decay_bounds()}")
+
     # --- Parametric fit: its geometry matrices must be in the cache
-    if cfg.parametric:
+    if cfg.solver == "parametric":
         from emis3d.geometry import matrix_path
 
         for name in cfg.parametric.get("matrices") or ["medium"]:
@@ -463,12 +465,12 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
                 ok(f"geometry matrix {name!r}: {mpath}")
             else:
                 err(f"geometry matrix {name!r} not found at {mpath}; build it with: emis3d build-matrix {cfg.tokamakName} --resolution {name}")
-        ok(f"parametric model: {cfg.parametric['model']}")
+        ok(f"parametric models: {', '.join(cfg.parametric['models'])}")
 
-    # --- radDist folders
+    # --- radDist folders (the library solver's)
     base = ws.path("raddists", tokamak=cfg.tokamakName)
-    folders = [(d, "LocIndependent") for d in cfg.radDistDirectories_LocIndependent]
-    folders += [(d, "LocDependent") for d in cfg.radDistDirectories_LocDependent]
+    folders = [(d, "LocIndependent") for d in cfg.radDistDirectories_LocIndependent] if cfg.solver == "library" else []
+    folders += [(d, "LocDependent") for d in cfg.radDistDirectories_LocDependent] if cfg.solver == "library" else []
     for folder, kind in folders:
         p = base / folder
         files = sorted(q for q in p.rglob("*.json")) if p.is_dir() else []

@@ -172,7 +172,7 @@ class Emis3D:
         self._load_config_file(tokamakName=tokamakName, runConfigName=runConfigName)
         self._load_bolometer_data()
         self._create_master_channel_order()
-        if self.config is not None and self.config.parametric:
+        if self.config is not None and self.config.solver == "parametric":
             self.data.setdefault("synthetic", {"locIndependent": {}, "locDependent": {}})  # filled per time by the fit
         else:
             self._load_radDists()
@@ -211,7 +211,7 @@ class Emis3D:
     def _perform_fit(self, evalTime: float, cleanup: bool = False) -> None:
         """Prepare, fit and post-process one evaluation time."""
         t_start = time.time()
-        if self.config is not None and self.config.parametric:
+        if self.config is not None and self.config.solver == "parametric":
             self._fit_parametric(evalTime=evalTime)
         self._prepare_fits(evalTime=evalTime)
         self._minimize_radDists(evalTime=evalTime)
@@ -238,7 +238,7 @@ class Emis3D:
         """
         import emis3d.radDist as radDist_module
         from emis3d.geometry import cached_matrix, matrix_path
-        from emis3d.parametric import MODELS, ParametricFit
+        from emis3d.parametric import MODELS, ParametricFit, comparison_table
         from emis3d.radDistFitting import RadDistFitting
 
         cfg = self.config.parametric
@@ -271,37 +271,53 @@ class Emis3D:
             for tag, v, err in zip(self.channel_order["channel_list"][ii], vals, errs, strict=True):
                 data[tag] = (float(v), float(err))
 
-        spec = MODELS[cfg["model"]]
-        template_cfg = {
-            "distType": spec["distType"], "tokamakName": self.info["tokamakName"], "units": "Brightness",
-            "injectionLocation": float(self.info["injectionLocation"]), "eqFileName": cfg.get("equilibrium"),
-            "saveRunsDirectoryName": "parametric", "rayMethod": "matrix", "matrixPath": str(matrix_path(self.ws, self.info["tokamakName"], names[-1])),
-            "BOLOMETER_PROPS": {"pixelSamples": 1, "seed": 0}, "numBins": 100,
-        }
-        # A starting shape (the middle of each default range), so the template builds
-        start = {k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b}
-        template_cfg.update(start)
-        template_cfg.update(cfg.get("fixed") or {})
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            template = radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
+        # --- Fit every listed model; the best by AIC becomes the candidate
+        results, templates = [], {}
+        for model in cfg["models"]:
+            spec = MODELS[model]
+            template_cfg = {
+                "distType": spec["distType"], "tokamakName": self.info["tokamakName"], "units": "Brightness",
+                "injectionLocation": float(self.info["injectionLocation"]), "eqFileName": cfg.get("equilibrium"),
+                "saveRunsDirectoryName": "parametric", "rayMethod": "matrix", "matrixPath": str(matrix_path(self.ws, self.info["tokamakName"], names[-1])),
+                "BOLOMETER_PROPS": {"pixelSamples": 1, "seed": 0}, "numBins": 100,
+            }
+            # A starting shape (the middle of each default range), so the template builds
+            template_cfg.update({k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b})
+            fixed = (cfg.get("fixed") or {}).get(model) or {}
+            template_cfg.update(fixed)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                template = radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
 
-        fit = ParametricFit(cfg["model"], template, matrices, data, self.info["scale_def"], float(self.info["injectionLocation"]),
-                            bounds=cfg.get("bounds"), fixed=cfg.get("fixed"), supersample=cfg.get("supersample"))
-        logger.info("→ Parametric fit (%s) at t=%s through %s", cfg["model"], evalTime, ", ".join(names))
-        result = fit.search(seed=int(cfg.get("seed", 0)), maxiter=int(cfg.get("maxiter", 60)), popsize=int(cfg.get("popsize", 12)),
-                            progress=lambda text: logger.info(text))
-        logger.info("→ %s", result.summary())
+            fit = ParametricFit(model, template, matrices, data, self.info["scale_def"], float(self.info["injectionLocation"]),
+                                bounds=(cfg.get("bounds") or {}).get(model), fixed=fixed, supersample=cfg.get("supersample"),
+                                a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds())
+            logger.info("→ Parametric fit (%s) at t=%s through %s", model, evalTime, ", ".join(names))
+            result = fit.search(seed=int(cfg.get("seed", 0)), maxiter=int(cfg.get("maxiter", 60)), popsize=int(cfg.get("popsize", 12)),
+                                progress=lambda text: logger.info(text))
+            logger.info("→ %s", result.summary())
+            results.append(result)
+            templates[model] = template
+
+        results.sort(key=lambda r: r.aic)
+        result = results[0]
+        template = templates[result.model]
+        logger.info("→ Models at t=%s, best first:\n%s", evalTime, comparison_table(results))
+        # The best model's template holds its fitted shape (each fit leaves its template at its result)
         if not hasattr(self, "parametric"):
             self.parametric = {}
+        if not hasattr(self, "parametric_models"):
+            self.parametric_models = {}
         self.parametric[evalTime] = result
+        self.parametric_models[evalTime] = results
 
         # --- The fitted shape as the normal pipeline's single candidate
         template.calc_radiated_power()
         template.observe_with_matrix(matrices[-1])
         template._get_observed_phi_loc()
         template.info["radDistFormat"] = RADDIST_FORMAT
-        template.info["parametric"] = {"model": cfg["model"], "values": result.values, "stderr": result.stderr}
+        template.info["parametric"] = {"model": result.model, "values": result.values, "stderr": result.stderr, "at_bounds": result.at_bounds,
+                                       "compared": {r.model: {"aic": r.aic, "chi2": r.chi2} for r in results}}
         candidate = RadDistFitting()
         candidate.info.update(template.info)
         candidate.data = template.data
@@ -744,6 +760,8 @@ class Emis3D:
                         vary_peak_rad_location=self.info["vary_peak_rad_location"],
                         scale_def=self.info["scale_def"],
                         peak_shift_max_degrees=self.info["peak_shift_max_degrees"],
+                        a_bounds=self.config.amplitude_bounds() if self.config else None,
+                        b_bounds=self.config.decay_bounds() if self.config else None,
                     )
                     if "ERROR CHANNELS" in radD.info and print_minor_error:
                         print_error(radD)
@@ -758,6 +776,8 @@ class Emis3D:
                     vary_peak_rad_location=self.info["vary_peak_rad_location"],
                     scale_def=self.info["scale_def"],
                     peak_shift_max_degrees=self.info["peak_shift_max_degrees"],
+                    a_bounds=self.config.amplitude_bounds() if self.config else None,
+                    b_bounds=self.config.decay_bounds() if self.config else None,
                 )
 
                 if "ERROR CHANNELS" in radD.info and print_minor_error:
@@ -1010,8 +1030,20 @@ class Emis3D:
             self.bestFits = {}
 
         self.bestFits[evalTime] = self.fits[evalTime][bestFitID]
+
+        # --- Fitted parameters on their bounds (a, b, peak shift): the shape the fit wants may be out of reach
+        from emis3d.parametric import at_bounds
+
+        fitted = self.bestFits[evalTime]["fit"].params
+        flags = at_bounds({n: fitted[n].value for n in fitted if fitted[n].vary},
+                          {n: (fitted[n].min, fitted[n].max) for n in fitted if fitted[n].vary and np.isfinite(fitted[n].min) and np.isfinite(fitted[n].max)})
+        self.bestFits[evalTime]["at_bounds"] = flags
+        for flag in flags:
+            logger.warning("Best fit at t=%s: %s (widen it in the run config's bounds, or consider other radDists)", evalTime, flag)
         if getattr(self, "parametric", {}).get(evalTime) is not None:
             self.bestFits[evalTime]["parametric"] = self.parametric[evalTime]
+            self.bestFits[evalTime]["parametric_models"] = self.parametric_models[evalTime]
+            self.bestFits[evalTime]["at_bounds"] = list(self.parametric[evalTime].at_bounds)
         self.bestFits[evalTime]["bestFitID"] = bestFitID
 
         # --- First multiply the synthetic data by the fit parameters
@@ -1362,11 +1394,16 @@ class Emis3D:
         path = best.get("radDistInfo", {}).get("radDistPath")
         chosen = Path(path).parent.name + "/" + Path(path).stem if path else best.get("radDistInfo", {}).get("distType", "")
         score = Util_emis3D.fit_score(best["fit"]) if "fit" in best else np.nan
-        return (
+        if "parametric" in best:
+            chosen = f"{best['parametric'].model} model (parametric, {len(best.get('parametric_models', []))} compared)"
+        title = (
             f"{self.info['tokamakName']} {self.info['shot']}   t = {evalTime:g}   best radDist: {chosen}\n"
             f"scale_def: {self.info['scale_def']}   errors: {self.info['error_definition']}   "
             f"fit: {self.info['fit_method']}   AIC = {score:.1f}"
         )
+        if best.get("at_bounds"):
+            title += "\nAT BOUNDS: " + "; ".join(best["at_bounds"])
+        return title
 
     def _raddist_description(self, evalTime: float) -> str:
         """The chosen shape's parameters, from its class's SAVE_KEYS, and its start position."""

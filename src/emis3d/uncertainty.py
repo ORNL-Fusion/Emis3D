@@ -232,10 +232,11 @@ def ensure_covariance(fit, data_dict: dict, synth: dict, scale_def: str, helical
     return fit, "no covariance"
 
 
-def sample_parameters(fit, n: int, rng: np.random.Generator, max_batches: int = 50):
+def sample_parameters(fit, n: int, rng: np.random.Generator):
     """
-    Draw parameter sets from the fit's (redchi-scaled) covariance, truncated to
-    the parameter bounds by rejection. Returns (list of value dicts, flags).
+    Draw parameter sets from the fit's (redchi-scaled) covariance, held within
+    the parameter bounds (draws beyond a bound are placed on it). Returns
+    (list of value dicts, flags).
     """
     base = fit.params.valuesdict()
     flags = set()
@@ -262,21 +263,15 @@ def sample_parameters(fit, n: int, rng: np.random.Generator, max_batches: int = 
     hi = np.array([fit.params[nm].max for nm in names])
     cov = 0.5 * (covar + covar.T)
 
-    accepted = []
-    drawn = 0
-    for _ in range(max_batches):
-        x = rng.multivariate_normal(mean, cov, size=max(n, 64), method="svd")
-        drawn += x.shape[0]
-        ok = np.all((x >= lo) & (x <= hi), axis=1)
-        accepted.extend(x[ok])
-        if len(accepted) >= n:
-            break
-    if len(accepted) < n:
-        flags.add("bounds truncate the covariance strongly; remaining samples clipped")
-        x = np.clip(rng.multivariate_normal(mean, cov, size=n - len(accepted), method="svd"), lo, hi)
-        accepted.extend(x)
-    if drawn and len(accepted) / drawn < 0.5:
-        flags.add(f"{100 * (1 - min(1.0, len(accepted) / drawn)):.0f}% of draws fell outside bounds")
+    # Draws beyond a bound are moved onto it (clipped), not rejected: a bound is a
+    # hard limit, so the probability beyond it belongs on it. Rejecting them made
+    # the range of a parameter sitting on a bound one-sided, so the range could
+    # miss the best fit itself (a TPF of 1.00 with a "68% range" of 1.02-1.13).
+    x = rng.multivariate_normal(mean, cov, size=n, method="svd")
+    outside = np.any((x < lo) | (x > hi), axis=1)
+    if outside.mean() > 0.25:
+        flags.add(f"{100 * outside.mean():.0f}% of draws reached a bound and were held on it")
+    accepted = list(np.clip(x, lo, hi))
 
     # Set the varied parameters on a copy so lmfit recomputes the derived ones
     # (peak_rad_loc = (injector_phi + peak_shift) % 2pi), which would otherwise

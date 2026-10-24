@@ -220,6 +220,12 @@ def cmd_run(args) -> int:
         if tpf:
             line += f" (68%: {tpf['68%'][0]:.3f}-{tpf['68%'][1]:.3f})"
         print(line)
+        if best.get("parametric_models"):
+            from emis3d.parametric import comparison_table
+
+            print("  " + comparison_table(best["parametric_models"]).replace("\n", "\n  "))
+        elif best.get("at_bounds"):
+            print("  ! at bounds: " + "; ".join(best["at_bounds"]))
     print(f"Results in {e._results_dir()}")
     return 0
 

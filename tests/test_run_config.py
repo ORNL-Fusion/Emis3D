@@ -34,7 +34,7 @@ def test_defaults_are_filled_in():
         ({"scale_def": "liner"}, "scale_def"),
         ({"error_definition": "gaussian"}, "error_definition"),
         ({"dtt": 1.0}, "Unknown run-config keys"),
-        ({"radDistDirectories_LocIndependent": []}, "No radDist directories"),
+        ({"radDistDirectories_LocIndependent": []}, "solver: library needs"),
     ],
 )
 def test_bad_configs_are_rejected(change, match):

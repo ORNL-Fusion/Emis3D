@@ -183,7 +183,10 @@ def test_flags_parameter_at_bound():
     cand = prepared_candidate(fake_raddist(), dd)
     res = U.propagate([cand], dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=200))
     assert any("at lower bound" in f for f in res.flags.get(0, []))
-    assert res.summary("statistical")["tpf"]["68%"][0] >= 1.0
+    lo, hi = res.summary("statistical")["tpf"]["68%"]
+    assert lo >= 1.0 - 1e-9                                                     # b >= 0 cannot make the TPF below 1
+    best_tpf = U.derived_quantities(cand[1].params.valuesdict(), cand[2], "exponential", None)[0]["tpf"]
+    assert lo - 1e-9 <= best_tpf <= hi                                          # the range contains the best fit (b on its bound)
 
 
 def test_differential_evolution_fit_gets_covariance():

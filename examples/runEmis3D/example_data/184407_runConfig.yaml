@@ -1,6 +1,15 @@
 # Config file for a basic Emis3D run
 
 # List of folder(s) containing radDists that are independent of injection location
+# How the fit is solved: library (the radDist folders below) or parametric (a parametric:
+# block fitting models through geometry matrices; see the JET example in the docs)
+solver: library
+
+# Bounds of the amplitude a (relative to the data's peak) and the toroidal decay b, both solvers
+bounds:
+  a: [0.05, 20.0]
+  b: [0.0, 10.0]
+
 radDistDirectories_LocIndependent: ['elongatedRing']
 
 # List of folder(s) containing radDists that are dependent of injection location

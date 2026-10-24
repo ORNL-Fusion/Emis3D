@@ -31,18 +31,39 @@ import emis3d.util_emis3D as Util_emis3D
 
 logger = logging.getLogger(__name__)
 
-# Model name -> radDist type and its free parameters with default bounds
-# (None: from the vessel's extent, set in ParametricFit)
+# Model name -> radDist type and its free parameters with default bounds (None:
+# from the vessel's extent, set in ParametricFit). The run config's
+# parametric.bounds.<model> overrides any of them. A ring's tilt covers 0-90
+# degrees: with both widths free, that is every orientation once (sigma_R,
+# sigma_z, tilt) and (sigma_z, sigma_R, tilt + 90) are the same ellipse.
 MODELS = {
     "ring": {"distType": "ElongatedRing", "emission": "elongatedRing",
-             "params": {"startR": None, "startZ": None, "sigma_R": (0.03, 0.8), "sigma_z": (0.03, 1.0), "rotationAngle": (0.0, 180.0)}},
+             "params": {"startR": None, "startZ": None, "sigma_R": (0.03, 1.5), "sigma_z": (0.03, 1.5), "rotationAngle": (0.0, 90.0)}},
     "tube": {"distType": "SquareTube", "emission": "squareTube",
-             "params": {"startR": None, "startZ": None, "dR": (0.02, 0.8), "dz": (0.02, 1.0)}},
+             "params": {"startR": None, "startZ": None, "dR": (0.02, 1.0), "dz": (0.02, 1.5)}},
     "shell": {"distType": "FluxShell", "emission": "fluxShell",
               "params": {"psi_center": (0.1, 1.15), "psi_width": (0.02, 0.5)}},
 }
-# Toroidal decay bounds per scale_def (as RadDistFitting.create_parameters uses)
-DECAY_BOUNDS = {"exponential": (0.0, 10.0), "linear": (0.0, 5.0)}
+SCALE_DEFS = ("constant", "exponential", "linear")
+
+
+def at_bounds(values: dict, bounds: dict, rel_tol: float = 1e-3) -> list[str]:
+    """
+    Parameters whose fitted value sits on a bound (within rel_tol of the
+    range): e.g. ["sigma_R at its upper bound 1.5"]. A fit pushing against a
+    bound usually wants a shape the model cannot take: widen the bound, or
+    try another model.
+    """
+    flags = []
+    for name, (lo, hi) in bounds.items():
+        if name not in values:
+            continue
+        tol = rel_tol * (hi - lo)
+        if values[name] - lo <= tol:
+            flags.append(f"{name} at its lower bound {lo:g}")
+        elif hi - values[name] <= tol:
+            flags.append(f"{name} at its upper bound {hi:g}")
+    return flags
 
 
 @dataclass
@@ -55,10 +76,27 @@ class ParametricResult:
     aic: float
     stages: list = field(default_factory=list)  # one record per stage: matrix, evaluations, chi2, seconds
     fit: object = None  # lmfit result of the final stage
+    n_params: int = 0  # fitted parameters, the amplitude included
+    at_bounds: list = field(default_factory=list)  # e.g. ["b at its lower bound 0"]
+    amplitude: float = float("nan")  # the absolute amplitude (a is relative to the data's peak)
 
     def summary(self) -> str:
         parts = [f"{k} {v:.4g}" + (f" +- {self.stderr[k]:.2g}" if self.stderr.get(k) else "") for k, v in self.values.items()]
-        return f"{self.model}: " + ", ".join(parts) + f" | chi2/N {self.chi2 / max(self.n_data, 1):.2f}"
+        text = f"{self.model}: " + ", ".join(parts) + f" | chi2/N {self.chi2 / max(self.n_data, 1):.2f}"
+        return text + (f" | AT BOUNDS: {'; '.join(self.at_bounds)}" if self.at_bounds else "")
+
+
+def comparison_table(results: list) -> str:
+    """The fitted models, best (lowest AIC) first: chi2/N, AIC, delta AIC, parameters, flags."""
+    ranked = sorted(results, key=lambda r: r.aic)
+    best = ranked[0].aic if ranked else 0.0
+    lines = [f"{'model':7s} {'chi2/N':>7s} {'AIC':>9s} {'dAIC':>7s} {'k':>3s}  parameters"]
+    for r in ranked:
+        params = ", ".join(f"{k} {v:.3g}" for k, v in r.values.items())
+        lines.append(f"{r.model:7s} {r.chi2 / max(r.n_data, 1):7.2f} {r.aic:9.1f} {r.aic - best:7.1f} {r.n_params:3d}  {params}")
+        if r.at_bounds:
+            lines.append(f"{'':7s} {'':>7s} {'':>9s} {'':>7s} {'':>3s}  ! at bounds: {'; '.join(r.at_bounds)}")
+    return "\n".join(lines)
 
 
 class ParametricFit:
@@ -68,14 +106,21 @@ class ParametricFit:
     matrices   : GeometryMatrix objects, coarsest first (one is fine)
     data       : {channel tag: (value, sigma)} in the matrix's units; sigma inf excludes a channel
     scale_def  : "constant", "exponential" or "linear"
-    bounds     : {parameter: (low, high)} overriding the defaults; fixed: {parameter: value}
+    bounds     : {parameter: (low, high)} for the model's parameters, overriding MODELS
+    fixed      : {parameter: value}
+    a_bounds   : bounds of the amplitude, relative to the data's peak (1: the model's
+                 peak equals the data's); default emis3d.globals.AMPLITUDE_BOUNDS
+    b_bounds   : bounds of the toroidal decay; default DECAY_BOUNDS for the scale_def
     """
 
     def __init__(self, model: str, template, matrices: list, data: dict, scale_def: str, injection_deg: float,
-                 bounds: dict | None = None, fixed: dict | None = None, supersample=None):
+                 bounds: dict | None = None, fixed: dict | None = None, supersample=None,
+                 a_bounds: tuple | None = None, b_bounds: tuple | None = None):
+        from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
+
         if model not in MODELS:
             raise ValueError(f"unknown model {model!r}; choose from {sorted(MODELS)}")
-        if scale_def not in ("constant", *DECAY_BOUNDS):
+        if scale_def not in SCALE_DEFS:
             raise ValueError(f"the parametric fit supports scale_def constant, exponential or linear, not {scale_def!r}")
         self.model, self.spec, self.template = model, MODELS[model], template
         self.matrices = list(matrices)
@@ -93,7 +138,8 @@ class ParametricFit:
             self.bounds[name] = tuple((bounds or {}).get(name) or b or defaults[name])
         self.has_decay = scale_def in DECAY_BOUNDS
         if self.has_decay:
-            self.bounds["b"] = tuple((bounds or {}).get("b") or DECAY_BOUNDS[scale_def])
+            self.bounds["b"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS[scale_def])
+        self.a_bounds = tuple(a_bounds if a_bounds is not None else AMPLITUDE_BOUNDS)
         self.names = list(self.bounds)  # search order
 
         # --- Data aligned with each matrix's rows
@@ -136,14 +182,26 @@ class ParametricFit:
         self.evaluations += 1
         return P @ self._toroidal(G, values.get("b", 0.0))
 
+    def _scale_ref(self, d: np.ndarray, m: np.ndarray) -> float:
+        """Absolute amplitude for a = 1: the model's peak scaled to the data's peak."""
+        peak_m = float(np.max(np.abs(m))) if m.size else 0.0
+        peak_d = float(np.max(np.abs(d))) if d.size else 0.0
+        return peak_d / peak_m if peak_m > 0 and peak_d > 0 else 1.0
+
     def chi2(self, G, values: dict) -> tuple[float, float]:
-        """(chi2, a): the amplitude solved in closed form (non-negative)."""
+        """
+        (chi2, a): the amplitude solved in closed form, then held within its
+        bounds (a is relative to the data's peak; for a one-parameter
+        quadratic, clipping gives the bounded optimum exactly).
+        """
         _, d, sig = self._rows[id(G)]
         m = self.model_signals(G, values)
         w = 1.0 / sig**2
+        ref = self._scale_ref(d, m)
         denom = float(np.sum(w * m * m))
-        a = max(float(np.sum(w * d * m)) / denom, 0.0) if denom > 0 else 0.0
-        return float(np.sum(w * (d - a * m) ** 2)), a
+        a_abs = float(np.sum(w * d * m)) / denom if denom > 0 else 0.0
+        a = float(np.clip(a_abs / ref, self.a_bounds[0], self.a_bounds[1]))
+        return float(np.sum(w * (d - a * ref * m) ** 2)), a
 
     # ------------------------------------------------------------------
     def search(self, seed: int = 0, maxiter: int = 60, popsize: int = 12, tol: float = 1e-3, progress=None) -> ParametricResult:
@@ -175,11 +233,12 @@ class ParametricFit:
         for n in self.names:
             pars.add(n, value=float(np.clip(best[n], lo[self.names.index(n)], hi[self.names.index(n)])), min=self.bounds[n][0], max=self.bounds[n][1])
         _, a_start = self.chi2(G1, best)
-        pars.add("a", value=max(a_start, 1e-12), min=0.0)
+        pars.add("a", value=float(np.clip(a_start, self.a_bounds[0], self.a_bounds[1])), min=self.a_bounds[0], max=self.a_bounds[1])
 
         def residual(p):
             vals = {n: p[n].value for n in self.names}
-            return (d - p["a"].value * self.model_signals(G1, vals)) / sig
+            m = self.model_signals(G1, vals)
+            return (d - p["a"].value * self._scale_ref(d, m) * m) / sig
 
         fit = minimize(residual, pars, method="least_squares")
         fitted = cast(Any, fit).params
@@ -189,6 +248,11 @@ class ParametricFit:
         stages.append({"matrix": G1.grid.describe(), "evaluations": self.evaluations, "chi2": chi2_1, "seconds": round(time.perf_counter() - t0, 1)})
         say(f"  polish ({G1.grid.describe()}): chi2/N {chi2_1 / max(self.n_data, 1):.2f} after {self.evaluations} evaluations, "
             f"{time.perf_counter() - t0:.0f} s")
+        flags = at_bounds(values, {**self.bounds, "a": self.a_bounds})
+        for flag in flags:
+            logger.warning("%s fit: %s (widen the bound, or consider another model)", self.model, flag)
+        amplitude = values["a"] * self._scale_ref(d, self.model_signals(G1, {n: values[n] for n in self.names}))
         self._apply(values)
         return ParametricResult(model=self.model, values=values, stderr=stderr, chi2=chi2_1, n_data=len(d),
-                                aic=float(fit.aic), stages=stages, fit=fit)
+                                aic=float(fit.aic), stages=stages, fit=fit, n_params=len(self.names) + 1,
+                                at_bounds=flags, amplitude=float(amplitude))
