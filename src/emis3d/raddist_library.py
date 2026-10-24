@@ -60,11 +60,12 @@ TYPES = {
     "Helical": {"required": ("sigma_R", "sigmaKernel", "numFieldLines"), "optional": {"numTransits": 1}},
     "HelicalRing": {"required": ("sigma_R", "sigma_z"), "optional": {"numTransits": 1}},
     "SquareTube": {"required": ("dR", "dz"), "optional": {}},
+    "FluxShell": {"required": ("psi_center", "psi_width"), "optional": {"psi_max": 1.2}},
     "NIMROD": {"required": ("files", "timesteps"), "optional": {}},
     "M3DC1": {"required": ("files", "timesteps"), "optional": {}},
 }
 SIMULATION_TYPES = ("NIMROD", "M3DC1")
-NEEDS_EQUILIBRIUM = ("Helical", "HelicalRing")
+NEEDS_EQUILIBRIUM = ("Helical", "HelicalRing", "FluxShell")
 
 # Names the radDist classes use for some settings
 CLASS_NAMES = {"numTransits": "numTransists"}

@@ -56,6 +56,10 @@ class RunConfig:
     # --- Optional blocks
     paths: dict = field(default_factory=dict)  # override workspace locations for this run (see emis3d.workspace)
     uncertainty: dict = field(default_factory=dict)  # TPF and other ranges (see emis3d.uncertainty.UncertaintyConfig)
+    # Fit a model's parameters through geometry matrices instead of a radDist library (emis3d.parametric):
+    # {model: ring|tube|shell, matrices: [low, medium], equilibrium: <g-file>, bounds: {param: [lo, hi]},
+    #  fixed: {param: value}, maxiter, popsize, seed, supersample}
+    parametric: dict = field(default_factory=dict)
 
     def __post_init__(self):
         # Check for valid scale definitions
@@ -95,9 +99,31 @@ class RunConfig:
             raise ValueError(f"tend ({self.tend}) is before tstart ({self.tstart})")
         if self.Nt is not None and (int(self.Nt) != self.Nt or self.Nt < 1):
             raise ValueError(f"Nt must be a whole number >= 1, got {self.Nt}")
-        # Check if the radDist directories are listed
-        if not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
-            raise ValueError("No radDist directories configured")
+        # --- Parametric fitting needs no radDist library; otherwise directories must be listed
+        if self.parametric:
+            from emis3d.parametric import MODELS
+
+            allowed = {"model", "matrices", "equilibrium", "bounds", "fixed", "maxiter", "popsize", "seed", "supersample"}
+            unknown = sorted(set(self.parametric) - allowed)
+            if unknown:
+                raise ValueError(f"Unknown parametric options {unknown}; the block takes {sorted(allowed)}")
+            model = self.parametric.get("model")
+            if model not in MODELS:
+                raise ValueError(f"parametric.model must be one of {sorted(MODELS)}, got {model!r}")
+            matrices = self.parametric.get("matrices") or ["medium"]
+            if not isinstance(matrices, list) or not all(isinstance(m, str) for m in matrices):
+                raise ValueError("parametric.matrices must be a list of matrix names (coarsest first), e.g. [low, medium]")
+            params = set(MODELS[model]["params"]) | {"b"}
+            for key in ("bounds", "fixed"):
+                bad = sorted(set(self.parametric.get(key) or {}) - params)
+                if bad:
+                    raise ValueError(f"parametric.{key} names parameters {bad} that the {model} model does not have ({sorted(params)})")
+            if model == "shell" and not self.parametric.get("equilibrium"):
+                raise ValueError("parametric.equilibrium (a g-file name) is required for the shell model")
+            if self.scale_def.lower() not in ("constant", "exponential", "linear"):
+                raise ValueError("the parametric fit supports scale_def constant, exponential or linear")
+        elif not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):
+            raise ValueError("No radDist directories configured (or a parametric block)")
 
     def eval_times(self) -> list[float]:
         """

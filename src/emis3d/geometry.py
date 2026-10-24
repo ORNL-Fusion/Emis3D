@@ -165,6 +165,33 @@ class GeometryMatrix:
         dR, dz, dphi = np.diff(g.r_edges).mean(), np.diff(g.z_edges).mean(), 2.0 * np.pi / g.n_phi
         off = lambda n: (np.arange(n) + 0.5) / n - 0.5  # noqa: E731  sub-sample offsets in [-0.5, 0.5)
         RR, ZZ = np.meshgrid(g.r_centers, g.z_centers, indexing="ij")
+
+        if getattr(radDist, "TOROIDALLY_UNIFORM", False):
+            # One poloidal plane serves every sector: evaluate the (R, z) cells any
+            # sector sees, then place the values in each sector
+            plane = np.zeros((g.n_r, g.n_z))
+            seen_rz = np.zeros((g.n_r, g.n_z), bool)
+            if only_seen:
+                i_r, rem = np.divmod(self._seen, g.n_phi * g.n_z)
+                seen_rz[i_r, rem % g.n_z] = True
+            else:
+                seen_rz[:] = True
+            use = seen_rz & self.inside_wall.reshape(g.n_r, g.n_phi, g.n_z)[:, 0, :]
+            R0, Z0 = RR[use], ZZ[use]
+            total = np.zeros(R0.size)
+            for a in off(n_rz):
+                for b in off(n_rz):
+                    vals = radDist.calc_emissivity(R0 + a * dR, Z0 + b * dz, phi=np.array([0.0]), emissionName=emissionName)[emissionName]
+                    total += np.asarray(vals, dtype=float)
+            plane[use] = total / (n_rz * n_rz)
+            eps = np.repeat(plane[:, None, :], g.n_phi, axis=1).ravel()
+            eps[~self.inside_wall] = 0.0
+            if only_seen:
+                mask = np.zeros(g.n_voxels, bool)
+                mask[self._seen] = True
+                eps[~mask] = 0.0
+            return eps
+
         for k, phi in enumerate(g.phi_centers):
             idx = self.eps_index(np.arange(g.n_r)[:, None], k, np.arange(g.n_z)[None, :]).ravel()
             use = self.inside_wall[idx]

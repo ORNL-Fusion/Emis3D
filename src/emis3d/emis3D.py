@@ -90,6 +90,7 @@ from lmfit import report_fit
 import emis3d.util_emis3D as Util_emis3D
 import emis3d.uncertainty as uncertainty
 import emis3d.radDist as radDist_module
+from emis3d.globals import RADDIST_FORMAT
 
 logger = logging.getLogger(__name__)
 from dataclasses import asdict
@@ -171,8 +172,11 @@ class Emis3D:
         self._load_config_file(tokamakName=tokamakName, runConfigName=runConfigName)
         self._load_bolometer_data()
         self._create_master_channel_order()
-        self._load_radDists()
-        self._prune_channel_order_to_radDists()
+        if self.config is not None and self.config.parametric:
+            self.data.setdefault("synthetic", {"locIndependent": {}, "locDependent": {}})  # filled per time by the fit
+        else:
+            self._load_radDists()
+            self._prune_channel_order_to_radDists()
 
     def eval_times(self) -> list[float]:
         """Evaluation times from the run config's tstart, tend and Nt (RunConfig.eval_times)."""
@@ -207,6 +211,8 @@ class Emis3D:
     def _perform_fit(self, evalTime: float, cleanup: bool = False) -> None:
         """Prepare, fit and post-process one evaluation time."""
         t_start = time.time()
+        if self.config is not None and self.config.parametric:
+            self._fit_parametric(evalTime=evalTime)
         self._prepare_fits(evalTime=evalTime)
         self._minimize_radDists(evalTime=evalTime)
         logger.info(f"→ Fitting done in {time.time() - t_start:.2f} seconds")
@@ -220,6 +226,77 @@ class Emis3D:
 
         if cleanup:
             self._cleanup_fits(evalTime=evalTime)
+
+    def _fit_parametric(self, evalTime: float) -> None:
+        """
+        Fit the run config's parametric model (emis3d.parametric) to the data
+        at evalTime through the geometry matrices, then make the fitted
+        shape the single candidate for the normal pipeline (observed through
+        the finest matrix), so the profile, TPF, ranges, figures and saving
+        work as for a library fit. The fit itself is kept in
+        self.parametric[evalTime] and copied into bestFits later.
+        """
+        import emis3d.radDist as radDist_module
+        from emis3d.geometry import cached_matrix, matrix_path
+        from emis3d.parametric import MODELS, ParametricFit
+        from emis3d.radDistFitting import RadDistFitting
+
+        cfg = self.config.parametric
+        names = cfg.get("matrices") or ["medium"]
+        matrices = []
+        for name in names:
+            path = matrix_path(self.ws, self.info["tokamakName"], name)
+            if not path.is_file():
+                raise FileNotFoundError(f"no geometry matrix {name!r} for {self.info['tokamakName']} at {path}; "
+                                        f"build it with: emis3d build-matrix {self.info['tokamakName']} --resolution {name}")
+            matrices.append(cached_matrix(path))
+
+        self._check_time_in_data(evalTime)
+        self._prepare_data_for_fit(evalTime=evalTime)
+        data = {}
+        for ii, bolo in enumerate(self.channel_order["bolometer_order"]):
+            vals = self.fitData[evalTime]["boloData"][bolo]
+            errs = self.fitData[evalTime]["boloData_error"][bolo]
+            for tag, v, err in zip(self.channel_order["channel_list"][ii], vals, errs, strict=True):
+                data[tag] = (float(v), float(err))
+
+        spec = MODELS[cfg["model"]]
+        template_cfg = {
+            "distType": spec["distType"], "tokamakName": self.info["tokamakName"], "units": "Brightness",
+            "injectionLocation": float(self.info["injectionLocation"]), "eqFileName": cfg.get("equilibrium"),
+            "saveRunsDirectoryName": "parametric", "rayMethod": "matrix", "matrixPath": str(matrix_path(self.ws, self.info["tokamakName"], names[-1])),
+            "BOLOMETER_PROPS": {"pixelSamples": 1, "seed": 0}, "numBins": 100,
+        }
+        # A starting shape (the middle of each default range), so the template builds
+        start = {k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b}
+        template_cfg.update(start)
+        template_cfg.update(cfg.get("fixed") or {})
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            template = radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
+
+        fit = ParametricFit(cfg["model"], template, matrices, data, self.info["scale_def"], float(self.info["injectionLocation"]),
+                            bounds=cfg.get("bounds"), fixed=cfg.get("fixed"), supersample=cfg.get("supersample"))
+        logger.info("→ Parametric fit (%s) at t=%s through %s", cfg["model"], evalTime, ", ".join(names))
+        result = fit.search(seed=int(cfg.get("seed", 0)), maxiter=int(cfg.get("maxiter", 60)), popsize=int(cfg.get("popsize", 12)),
+                            progress=lambda text: logger.info(text))
+        logger.info("→ %s", result.summary())
+        if not hasattr(self, "parametric"):
+            self.parametric = {}
+        self.parametric[evalTime] = result
+
+        # --- The fitted shape as the normal pipeline's single candidate
+        template.calc_radiated_power()
+        template.observe_with_matrix(matrices[-1])
+        template._get_observed_phi_loc()
+        template.info["radDistFormat"] = RADDIST_FORMAT
+        template.info["parametric"] = {"model": cfg["model"], "values": result.values, "stderr": result.stderr}
+        candidate = RadDistFitting()
+        candidate.info.update(template.info)
+        candidate.data = template.data
+        candidate._load_ok = True
+        candidate._map_signals()
+        self.data["synthetic"] = {"locIndependent": {0: candidate}, "locDependent": {}}
 
     # ------------------------------------------------------------------
     # Configuration / data loading
@@ -914,6 +991,8 @@ class Emis3D:
             self.bestFits = {}
 
         self.bestFits[evalTime] = self.fits[evalTime][bestFitID]
+        if getattr(self, "parametric", {}).get(evalTime) is not None:
+            self.bestFits[evalTime]["parametric"] = self.parametric[evalTime]
         self.bestFits[evalTime]["bestFitID"] = bestFitID
 
         # --- First multiply the synthetic data by the fit parameters

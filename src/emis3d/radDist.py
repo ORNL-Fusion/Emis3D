@@ -1666,6 +1666,70 @@ class SquareTube(RadDist):
         return [[float(phi)] for _ in range(numChan)]
 
 
+class FluxShell(RadDist):
+    """
+    Emission in a shell of flux surfaces: a Gaussian in normalized flux
+    psi_N, centred on psi_center with width psi_width, toroidally uniform
+    (the fit applies the toroidal shape). A radiating edge mantle is
+    psi_center near 1; a hollow profile is a shell. Emission is cut off
+    beyond psi_max (default 1.2) and outside the wall. Needs an equilibrium
+    (eqFileName) for psi_N.
+    """
+
+    SAVE_KEYS = (("psi_center", "psi"), ("psi_width", "width"))
+    TOROIDALLY_UNIFORM = True
+
+    def __init__(self, startR=None, startZ=None, config=None):
+        config = {} if config is None else config
+        super().__init__(startR=float(config.get("startR", 0.0) if startR is None else startR),
+                         startZ=float(config.get("startZ", 0.0) if startZ is None else startZ), config=config)
+        self.info["distType"] = "fluxShell"
+        self.info["emissionNames"] = ["fluxShell"]
+        self.info.setdefault("psi_max", 1.2)
+        if "psi_center" in self.info:
+            if not self.info.get("eqFileName"):
+                raise ValueError("FluxShell needs an equilibrium (eqFileName) for the normalized flux")
+            self._build_tokamak(tokamakName=self.info["tokamakName"], mode="Build", reflections=False, eqFileName=self.info["eqFileName"])
+            if self.tokamak.gfile is None:
+                raise RuntimeError(f"equilibrium {self.info['eqFileName']} did not load for {self.info['tokamakName']}")
+            # The axis is the natural start position (used in save names and plots)
+            self.info["startR"], self.info["startZ"] = float(self.tokamak.gfile.rmagx), float(self.tokamak.gfile.zmagx)
+            logger.info("→ Building FluxShell radDist at psi_N %.3f, width %.3f", self.info["psi_center"], self.info["psi_width"])
+
+    def psi_norm(self, R, z) -> np.ndarray:
+        """Normalized flux at (R, z); large outside the equilibrium's grid (no emission there)."""
+        if not hasattr(self, "_psi_interp"):
+            from scipy.interpolate import RegularGridInterpolator
+
+            g = self.tokamak.gfile
+            if g is None:
+                raise RuntimeError("FluxShell needs a loaded equilibrium")
+            Rg = np.linspace(g.rleft, g.rleft + g.rdim, g.nx)
+            Zg = np.linspace(g.zmid - g.zdim / 2, g.zmid + g.zdim / 2, g.ny)
+            psin = (np.asarray(g.psi, dtype=float) - g.simagx) / (g.sibdry - g.simagx)
+            self._psi_interp = RegularGridInterpolator((Rg, Zg), psin, bounds_error=False, fill_value=1e6)
+        pts = np.column_stack([np.ravel(R), np.ravel(z)])
+        return np.asarray(self._psi_interp(pts), dtype=float)
+
+    def _evaluate(self, R, z, phi, emissionName=None):
+        if emissionName is None:
+            emissionName = self.emissionName
+        psin = self.psi_norm(R, z)
+        c, w = float(self.info["psi_center"]), float(self.info["psi_width"])
+        emis = np.exp(-0.5 * ((psin - c) / w) ** 2)
+        emis[psin > float(self.info["psi_max"])] = 0.0
+        return {emissionName: emis}
+
+    def _scaling_factor(self, bolo_info=None, emissionName=None):
+        return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
+
+    def _observed_phi_loc(self, bolo_info=None, emissionName=None):
+        if not bolo_info:
+            return []
+        phi = float(np.deg2rad(bolo_info["CAMERA_POSITION_R_Z_PHI"][2])) % (2.0 * np.pi)
+        return [[phi] for _ in bolo_info["CHANNEL_TAGS"]]
+
+
 class SimulationRadDist(RadDist):
     """
     Emissivity from one timestep of a 3-D simulation, on a regular (R, z, phi)
@@ -1882,7 +1946,7 @@ def from_info(info: dict) -> "RadDist":
     if kind in ("nimrod", "m3dc1"):
         cls = NIMROD if kind == "nimrod" else M3DC1
         return cls(config["sourceFile"], config["timestep"], config=config)
-    classes = {"elongatedring": ElongatedRing, "squaretube": SquareTube, "helical": Helical, "helicalring": HelicalRing}
+    classes = {"elongatedring": ElongatedRing, "squaretube": SquareTube, "helical": Helical, "helicalring": HelicalRing, "fluxshell": FluxShell}
     if kind not in classes:
         raise ValueError(f"Cannot rebuild radDist of type {info.get('distType')!r}")
     return classes[kind](startR=config.get("startR"), startZ=config.get("startZ"), config=config)

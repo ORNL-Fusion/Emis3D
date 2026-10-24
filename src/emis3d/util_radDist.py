@@ -120,6 +120,16 @@ def radDist_SquareTube_parallel(args: tuple, return_result: bool = False):  # ->
         return squareTube
 
 
+def radDist_FluxShell_parallel(args: tuple, return_result: bool = False):
+    """Build (and save) one FluxShell radDist; args = ((R, z), config)."""
+    from emis3d.radDist import FluxShell
+
+    (startR, startZ), config = args
+    rd = FluxShell(startR=float(startR), startZ=float(startZ), config=config)
+    rd.build()
+    return rd if return_result else None
+
+
 def radDist_NIMROD_parallel(args: tuple, return_result: bool = False):
     """
     Worker function for parallel computation of NIMROD radial distribution.

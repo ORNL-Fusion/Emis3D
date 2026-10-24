@@ -182,6 +182,7 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
         "Helical": "radDist_Helical_parallel",
         "HelicalRing": "radDist_HelicalRing_parallel",
         "SquareTube": "radDist_SquareTube_parallel",
+        "FluxShell": "radDist_FluxShell_parallel",
         "NIMROD": "radDist_NIMROD_parallel",
         "M3DC1": "radDist_M3DC1_parallel",
     }
@@ -451,6 +452,18 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
             err(f"{cam}: time(s) {outside} (dt {dt:g}) outside the data, which runs from {t.min():g} to {t.max():g}")
         else:
             ok(f"{cam}: {f.name}, {len(chans)} channels, data from {t.min():g} to {t.max():g}")
+
+    # --- Parametric fit: its geometry matrices must be in the cache
+    if cfg.parametric:
+        from emis3d.geometry import matrix_path
+
+        for name in cfg.parametric.get("matrices") or ["medium"]:
+            mpath = matrix_path(ws, cfg.tokamakName, name)
+            if mpath.is_file():
+                ok(f"geometry matrix {name!r}: {mpath}")
+            else:
+                err(f"geometry matrix {name!r} not found at {mpath}; build it with: emis3d build-matrix {cfg.tokamakName} --resolution {name}")
+        ok(f"parametric model: {cfg.parametric['model']}")
 
     # --- radDist folders
     base = ws.path("raddists", tokamak=cfg.tokamakName)
