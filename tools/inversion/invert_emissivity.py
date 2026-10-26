@@ -222,6 +222,27 @@ def per_camera_chi2(K, x, d, sig, cams) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def camera_angles(G, tok, tags, cams) -> dict:
+    """
+    Toroidal angle [rad] of each camera as the run config names it. The run
+    config's names (BOLOMETERS keys) need not match the machine's camera
+    objects' names, so the angle is found through the channels: each
+    channel is a row of the geometry matrix, which records the camera object
+    it came from (the same objects the angles are read from).
+    """
+    by_object = {b.name: float(np.deg2rad(float(b.info["CAMERA_POSITION_R_Z_PHI"][2]))) % (2 * np.pi) for b in tok.bolometers}
+    row_of = {t: i for i, t in enumerate(G.channels)}
+    out = {}
+    for cam in dict.fromkeys(cams):
+        objects = [G.cameras[G.camera_of_row[row_of[t]]] for t, c in zip(tags, cams, strict=True) if c == cam and t in row_of]
+        angles = [by_object[o] for o in objects if o in by_object]
+        if angles:
+            out[cam] = float(np.angle(np.mean(np.exp(1j * np.array(angles))))) % (2 * np.pi)  # all its channels' cameras
+        elif cam in by_object:
+            out[cam] = by_object[cam]
+    return out
+
+
 def as_map(values, ir, iz, shape) -> np.ndarray:
     out = np.full(shape, np.nan)
     out[ir, iz] = values
@@ -243,6 +264,9 @@ def plot(path, mode, G, ir, iz, x, eps_vox, K, d, sig, tags, cams, chosen, resul
     maps = [("reconstruction" if mode == "axisymmetric" else f"source on the injector plane ({np.rad2deg(phi0):.0f} deg)", as_map(x, ir, iz, shape))]
     if mode == "field-aligned":
         for cam in cam_names:
+            if cam not in camera_phi:
+                logger.warning("no toroidal angle found for camera %s: its emissivity map is left out", cam)
+                continue
             k = int(np.argmin(np.abs((g.phi_centers - camera_phi[cam] + np.pi) % (2 * np.pi) - np.pi)))
             plane = eps_vox.reshape(g.n_r, g.n_phi, g.n_z)[:, k, :]
             maps.append((f"emissivity at {cam} ({np.rad2deg(camera_phi[cam]):.0f} deg)", np.where(plane > 0, plane, np.nan)))
@@ -320,7 +344,7 @@ def main(argv=None) -> int:
     eq_name = args.equilibrium or (((e.config.parametric or {}) if e.config else {}).get("equilibrium"))
     # One tokamak gives the equilibrium (if any) and the cameras' toroidal angles
     tok = Tokamak(tokamakName=e.info["tokamakName"], mode="Build", reflections=False, eqFileName=eq_name, loadBolometers=True, workspace=e.ws)
-    camera_phi = {b.name: float(np.deg2rad(float(b.info["CAMERA_POSITION_R_Z_PHI"][2]))) % (2 * np.pi) for b in tok.bolometers}
+    camera_phi = camera_angles(G, tok, tags, cams)
     psi_norm, gfile = None, None
     if eq_name:
         gfile = tok.gfile

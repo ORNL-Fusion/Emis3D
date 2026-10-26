@@ -149,3 +149,20 @@ def test_inconsistent_views_are_reported_per_camera(mock_tok):
     by_cam = inv.per_camera_chi2(K, chosen[1], d, sig, cams)
     assert set(by_cam) == {"A", "B"} and all(v >= 0 for v in by_cam.values())
     assert chosen[2] > 0 and len(results) == 2
+
+
+def test_camera_angles_follow_the_channels_not_the_names(mock_tok):
+    """Run-config camera names (DISRADU) need not match the machine's camera objects (disradu_upper): the channels link them."""
+
+    class Bolo:
+        def __init__(self, name, phi):
+            self.name, self.info = name, {"CAMERA_POSITION_R_Z_PHI": [2.0, 0.0, phi]}
+
+    class Tok:
+        bolometers = [Bolo("disradu_upper", 135.0), Bolo("sx90m", 270.0)]
+
+    G = small_G(mock_tok, n_channels=4)
+    G.cameras, G.camera_of_row, G.channels = ["disradu_upper", "sx90m"], np.array([0, 0, 1, 1]), ["D1", "D2", "S1", "S2"]
+    angles = inv.camera_angles(G, Tok(), ["D1", "D2", "S1", "S2"], ["DISRADU", "DISRADU", "SX90MF", "SX90MF"])
+    assert angles["DISRADU"] == pytest.approx(np.deg2rad(135.0)) and angles["SX90MF"] == pytest.approx(np.deg2rad(270.0))
+    assert inv.camera_angles(G, Tok(), ["X1"], ["UNKNOWN"]) == {}                         # no channel in the matrix: none, no crash
