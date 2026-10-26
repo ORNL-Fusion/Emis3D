@@ -110,3 +110,42 @@ def test_mapping_round_trip_and_cache(mock_tok, tmp_path):
     assert cached_map(path) is cached_map(path)
     ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
     assert map_path(ws, "MOCK", "low", "g_file.geqdsk", 225.0, 1).name == "low_map_g_file_225deg_1t.npz"
+
+
+def test_solver_reaches_the_constrained_optimum(mock_tok):
+    """L-BFGS-B must drive the projected gradient to zero, at strong and at weak regularization."""
+    G = small_G(mock_tok, n_channels=60, seed=2)
+    ir, iz, index = inv.pixel_grid(G)
+    L = inv.laplacian(ir, iz, index)
+    K = inv.kernel_axisymmetric(G, np.arange(len(G.channels)), ir, iz)
+    Rp, Zp = G.grid.r_centers[ir], G.grid.z_centers[iz]
+    x_true = 1e6 * np.exp(-((Rp - 1.9) ** 2 + (Zp - 0.6) ** 2) / (2 * 0.1**2))        # bright and compact
+    d = np.asarray(K @ x_true).ravel()
+    sig = 0.05 * d.max() + 0.05 * d
+    prob = inv.Problem(K, d, sig, L)
+    x = None
+    for lam in (1e2, 1e-2, 1e-6):
+        x, its, opt = prob.solve(lam, x0=x)
+        assert (x >= 0).all() and opt < 1e-4, (lam, opt)
+    assert inv.chi2_per_point(K, x, d, sig) < 1e-3                                      # an unregularized fit is exact
+
+
+def test_inconsistent_views_are_reported_per_camera(mock_tok):
+    """Data from a toroidally localized source cannot be fitted axisymmetrically; the per-camera chi2 says which views disagree."""
+    G = small_G(mock_tok, n_channels=40, seed=3)
+    G.cameras, G.camera_of_row = ["A", "B"], np.repeat([0, 1], 20)
+    ir, iz, index = inv.pixel_grid(G)
+    L = inv.laplacian(ir, iz, index)
+    K = inv.kernel_axisymmetric(G, np.arange(40), ir, iz)
+    eps = np.zeros(G.grid.n_voxels)
+    sector = G.sector_of_voxel()
+    Rv = np.repeat(np.repeat(G.grid.r_centers, G.grid.n_phi), G.grid.n_z)
+    Zv = np.tile(G.grid.z_centers, G.grid.n_r * G.grid.n_phi)
+    eps = np.exp(-((Rv - 1.8) ** 2 + (Zv - 0.2) ** 2) / (2 * 0.15**2)) * (sector < G.grid.n_phi // 4)   # one toroidal quarter only
+    d = G.signals(eps)
+    sig = 0.05 * d.max() + 0.05 * d
+    chosen, results = inv.scan(K, d, sig, L, [1e-8, 1e-2], 1.0)
+    cams = ["A"] * 20 + ["B"] * 20
+    by_cam = inv.per_camera_chi2(K, chosen[1], d, sig, cams)
+    assert set(by_cam) == {"A", "B"} and all(v >= 0 for v in by_cam.values())
+    assert chosen[2] > 0 and len(results) == 2

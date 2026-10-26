@@ -1,0 +1,75 @@
+# Config for scripts/process_bolometer_data.py: prepare bolometer measurement files for Emis3D.
+# Copy this file next to your data, edit it, then: python scripts/process_bolometer_data.py <this file>
+# Paths are relative to this file. Every setting here is optional except `files`; the values
+# shown are the defaults. Any of time_window, offset, filter, spikes, scale, resample,
+# bad_channels and plots can also be set inside a file entry to override it for that file.
+
+input_dir: .  # Where the input files are
+output_dir: processed  # Where the processed files, plots and processing_report.yaml go
+
+files:  # One entry per measurement file (Emis3D format: TIME, DATA_CALIBRATED, channelOrder)
+  - input: 95709_KB5V_CALIBRATED.h5
+    output: 95709_KB5V_PROCESSED.h5  # Default: <input stem>_PROCESSED.h5
+    camera: KB5V  # Name used in the plots and the run-config block
+  - input: 95709_KB5H_CALIBRATED.h5
+    output: 95709_KB5H_PROCESSED.h5
+    camera: KB5H
+    # bad_channels: {manual: [KB5H_12]}  # Per-file override (merged with the settings below)
+
+time_window: null  # [t0, t1] in the file's time units: keep only this interval (null: all)
+
+offset:  # Each channel's offset, measured in a window with no plasma radiation, is subtracted
+  window: [50.0, 50.9]  # [t0, t1]; null: no offset subtraction
+  method: median  # median (robust to spikes) | mean over the window
+
+filter:  # Smoothing applied to every channel (after the offset)
+  type: none  # none | median | moving_average | savgol | lowpass | tv | wavelet | hanning | hamming | blackman | bartlett
+  window: 11  # Samples, for median / moving_average / savgol (odd)
+  order: 2  # Polynomial order for savgol
+  cutoff_hz: null  # For lowpass (needs a uniform time base: see resample)
+  filter_order: 4  # Butterworth order for lowpass
+  tv_noise_factor: 2.0  # tv (total variation, keeps edges): weight = this x the channel's noise ...
+  tv_weight: null  # ... or an absolute weight in signal units (overrides the factor)
+  wavelet: db4  # wavelet (needs PyWavelets): the wavelet family
+  wavelet_level: null  # Decomposition level (null: automatic)
+  wavelet_threshold_factor: 3.0  # Soft threshold, in units of the noise
+
+common_mode:  # Pickup shared by all channels (mains, switching supplies), learned in the offset window
+  remove: false  # true: project it out of every channel
+  components: 1  # Number of shared patterns removed
+
+errors:  # Per-channel error traces, saved as DATA_CALIBRATED_ERROR and drawn as a band in the plots
+  save: true
+  residual_window: 21  # Samples over which the filtering residual is averaged
+
+spikes:  # Isolated samples far from a running median (threshold x MAD)
+  remove: false  # true: replace spikes by the running median
+  threshold: 8.0
+  window: 21  # Samples of the running median
+
+scale: 1.0  # Multiplies every channel (unit conversions)
+
+invert_channels: []  # Channels whose sign is flipped (wired backwards), e.g. [KB5V_07]
+
+resample: null  # {dt: 1.0e-4}: interpolate onto a uniform time base (required by lowpass)
+
+bad_channels:  # A channel failing any criterion is reported; `action` says what happens to it
+  manual: []  # Channel names to mark bad regardless
+  zero_fraction: 0.99  # Bad if this fraction of samples is exactly zero
+  nan_fraction: 0.05  # Bad if this fraction is not finite
+  flat_fraction: 0.01  # Bad if its std is below this fraction of the median channel std
+  negative_fraction: 0.2  # Bad if this fraction of samples lies below -3 x its noise (after the offset)
+  spiky_fraction: 0.05  # Bad if this fraction of samples are spikes
+  svd:  # A channel the shared time structure cannot explain (pickup, drift, a cross-wired channel)
+    enabled: false
+    components: 3  # Shared patterns (SVD components) that define "the structure"
+    residual_factor: 4.0  # Bad if its residual from them exceeds this x its noise
+  saturated_fraction: 0.02  # Bad if this fraction of samples sit at the channel's maximum (a plateau)
+  action: zero  # zero (Emis3D then treats the channel as bad automatically) | nan | keep
+
+plots:
+  save: true  # PNG files in <output_dir>/plots
+  overview: true  # All processed channels in one figure
+  per_channel: true  # A grid: raw (grey) and processed (blue, red if bad) per channel
+  columns: 6  # Columns of the grid
+  time_window: null  # [t0, t1] shown in the plots (null: everything)

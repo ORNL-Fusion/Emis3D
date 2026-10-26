@@ -153,26 +153,31 @@ class Problem:
         self.k_norm2 = float(np.linalg.norm(self.Kw, 2) ** 2)  # largest singular value squared
         self.l_norm2 = float(sp.linalg.norm(self.LtL, 1))  # an upper bound of ||L||_2^2
 
-    def solve(self, lam: float, x0=None, max_iter: int = 20000, tol: float = 1e-8) -> tuple[np.ndarray, int]:
-        """FISTA with projection onto x >= 0 (and restarts); returns (x, iterations)."""
+    def objective(self, x: np.ndarray, mu: float) -> tuple[float, np.ndarray]:
+        r = self.Kw @ x - self.b
+        Lx = self.L @ x
+        return float(r @ r + mu * (Lx @ Lx)), 2.0 * (self.Kw.T @ r) + 2.0 * mu * (self.LtL @ x)
+
+    def optimality(self, x: np.ndarray, mu: float) -> float:
+        """
+        The projected gradient's size at x relative to the gradient's size at
+        the start (x = 0): 0 at the constrained optimum, 1 for no progress.
+        """
+        _, g = self.objective(x, mu)
+        _, g0 = self.objective(np.zeros_like(x), mu)
+        pg = np.where(x > 0, g, np.minimum(g, 0.0))
+        return float(np.abs(pg).max() / max(np.abs(g0).max(), 1e-300))
+
+    def solve(self, lam: float, x0=None, max_iter: int = 20000) -> tuple[np.ndarray, int, float]:
+        """L-BFGS-B with x >= 0; returns (x, iterations, optimality)."""
+        from scipy.optimize import minimize
+
         mu = lam * self.scale
-        step = 1.0 / (2.0 * (self.k_norm2 + mu * self.l_norm2))
-        x = np.zeros(self.Kw.shape[1]) if x0 is None else np.maximum(np.asarray(x0, dtype=float), 0.0)
-        y, t = x.copy(), 1.0
-        f_old = np.inf
-        for it in range(1, max_iter + 1):
-            grad = 2.0 * (self.Kw.T @ (self.Kw @ y - self.b)) + 2.0 * mu * (self.LtL @ y)
-            x_new = np.maximum(y - step * grad, 0.0)
-            t_new = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * t * t))
-            y = x_new + ((t - 1.0) / t_new) * (x_new - x)
-            r = self.Kw @ x_new - self.b
-            f = float(r @ r + mu * np.sum((self.L @ x_new) ** 2))
-            if f > f_old:  # restart the momentum when the objective rises
-                y, t_new = x_new.copy(), 1.0
-            if abs(f_old - f) <= tol * max(f, 1e-300) and it > 50:
-                return x_new, it
-            x, t, f_old = x_new, t_new, f
-        return x, max_iter
+        x_start = np.zeros(self.Kw.shape[1]) if x0 is None else np.maximum(np.asarray(x0, dtype=float), 0.0)
+        res = minimize(lambda v: self.objective(v, mu), x_start, jac=True, method="L-BFGS-B",
+                       bounds=[(0.0, None)] * x_start.size, options={"maxiter": max_iter, "maxfun": 2 * max_iter, "ftol": 1e-15, "gtol": 1e-14})
+        x = np.asarray(res.x, dtype=float)
+        return x, int(res.nit), self.optimality(x, mu)
 
 
 def chi2_per_point(K, x, d, sig) -> float:
@@ -190,15 +195,26 @@ def scan(K, d, sig, L, lams, target: float, progress=None):
     results, x = [], None
     for lam in sorted(lams, reverse=True):
         t0 = time.perf_counter()
-        x, its = prob.solve(lam, x0=x)
+        x, its, opt = prob.solve(lam, x0=x)
         c = chi2_per_point(K, x, d, sig)
         rough = float(np.linalg.norm(L @ x))
         results.append((lam, x.copy(), c, rough))
-        say(f"  lam {lam:9.2e}: chi2/N {c:8.3f}, roughness {rough:.3g} ({its} iterations, {time.perf_counter() - t0:.1f} s)")
+        say(f"  lam {lam:9.2e}: chi2/N {c:8.3f}, roughness {rough:.3g} ({its} iterations, optimality {opt:.1e}, {time.perf_counter() - t0:.1f} s)")
     results.sort(key=lambda r: r[0])
     ok = [r for r in results if r[2] <= target]
     chosen = max(ok, key=lambda r: r[0]) if ok else min(results, key=lambda r: r[2])
+    if not ok:
+        say(f"  no regularization reaches chi2/N {target:g}: the best is {chosen[2]:.2f} at lam {chosen[0]:.1e}")
     return chosen, results
+
+
+def per_camera_chi2(K, x, d, sig, cams) -> dict:
+    model = np.asarray(K @ x).ravel()
+    out = {}
+    for cam in dict.fromkeys(cams):
+        sel = np.array([c == cam for c in cams])
+        out[cam] = float(np.mean(((d[sel] - model[sel]) / sig[sel]) ** 2))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +252,9 @@ def plot(path, mode, G, ir, iz, x, eps_vox, K, d, sig, tags, cams, chosen, resul
     gs = fig.add_gridspec(2, max(n_maps, len(cam_names) + 1))
     for j, (label, m) in enumerate(maps):
         ax = fig.add_subplot(gs[0, j])
-        pc = ax.pcolormesh(g.r_centers, g.z_centers, m.T, shading="nearest", cmap="viridis")
+        finite = m[np.isfinite(m)]
+        vmax = float(np.percentile(finite[finite > 0], 99.5)) if np.any(finite > 0) else None  # a few hot pixels must not hide the map
+        pc = ax.pcolormesh(g.r_centers, g.z_centers, m.T, shading="nearest", cmap="viridis", vmin=0.0, vmax=vmax)
         ax.contour(g.r_centers, g.z_centers, (G.inside_wall.reshape(g.n_r, g.n_phi, g.n_z)[:, 0, :]).T.astype(float), levels=[0.5], colors="w", linewidths=0.8)
         if psin is not None:
             ax.contour(g.r_centers, g.z_centers, psin.T, levels=[1.0], colors="r", linewidths=0.8, linestyles="--")
@@ -244,7 +262,7 @@ def plot(path, mode, G, ir, iz, x, eps_vox, K, d, sig, tags, cams, chosen, resul
         ax.set_title(label, fontsize=9)
         ax.set_xlabel("R [m]")
         ax.set_ylabel("z [m]")
-        fig.colorbar(pc, ax=ax, shrink=0.8, label="emissivity [W/m3]")
+        fig.colorbar(pc, ax=ax, shrink=0.8, label="emissivity [W/m3]" + (f" (scale to 99.5th percentile, max {np.nanmax(m):.2g})" if vmax else ""))
 
     model = np.asarray(K @ x).ravel()
     for j, cam in enumerate(cam_names):
@@ -353,6 +371,13 @@ def main(argv=None) -> int:
     tpf = float(P_sector.max() / P_sector.mean()) if P_sector.mean() > 0 else float("nan")
     say(f"chosen lambda {lam:.2e}: chi2/N {c:.2f}; total radiated power {total:.3g} W; TPF {tpf:.2f}"
         + (" (axisymmetric by construction)" if M is None else ""))
+    by_cam = per_camera_chi2(K, x, d, sig, cams)
+    say("chi2/N per camera: " + ", ".join(f"{cam} {v:.2f}" for cam, v in by_cam.items()))
+    if c > args.target_chi2:
+        say(f"NOTE: no {args.mode} emissivity fits these channels within their errors, however weak the regularization. "
+            "Either the emission is not " + ("axisymmetric (toroidally localized, e.g. near the injector): try --mode field-aligned,"
+                                             if args.mode == "axisymmetric" else "field-aligned with this decay: try other --decay values,")
+            + " or a camera's calibration or geometry disagrees with the others (see the chi2/N per camera).")
 
     out = Path(args.out) if args.out else Path(args.run_config).resolve().parent
     out.mkdir(parents=True, exist_ok=True)
