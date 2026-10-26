@@ -19,7 +19,7 @@ from uncertainties import unumpy as unp
 # --- Values to change ---
 shotNumber = 184407
 loadData = False
-arrayName = "SX90MF"  # Supported arrays: SX45F, SX90PF, SX90MF, DISRADU
+arrayName = "SX45F"  # Supported arrays: SX45F, SX90PF, SX90MF, DISRADU
 badChannels = []  # Zero out these channels before saving
 invertedChannels = []  # Channels to be inverted
 offsetWindow = [4000, 6000]  # Enter an offset window, optional
@@ -105,9 +105,7 @@ if plot_overview:
             color="grey",
             label="raw",
         )
-        ax.plot(
-            data.get_time(), data.get_observed()[ii, :], color="teal", label="filtered"
-        )
+        ax.plot(data.get_time(), data.get_observed()[ii, :], color="teal", label="filtered")
         ax.text(
             0.01,
             0.98,

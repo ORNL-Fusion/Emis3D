@@ -381,18 +381,21 @@ class Emis3D:
         if not profiles:
             return
 
-        def entry(v):
+        def entry(v, best_value):
+            # the interval always contains the best fit: with several amplitudes on their bounds,
+            # the clipped draws can all lie to one side of it
             v = np.asarray(v)
             out = {"median": float(np.median(v)), "n": int(v.size)}
             for c in cfg.intervals:
                 lo, hi = np.percentile(v, [50 * (1 - c), 50 * (1 + c)])
-                out[f"{int(round(100 * c))}%"] = (float(lo), float(hi))
+                out[f"{int(round(100 * c))}%"] = (float(min(lo, best_value)), float(max(hi, best_value)))
             return out
 
         ranges = best["ranges"]
+        best_tpf = float(P_best.max() / P_best.mean()) if P_best.mean() > 0 else float("nan")
         for key in ("total", "statistical"):
-            ranges[key]["tpf"] = entry(tpf)
-            ranges[key]["total_power"] = entry(total)
+            ranges[key]["tpf"] = entry(tpf, best_tpf)
+            ranges[key]["total_power"] = entry(total, total_best)
         prof = np.asarray(profiles)
         band = {"phi": phi, "median": np.median(prof, axis=0)}
         for c in (0.68, 0.95):
@@ -802,19 +805,26 @@ class Emis3D:
 
         self.fitData[evalTime]["dataMap"] = data_
 
-        # --- The peak over the good channels sets the error floor
-        good = [data_[ch] for bolo_ in self.channel_order["channel_list"] for ch in bolo_ if ch not in bad_ and np.isfinite(data_[ch])]
-        max_ = max(good, default=0.0)
+        # --- The error floor is a fraction of a peak: each camera's own (default), so arrays with
+        # different signal levels all count, or the peak over every camera (error_floor_scope: global)
+        def peak_of(chans):
+            vals = [data_[ch] for ch in chans if ch not in bad_ and np.isfinite(data_[ch])]
+            return max(vals, default=0.0)
+
+        global_peak = peak_of([ch for bolo_ in self.channel_order["channel_list"] for ch in bolo_])
+        scope = str(self.info.get("error_floor_scope", "camera"))
 
         for ii, bolo_chans in enumerate(self.channel_order["channel_list"]):
+            bolo_name = self.channel_order["bolometer_order"][ii]
+            settings = (self.info.get("BOLOMETERS") or {}).get(bolo_name) or {}
             temp = [data_[ch] for ch in bolo_chans]
             noise = [noise_[ch] for ch in bolo_chans] if noise_ else None
             err = Util_emis3D.channel_error(
                 self.info["error_definition"],
                 temp,
-                max_,
-                floor=self.info["error_floor"],
-                relative=self.info["error_relative"],
+                peak_of(bolo_chans) if scope == "camera" else global_peak,
+                floor=float(settings.get("error_floor", self.info["error_floor"])),
+                relative=float(settings.get("error_relative", self.info["error_relative"])),
                 noise=noise,
             )
             # --- Bad or missing channels are left out of the fit

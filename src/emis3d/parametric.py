@@ -306,7 +306,8 @@ class ParametricFit:
         stages.append({"matrix": G1.grid.describe(), "evaluations": self.evaluations, "chi2": chi2_1, "seconds": round(time.perf_counter() - t0, 1)})
         say(f"  polish ({G1.grid.describe()}): chi2/N {chi2_1 / max(self.n_data, 1):.2f} after {self.evaluations} evaluations, "
             f"{time.perf_counter() - t0:.0f} s")
-        flags = at_bounds(values, {**self.bounds, **{n: self.a_bounds for n in self.amp_names}})
+        # the tilt's ends (an axis-aligned ellipse) are not limits in any meaningful sense
+        flags = at_bounds(values, {**{k: v for k, v in self.bounds.items() if k != "rotationAngle"}, **{n: self.a_bounds for n in self.amp_names}})
         for flag in flags:
             logger.warning("%s fit: %s (widen the bound, or consider another model)", self.model, flag)
         X = self.design(G1, {n: values[n] for n in self.names})

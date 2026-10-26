@@ -176,6 +176,16 @@ def test_at_bounds_names_the_parameter_and_side():
     assert flags == ["sigma_R at its upper bound 1.5", "b at its lower bound 0"]
 
 
+def test_tilt_at_zero_is_not_flagged(rings):
+    _, truth, template = rings
+    G = synthetic_G(truth)
+    data, _ = fabricate(G, truth)
+    fit = ParametricFit("ring", template, [G], data, "exponential", 225.0, fixed={k: TRUE[k] for k in ("startR", "startZ", "sigma_R", "sigma_z")},
+                        bounds={"rotationAngle": (0.0, 90.0)})
+    res = fit.search(seed=0, maxiter=10)
+    assert not any("rotationAngle" in f for f in res.at_bounds)
+
+
 def test_a_tight_bound_is_flagged(rings, caplog):
     _, truth, template = rings
     G = synthetic_G(truth)

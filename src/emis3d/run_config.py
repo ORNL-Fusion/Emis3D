@@ -18,7 +18,8 @@ from emis3d.globals import SCALE_DEFINITIONS, ERROR_DEFINITIONS, FIT_METHODS, SO
 @dataclass
 class RunConfig:
     # --- What is being analysed
-    BOLOMETERS: dict  # cameras to fit: name -> {dataFileName, scalingFactor (default 1), badChannels (default [])}
+    BOLOMETERS: dict  # cameras to fit: name -> {dataFileName, scalingFactor (default 1), badChannels (default []),
+    #                     error_floor, error_relative (override the run-wide values for that camera)}
     shot: int  # shot number; also used in result file names and path templates
     tokamakName: str | None = None  # machine, e.g. "JET"; selects machines/, measurements/, raddists/, equilibria/
 
@@ -47,6 +48,10 @@ class RunConfig:
     error_definition: str = "floor_relative"  # or "constant", "poisson", "exponential"
     error_floor: float = 0.05  # additive error, as a fraction of the peak signal
     error_relative: float = 0.05  # relative error, as a fraction of each channel's signal
+    # What the error floor is a fraction of: "camera" (each camera's own peak: arrays with different signal
+    # levels, e.g. SXR and bolometers, all count) or "global" (the peak over every camera: a dim camera
+    # gets floors as large as its signals and drops out of the fit)
+    error_floor_scope: str = "camera"
     noise_window: list | None = None  # [t_start, t_end], a quiet period before the event
 
     # --- Fitting
@@ -84,6 +89,8 @@ class RunConfig:
             raise ValueError(f"Unknown fit_method: {self.fit_method!r}; choose from {FIT_METHODS}")
         if self.error_floor < 0 or self.error_relative < 0:
             raise ValueError("error_floor and error_relative must be >= 0")
+        if self.error_floor_scope not in ("camera", "global"):
+            raise ValueError(f"error_floor_scope must be camera or global, got {self.error_floor_scope!r}")
         if self.error_definition.lower() == "floor_relative" and self.error_floor == 0 and self.noise_window is None:
             raise ValueError("floor_relative needs error_floor > 0 or a noise_window, or near-zero channels get zero error")
         if self.noise_window is not None and (len(self.noise_window) != 2 or self.noise_window[0] >= self.noise_window[1]):
@@ -92,6 +99,13 @@ class RunConfig:
             bad = (bolo or {}).get("badChannels", [])
             if not isinstance(bad, list):
                 raise ValueError(f"BOLOMETERS.{name}.badChannels must be a list of channel names")
+            for key in ("error_floor", "error_relative"):
+                v = (bolo or {}).get(key)
+                if v is not None and not (isinstance(v, (int, float)) and v >= 0):
+                    raise ValueError(f"BOLOMETERS.{name}.{key} must be a number >= 0")
+            unknown = sorted(set(bolo or {}) - {"dataFileName", "scalingFactor", "badChannels", "error_floor", "error_relative"})
+            if unknown:
+                raise ValueError(f"BOLOMETERS.{name}: unknown key(s) {unknown}; it takes dataFileName, scalingFactor, badChannels, error_floor, error_relative")
         # --- Uncertainty block: known options, calibration for configured cameras only
         from emis3d.uncertainty import UncertaintyConfig
 
