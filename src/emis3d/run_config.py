@@ -62,9 +62,10 @@ class RunConfig:
     # Bounds of the amplitude a (relative to the data's peak) and the toroidal decay b, both
     # solvers: {a: [lo, hi], b: [lo, hi]}; defaults in emis3d.globals (AMPLITUDE_BOUNDS, DECAY_BOUNDS)
     bounds: dict = field(default_factory=dict)
-    # The parametric solver (emis3d.parametric): {models: [ring, shell, tube], matrices: [low, medium],
-    #  equilibrium: <g-file>, bounds: {model: {param: [lo, hi]}}, fixed: {model: {param: value}},
-    #  maxiter, popsize, seed, supersample}
+    # The parametric solver (emis3d.parametric): {models: [ring, shell, asymshell, helical, tube],
+    #  matrices: [low, medium], equilibrium: <g-file>, bounds: {model: {param: [lo, hi]}},
+    #  fixed: {model: {param: value}}, maxiter, popsize, seed, supersample,
+    #  transits, substeps, psi_max (the helical model's field-line mapping)}
     parametric: dict = field(default_factory=dict)
 
     def __post_init__(self):
@@ -139,7 +140,8 @@ class RunConfig:
         p = self.parametric
         if not p:
             raise ValueError("solver: parametric needs a parametric block (models, matrices, ...)")
-        allowed = {"models", "matrices", "equilibrium", "bounds", "fixed", "maxiter", "popsize", "seed", "supersample"}
+        allowed = {"models", "matrices", "equilibrium", "bounds", "fixed", "maxiter", "popsize", "seed", "supersample",
+                   "transits", "substeps", "psi_max"}
         unknown = sorted(set(p) - allowed)
         if unknown:
             hint = " (use models: [ring], a list)" if "model" in unknown else ""
@@ -168,8 +170,11 @@ class RunConfig:
                     for name, v in (params or {}).items():
                         if not (isinstance(v, (list, tuple)) and len(v) == 2 and v[0] < v[1]):
                             raise ValueError(f"parametric.bounds.{model}.{name} must be [low, high] with low < high, got {v!r}")
-        if "shell" in models and not p.get("equilibrium"):
-            raise ValueError("parametric.equilibrium (a g-file name) is required for the shell model")
+        from emis3d.parametric import NEEDS_EQUILIBRIUM
+
+        needing = [m for m in models if m in NEEDS_EQUILIBRIUM]
+        if needing and not p.get("equilibrium"):
+            raise ValueError(f"parametric.equilibrium (a g-file name) is required for the {', '.join(needing)} model(s)")
         if self.scale_def.lower() not in ("constant", "exponential", "linear", "step"):
             raise ValueError("the parametric solver supports scale_def constant, exponential, linear or step")
 

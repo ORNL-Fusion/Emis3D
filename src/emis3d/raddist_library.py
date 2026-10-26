@@ -60,7 +60,7 @@ TYPES = {
     "Helical": {"required": ("sigma_R", "sigmaKernel", "numFieldLines"), "optional": {"numTransits": 1}},
     "HelicalRing": {"required": ("sigma_R", "sigma_z"), "optional": {"numTransits": 1}},
     "SquareTube": {"required": ("dR", "dz"), "optional": {}},
-    "FluxShell": {"required": ("psi_center", "psi_width"), "optional": {"psi_max": 1.2}},
+    "FluxShell": {"required": ("psi_center", "psi_width"), "optional": {"psi_max": 1.2, "asym_amp": 0.0, "asym_angle": 0.0}},
     "NIMROD": {"required": ("files", "timesteps"), "optional": {}},
     "M3DC1": {"required": ("files", "timesteps"), "optional": {}},
 }

@@ -1671,12 +1671,15 @@ class FluxShell(RadDist):
     Emission in a shell of flux surfaces: a Gaussian in normalized flux
     psi_N, centred on psi_center with width psi_width, toroidally uniform
     (the fit applies the toroidal shape). A radiating edge mantle is
-    psi_center near 1; a hollow profile is a shell. Emission is cut off
-    beyond psi_max (default 1.2) and outside the wall. Needs an equilibrium
-    (eqFileName) for psi_N.
+    psi_center near 1; a hollow profile is a shell. Optionally asymmetric
+    poloidally: multiplied by max(1 + asym_amp cos(theta - asym_angle), 0)
+    with theta the poloidal angle about the magnetic axis (degrees, 0 on
+    the outboard midplane, 90 at the top), so one side of the shell can be
+    brighter (a crescent). Emission is cut off beyond psi_max (default 1.2)
+    and outside the wall. Needs an equilibrium (eqFileName) for psi_N.
     """
 
-    SAVE_KEYS = (("psi_center", "psi"), ("psi_width", "width"))
+    SAVE_KEYS = (("psi_center", "psi"), ("psi_width", "width"), ("asym_amp", "asym"), ("asym_angle", "at"))
     TOROIDALLY_UNIFORM = True
 
     def __init__(self, startR=None, startZ=None, config=None):
@@ -1686,6 +1689,8 @@ class FluxShell(RadDist):
         self.info["distType"] = "fluxShell"
         self.info["emissionNames"] = ["fluxShell"]
         self.info.setdefault("psi_max", 1.2)
+        self.info.setdefault("asym_amp", 0.0)
+        self.info.setdefault("asym_angle", 0.0)
         if "psi_center" in self.info:
             if not self.info.get("eqFileName"):
                 raise ValueError("FluxShell needs an equilibrium (eqFileName) for the normalized flux")
@@ -1718,7 +1723,81 @@ class FluxShell(RadDist):
         c, w = float(self.info["psi_center"]), float(self.info["psi_width"])
         emis = np.exp(-0.5 * ((psin - c) / w) ** 2)
         emis[psin > float(self.info["psi_max"])] = 0.0
+        A = float(self.info.get("asym_amp", 0.0))
+        if A != 0.0:
+            theta = np.arctan2(np.ravel(z) - float(self.info["startZ"]), np.ravel(R) - float(self.info["startR"]))
+            emis = emis * np.maximum(1.0 + A * np.cos(theta - np.deg2rad(float(self.info["asym_angle"]))), 0.0)
         return {emissionName: emis}
+
+    def _scaling_factor(self, bolo_info=None, emissionName=None):
+        return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
+
+    def _observed_phi_loc(self, bolo_info=None, emissionName=None):
+        if not bolo_info:
+            return []
+        phi = float(np.deg2rad(bolo_info["CAMERA_POSITION_R_Z_PHI"][2])) % (2.0 * np.pi)
+        return [[phi] for _ in bolo_info["CHANNEL_TAGS"]]
+
+
+class FieldAlignedSource(RadDist):
+    """
+    A helical radiation structure from a field-line mapping
+    (emis3d.fieldline_map): a Gaussian source on the injector's poloidal
+    plane (startR, startZ, sigma_R, sigma_z, peak 1) carried along the
+    field lines in both directions with a decay exp(-decay dphi^2). Its
+    emissivity lives on the mapping's voxel grid (the geometry matrix's);
+    elsewhere it is interpolated, as a simulation radDist's is. Settings:
+    mapPath (the mapping file), decay, and the source's shape.
+    """
+
+    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("decay", "decay"))
+
+    def __init__(self, startR=None, startZ=None, config=None):
+        config = {} if config is None else config
+        super().__init__(startR=float(config.get("startR", 0.0) if startR is None else startR),
+                         startZ=float(config.get("startZ", 0.0) if startZ is None else startZ), config=config)
+        self.info["distType"] = "fieldAligned"
+        self.info["emissionNames"] = ["fieldAligned"]
+        self.info.setdefault("decay", 0.0)
+        self._grid_eps = None
+        if "mapPath" in self.info:
+            from emis3d.fieldline_map import cached_map
+
+            self.fmap = cached_map(self.info["mapPath"])  # the finest: plots and the saved radDist use it
+            self.fmaps = {m.n_voxels: m for m in (cached_map(p) for p in self.info.get("mapPaths", [self.info["mapPath"]]))}
+            self._build_tokamak(tokamakName=self.info["tokamakName"], mode="Build", reflections=False, eqFileName=self.info.get("eqFileName"))
+            logger.info("→ Building field-aligned radDist from the source at R=%.3f, z=%.3f", self.info["startR"], self.info["startZ"])
+
+    def voxel_emissivity(self, G=None) -> np.ndarray:
+        """The emissivity on the mapping's voxel grid (the matrix's), from the current settings."""
+        f = self.fmap if G is None else self.fmaps.get(G.grid.n_voxels)
+        if f is None:
+            raise ValueError("no field-line mapping for this geometry matrix (emis3d build-mapping, or list it in parametric.matrices)")
+        src = f.gaussian_source(float(self.info["startR"]), float(self.info["startZ"]), float(self.info["sigma_R"]), float(self.info["sigma_z"]))
+        return f.apply(src, float(self.info["decay"]))
+
+    def _interpolator(self):
+        """3-D linear interpolation of the voxel emissivity (periodic in phi), rebuilt when the settings change."""
+        key = tuple(float(self.info[k]) for k in ("startR", "startZ", "sigma_R", "sigma_z", "decay"))
+        if self._grid_eps is None or self._grid_eps[0] != key:
+            from scipy.interpolate import RegularGridInterpolator
+
+            f = self.fmap
+            n_r, n_z = f.r_centers.size, f.z_centers.size
+            eps = self.voxel_emissivity().reshape(n_r, f.n_phi, n_z)
+            phi = np.concatenate([f.phi_centers, [f.phi_centers[0] + 2.0 * np.pi]])  # periodic
+            vals = np.concatenate([eps, eps[:, :1, :]], axis=1)
+            interp = RegularGridInterpolator((f.r_centers, phi, f.z_centers), vals, bounds_error=False, fill_value=0.0)
+            self._grid_eps = (key, interp)
+        return self._grid_eps[1]
+
+    def _evaluate(self, R, z, phi, emissionName=None):
+        if emissionName is None:
+            emissionName = self.emissionName
+        f = self.fmap
+        R, z = np.ravel(R), np.ravel(z)
+        phi_w = (np.ravel(np.broadcast_to(phi, R.shape)) - f.phi_centers[0]) % (2.0 * np.pi) + f.phi_centers[0]
+        return {emissionName: np.asarray(self._interpolator()(np.column_stack([R, phi_w, z])), dtype=float)}
 
     def _scaling_factor(self, bolo_info=None, emissionName=None):
         return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
@@ -1946,7 +2025,8 @@ def from_info(info: dict) -> "RadDist":
     if kind in ("nimrod", "m3dc1"):
         cls = NIMROD if kind == "nimrod" else M3DC1
         return cls(config["sourceFile"], config["timestep"], config=config)
-    classes = {"elongatedring": ElongatedRing, "squaretube": SquareTube, "helical": Helical, "helicalring": HelicalRing, "fluxshell": FluxShell}
+    classes = {"elongatedring": ElongatedRing, "squaretube": SquareTube, "helical": Helical, "helicalring": HelicalRing, "fluxshell": FluxShell,
+               "fieldaligned": FieldAlignedSource}
     if kind not in classes:
         raise ValueError(f"Cannot rebuild radDist of type {info.get('distType')!r}")
     return classes[kind](startR=config.get("startR"), startZ=config.get("startZ"), config=config)

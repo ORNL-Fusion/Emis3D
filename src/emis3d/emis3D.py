@@ -290,6 +290,17 @@ class Emis3D:
             template_cfg.update({k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b})
             fixed = (cfg.get("fixed") or {}).get(model) or {}
             template_cfg.update(fixed)
+            if spec.get("field_aligned"):
+                # the field-line mapping for every matrix in the search (built once and cached)
+                from emis3d.fieldline_map import get_or_build
+
+                paths = []
+                for name, G in zip(names, matrices, strict=True):
+                    _, mpath = get_or_build(self.ws, G, self.info["tokamakName"], name, cfg["equilibrium"], float(self.info["injectionLocation"]),
+                                            transits=int(cfg.get("transits", 1)), substeps=int(cfg.get("substeps", 2)),
+                                            psi_max=cfg.get("psi_max"), progress=lambda text: logger.info(text))
+                    paths.append(str(mpath))
+                template_cfg["mapPath"], template_cfg["mapPaths"] = paths[-1], paths
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 template = radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})

@@ -43,7 +43,17 @@ MODELS = {
              "params": {"startR": None, "startZ": None, "dR": (0.02, 1.0), "dz": (0.02, 1.5)}},
     "shell": {"distType": "FluxShell", "emission": "fluxShell",
               "params": {"psi_center": (0.1, 1.15), "psi_width": (0.02, 0.5)}},
+    # A shell brighter on one poloidal side (a crescent): asym_angle is the poloidal angle of the
+    # bright side about the magnetic axis, degrees (0 outboard midplane, 90 top, 180 inboard)
+    "asymshell": {"distType": "FluxShell", "emission": "fluxShell",
+                  "params": {"psi_center": (0.1, 1.15), "psi_width": (0.02, 0.5), "asym_amp": (0.0, 1.0), "asym_angle": (-180.0, 180.0)}},
+    # A helical structure: a Gaussian source on the injector's plane carried along field lines
+    # (emis3d.fieldline_map) with a decay exp(-decay dphi^2); decay takes bounds.b. The toroidal
+    # shape is the decay itself, so no sector scale is applied (the step scale still can be)
+    "helical": {"distType": "FieldAligned", "emission": "fieldAligned", "field_aligned": True,
+                "params": {"startR": None, "startZ": None, "sigma_R": (0.02, 0.5), "sigma_z": (0.02, 0.5)}},
 }
+NEEDS_EQUILIBRIUM = ("shell", "asymshell", "helical")
 SCALE_DEFS = ("constant", "exponential", "linear", "step")
 
 
@@ -140,7 +150,10 @@ class ParametricFit:
             if name in self.fixed:
                 continue
             self.bounds[name] = tuple((bounds or {}).get(name) or b or defaults[name])
-        self.has_decay = scale_def in DECAY_BOUNDS
+        self.field_aligned = bool(self.spec.get("field_aligned"))
+        if self.field_aligned:  # the decay along the field lines is the model's own toroidal shape
+            self.bounds["decay"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS["exponential"])
+        self.has_decay = scale_def in DECAY_BOUNDS and not self.field_aligned
         if self.has_decay:
             self.bounds["b"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS[scale_def])
         self.a_bounds = tuple(a_bounds if a_bounds is not None else AMPLITUDE_BOUNDS)

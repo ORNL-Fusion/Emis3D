@@ -137,7 +137,7 @@ def test_run_config_solver_and_parametric_block():
     for block, match in bad:
         with pytest.raises(ValueError, match=match):
             RunConfig.from_dict({**RUN, "solver": "parametric", "parametric": block})
-    assert set(MODELS) == {"ring", "tube", "shell"}
+    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical"}
 
 
 def test_run_config_a_and_b_bounds():
@@ -424,3 +424,86 @@ def test_step_end_to_end_through_emis3d(rings, tmp_path):
     tpf = best["radiation_distribution"]["toroidal_peaking_factor"]
     assert hi > lo and lo - 1e-9 <= tpf <= hi + 1e-9                                         # a real range, containing the best fit
     assert "step amplitudes" in best["ranges"]["note"]
+
+
+# ---------------------------------------------------------------------------
+# The asymmetric shell and the helical model
+# ---------------------------------------------------------------------------
+
+def test_asymmetric_shell_is_brighter_on_its_side(rings):
+    with contextlib.redirect_stdout(io.StringIO()):
+        shell = RD.FluxShell(config={**BASE, "distType": "FluxShell", "eqFileName": mock.EQ_FILE, "psi_center": 0.8, "psi_width": 0.1,
+                                     "asym_amp": 1.0, "asym_angle": 90.0})                   # bright at the top
+    R0, z0 = shell.info["startR"], shell.info["startZ"]
+    top = shell.calc_emissivity(np.array([R0]), np.array([z0 + 0.55]), phi=np.array([0.0]), emissionName="fluxShell")["fluxShell"][0]
+    bottom = shell.calc_emissivity(np.array([R0]), np.array([z0 - 0.55]), phi=np.array([0.0]), emissionName="fluxShell")["fluxShell"][0]
+    assert top > 0 and bottom == 0.0                                                       # 1 + cos(180 deg) = 0 on the far side
+    shell.info["asym_amp"] = 0.0
+    sym = shell.calc_emissivity(np.array([R0, R0]), np.array([z0 + 0.55, z0 - 0.55]), phi=np.array([0.0]), emissionName="fluxShell")["fluxShell"]
+    assert sym[0] == pytest.approx(top / 2) and sym[1] > 0
+    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical"}
+
+
+@pytest.fixture(scope="module")
+def helical_setup(rings, tmp_path_factory):
+    """A synthetic matrix with MOCK's cameras, its field-line mapping, and a field-aligned template."""
+    from emis3d.fieldline_map import FieldLineMap
+    from emis3d.tokamak import Tokamak
+
+    tmp, truth, _ = rings
+    G = matrix_for(rings)                                                                    # 10 cm, 12 sectors: fast to trace
+    ws = Workspace.resolve(workspace=tmp, env={}, user_config=tmp / "none.yaml")
+    gfile = Tokamak(tokamakName="MOCK", mode="Analysis", eqFileName=mock.EQ_FILE, workspace=ws).gfile
+    fmap = FieldLineMap.build(G, gfile, np.deg2rad(225.0), "test", mock.EQ_FILE, transits=1, substeps=1)
+    path = fmap.save(tmp_path_factory.mktemp("map") / "map.npz")
+    with contextlib.redirect_stdout(io.StringIO()):
+        template = RD.FieldAlignedSource(config={**BASE, "distType": "FieldAligned", "eqFileName": mock.EQ_FILE, "mapPath": str(path),
+                                                 "startR": 1.9, "startZ": 0.0, "sigma_R": 0.1, "sigma_z": 0.1, "decay": 0.0})
+    return G, fmap, template
+
+
+HELICAL_TRUE = {"startR": 1.95, "startZ": 0.10, "sigma_R": 0.12, "sigma_z": 0.12, "decay": 0.3}
+
+
+def test_helical_model_recovers_a_field_aligned_source(helical_setup):
+    G, fmap, template = helical_setup
+    probe = ParametricFit("helical", template, [G], {t: (1.0, 1.0) for t in G.channels}, "constant", 225.0)
+    assert probe.names == ["startR", "startZ", "sigma_R", "sigma_z", "decay"] and probe.field_aligned and not probe.has_decay
+    signal = probe.model_signals(G, HELICAL_TRUE)
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    data = {t: (float(s), float(e)) for t, s, e in zip(G.channels, signal, sigma, strict=True)}
+    fit = ParametricFit("helical", template, [G], data, "constant", 225.0, bounds={"startR": (1.5, 2.2), "startZ": (-0.5, 0.5)})
+    res = fit.search(seed=0, maxiter=40)
+    assert res.values["startR"] == pytest.approx(HELICAL_TRUE["startR"], abs=0.06)
+    assert res.values["startZ"] == pytest.approx(HELICAL_TRUE["startZ"], abs=0.06)
+    assert res.values["decay"] == pytest.approx(HELICAL_TRUE["decay"], abs=0.15)
+    assert res.chi2 / res.n_data < 0.5
+    # the radDist itself: its emissivity off-grid interpolates the voxel field, and it observes through G
+    template.info.update(HELICAL_TRUE)
+    eps = template.voxel_emissivity(G)
+    assert eps.max() > 0 and (eps >= 0).all()
+    on = template.calc_emissivity(np.array([1.95]), np.array([0.10]), phi=np.array([np.deg2rad(225.0)]), emissionName="fieldAligned")["fieldAligned"][0]
+    assert on > 0.3 * eps.max()
+    sig = G.observe(template)["fieldAligned"]
+    np.testing.assert_allclose(np.concatenate([sig[c] for c in G.cameras]), G.signals(G.emissivity_on_grid(template, "fieldAligned")), rtol=1e-9)
+
+
+def test_helical_and_ring_compared_end_to_end(rings, tmp_path, monkeypatch):
+    from emis3d.emis3D import Emis3D
+    from emis3d.fieldline_map import map_path
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], solver="parametric", scale_def="constant",
+                          parametric={"models": ["helical", "ring"], "matrices": ["low"], "equilibrium": mock.EQ_FILE, "maxiter": 4,
+                                      "substeps": 1, "bounds": {"helical": {"startR": [1.6, 2.1], "startZ": [-0.3, 0.3]},
+                                                                "ring": {"startR": [1.6, 2.1], "startZ": [-0.3, 0.3]}}})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings).save(matrix_path(ws, "MOCK", "low"))
+    e = Emis3D(runConfigName=str(run))
+    e._perform_fits()
+    best = e.bestFits[10.0]
+    assert {r.model for r in best["parametric_models"]} == {"helical", "ring"}
+    assert map_path(ws, "MOCK", "low", mock.EQ_FILE, float(e.info["injectionLocation"]), 1).is_file()   # built once, cached
+    helical = next(r for r in best["parametric_models"] if r.model == "helical")
+    assert "decay" in helical.values and helical.n_params == 6

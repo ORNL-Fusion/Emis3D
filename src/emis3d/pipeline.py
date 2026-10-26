@@ -316,6 +316,29 @@ def build_matrix(machine: str, cameras=None, resolution: str = "medium", samples
     return out
 
 
+def build_mapping(machine: str, matrix: str, equilibrium: str, injection_deg: float, transits: int = 1, substeps: int = 2,
+                  psi_max: float | None = None, workspace=None, progress: bool = False) -> Path:
+    """
+    Build (or find) the field-line mapping of a matrix for an equilibrium and
+    injector angle (emis3d.fieldline_map), cached beside the matrix. The
+    helical parametric model builds it itself when missing; this command
+    does it ahead of time. Returns the file's path.
+    """
+    from emis3d.fieldline_map import get_or_build
+    from emis3d.geometry import cached_matrix, matrix_path
+    from emis3d.workspace import Workspace, set_workspace
+
+    ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(workspace=workspace)
+    set_workspace(ws)
+    say = (lambda text: print(text, flush=True)) if progress else (lambda text: None)
+    mpath = matrix_path(ws, machine, matrix)
+    if not mpath.is_file():
+        raise FileNotFoundError(f"no geometry matrix {matrix!r} at {mpath}; build it with: emis3d build-matrix {machine} --resolution {matrix}")
+    fmap, path = get_or_build(ws, cached_matrix(mpath), machine, matrix, equilibrium, injection_deg, transits, substeps, psi_max, progress=say)
+    say(f"mapping: {path} ({fmap.n_pixels} source pixels, {len(fmap.passes)} passes)")
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Running an analysis
 # ---------------------------------------------------------------------------

@@ -78,21 +78,35 @@ def test_solver_recovers_a_smooth_source_and_respects_positivity(mock_tok):
 
 
 def test_field_aligned_mapping(mock_tok):
+    from emis3d.fieldline_map import FieldLineMap
+
     G = small_G(mock_tok, dR=0.15, n_phi=12)
-    ir, iz, _ = inv.pixel_grid(G)
     phi0 = float(G.grid.phi_centers[3])                                                       # on a sector centre
-    M = inv.mapping_field_aligned(G, ir, iz, mock_tok.gfile, phi0, decay=0.0, transits=1, substeps=1)
-    assert M.shape == (G.grid.n_voxels, ir.size) and M.nnz > 0 and (M.data > 0).all()
+    fmap = FieldLineMap.build(G, mock_tok.gfile, phi0, "test", mock.EQ_FILE, transits=1, substeps=1)
+    M = fmap.matrix(0.0)
+    assert M.shape == (G.grid.n_voxels, fmap.n_pixels) and M.nnz > 0 and (M.data > 0).all()
     assert np.asarray(M.sum(axis=1)).max() <= 2.0 + 1e-9                                       # one pass per direction, each averaged
-    sector = G.sector_of_voxel()
-    on_plane = np.flatnonzero(sector == 3)
-    sub = M[on_plane]                                                                         # on the source plane each pixel maps to itself
     hits = 0
-    for p, (r, z) in enumerate(zip(ir, iz, strict=True)):
-        v = G.eps_index(r, 3, z)
-        row = M[v]
+    for p, (r, z) in enumerate(zip(fmap.ir, fmap.iz, strict=True)):
+        row = M[G.eps_index(r, 3, z)]
         if row.nnz and row[0, p] > 0:
             hits += 1
-    assert hits >= 0.9 * ir.size and sub.nnz > 0
-    M_decay = inv.mapping_field_aligned(G, ir, iz, mock_tok.gfile, phi0, decay=1.0, transits=1, substeps=1)
-    assert M_decay.sum() < M.sum()                                                            # decay weakens the far sectors
+    assert hits >= 0.9 * fmap.n_pixels                                                        # on the source plane each pixel maps to itself
+    assert fmap.matrix(1.0).sum() < M.sum()                                                    # decay weakens the far sectors
+    src = fmap.gaussian_source(1.8, 0.1, 0.2, 0.2)
+    np.testing.assert_allclose(fmap.apply(src, 0.5), fmap.matrix(0.5) @ src, rtol=1e-12)
+
+
+def test_mapping_round_trip_and_cache(mock_tok, tmp_path):
+    from emis3d.fieldline_map import FieldLineMap, cached_map, map_path
+
+    G = small_G(mock_tok, dR=0.2, n_phi=8)
+    fmap = FieldLineMap.build(G, mock_tok.gfile, 0.3, "t", mock.EQ_FILE, transits=1, substeps=1)
+    path = fmap.save(tmp_path / "m.npz")
+    back = FieldLineMap.load(path)
+    assert back.n_pixels == fmap.n_pixels and len(back.passes) == len(fmap.passes) and back.phi0 == pytest.approx(0.3)
+    src = np.random.default_rng(0).uniform(size=fmap.n_pixels)
+    np.testing.assert_allclose(back.apply(src, 0.2), fmap.apply(src, 0.2))
+    assert cached_map(path) is cached_map(path)
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    assert map_path(ws, "MOCK", "low", "g_file.geqdsk", 225.0, 1).name == "low_map_g_file_225deg_1t.npz"

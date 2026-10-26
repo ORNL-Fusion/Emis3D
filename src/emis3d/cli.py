@@ -12,6 +12,8 @@ The ``emis3d`` command.
                                            build the radDists of a library config
     emis3d build-matrix MACHINE [--cameras C,C] [--resolution low|medium|high] [--samples N]
                                            build the geometry matrix (voxel forward model) into the cache
+    emis3d build-mapping MACHINE --matrix M --equilibrium G --injection DEG
+                                           build the field-line mapping for the helical model (cached)
     emis3d check RUN                       find problems in a run config and its files
     emis3d run RUN [--times T ...] [--workers N] [--no-plots]
                                            fit every evaluation time, save figures and results
@@ -193,6 +195,14 @@ def cmd_build_matrix(args) -> int:
     return 0
 
 
+def cmd_build_mapping(args) -> int:
+    from emis3d.pipeline import build_mapping
+
+    build_mapping(args.machine, args.matrix, args.equilibrium, args.injection, transits=args.transits, substeps=args.substeps,
+                  psi_max=args.psi_max, workspace=args.workspace, progress=True)
+    return 0
+
+
 def cmd_check(args) -> int:
     from emis3d.pipeline import check
 
@@ -283,6 +293,17 @@ def main(argv=None) -> int:
     pm.add_argument("--name", help="file name in the cache (default: the resolution)")
     pm.add_argument("--workspace")
     pm.set_defaults(func=cmd_build_matrix)
+
+    pf = sub.add_parser("build-mapping", help="build a matrix's field-line mapping for the helical model (cached)")
+    pf.add_argument("machine")
+    pf.add_argument("--matrix", default="medium", help="geometry matrix name (default medium)")
+    pf.add_argument("--equilibrium", required=True, help="g-file name in the equilibria folder")
+    pf.add_argument("--injection", type=float, required=True, help="injector toroidal angle [deg]: the source plane")
+    pf.add_argument("--transits", type=int, default=1)
+    pf.add_argument("--substeps", type=int, default=2, help="field lines per pixel edge (default 2)")
+    pf.add_argument("--psi-max", type=float, default=None, help="only source pixels with psi_N <= this")
+    pf.add_argument("--workspace")
+    pf.set_defaults(func=cmd_build_mapping)
 
     pk = sub.add_parser("check", help="find problems in a run config and its files before a long run")
     pk.add_argument("config", help="run config")

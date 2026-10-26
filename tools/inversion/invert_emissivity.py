@@ -26,6 +26,8 @@ Usage (from the workspace, with the emis3d environment active)
   python tools/inversion/invert_emissivity.py RUN --time T --mode field-aligned --decay 0.3
   options: --matrix medium  --equilibrium <g-file>  --transits 1  --substeps 2
            --lam 1e-3  --target-chi2 1.0  --psi-max 1.2  --out <folder>
+The field-aligned mode's field-line mapping is cached beside the geometry
+matrix (emis3d.fieldline_map), shared with the parametric helical model.
 
 Outputs: <out>/inversion_<mode>_t<time>.png (maps, fits, lambda scan) and
 .npz (solution, grid, kernel diagnostics). The run config's data, errors and
@@ -42,6 +44,8 @@ from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
 import yaml
+
+from emis3d.fieldline_map import pixel_grid  # noqa: F401  (re-exported for the tests and callers)
 
 logger = logging.getLogger("invert_emissivity")
 
@@ -94,19 +98,6 @@ def load_problem(run_config, evalTime: float, matrix_name: str):
     return e, G, rows, np.array(d), np.array(sig), tags, cams
 
 
-def pixel_grid(G, psi_norm=None, psi_max=None):
-    """The (R, z) cells of the matrix's grid inside the wall (and, if given, psi_N <= psi_max)."""
-    g = G.grid
-    inside = G.inside_wall.reshape(g.n_r, g.n_phi, g.n_z)[:, 0, :].copy()
-    if psi_norm is not None and psi_max is not None:
-        RR, ZZ = np.meshgrid(g.r_centers, g.z_centers, indexing="ij")
-        inside &= psi_norm(RR.ravel(), ZZ.ravel()).reshape(RR.shape) <= psi_max
-    ir, iz = np.nonzero(inside)
-    index = -np.ones((g.n_r, g.n_z), dtype=int)
-    index[ir, iz] = np.arange(ir.size)
-    return ir, iz, index
-
-
 def laplacian(ir, iz, index) -> sp.csr_matrix:
     """The graph Laplacian of the pixels (4-neighbours): (L x)_p = sum over neighbours (x_p - x_q)."""
     rows, cols, vals = [], [], []
@@ -139,70 +130,6 @@ def kernel_axisymmetric(G, rows, ir, iz) -> sp.csr_matrix:
         pix.append(np.full(g.n_phi, p))
     S = sp.csr_matrix((np.ones(sum(v.size for v in vox)), (np.concatenate(vox), np.concatenate(pix))), shape=(g.n_voxels, ir.size))
     return sp.csr_matrix(G.rows[rows] @ S)
-
-
-def mapping_field_aligned(G, ir, iz, gfile, phi0: float, decay: float, transits: int = 1, substeps: int = 2,
-                          n_tor: int | None = None, progress=None) -> sp.csr_matrix:
-    """
-    M (voxels x pixels): each source pixel on the plane phi0 carried along its
-    field line in both directions for `transits` turns, weighted by
-    exp(-decay * dphi^2) (dphi: toroidal angle travelled, radians).
-
-    For each pass (a direction and a transit), a voxel's value is the mean of
-    the sources whose field lines land in it at that sector (so a voxel takes
-    the source its field line comes from); substeps x substeps lines start in
-    each pixel to fill the gaps between landings.
-    """
-    from emis3d.fieldline_tracer import Fieldline_Tracer
-
-    say = progress or (lambda text: None)
-    g = G.grid
-    two_pi = 2.0 * np.pi
-    n_tor = n_tor or max(300, 8 * g.n_phi)
-    dR, dz = np.diff(g.r_edges).mean(), np.diff(g.z_edges).mean()
-    offs = (np.arange(substeps) + 0.5) / substeps - 0.5
-    inside_rz = G.inside_wall.reshape(g.n_r, g.n_phi, g.n_z)[:, 0, :]
-
-    passes: dict = {}  # (direction, transit) -> lists of voxel, pixel
-    t0 = time.perf_counter()
-    for p, (r, z) in enumerate(zip(ir, iz, strict=True)):
-        for a in offs:
-            for b in offs:
-                R0, Z0 = g.r_centers[r] + a * dR, g.z_centers[z] + b * dz
-                for direction in (1, -1):
-                    tr = Fieldline_Tracer(StartR=R0, StartZ=Z0, StartPhi=phi0, gfile=gfile, NumTor=n_tor)
-                    tr.trace(NumTransits=float(direction * transits))
-                    phi_line = np.asarray(tr.data["phi"], dtype=float)
-                    travelled = direction * (phi_line - phi0)  # increasing from 0
-                    Rl, Zl = np.asarray(tr.data["R"], dtype=float), np.asarray(tr.data["z"], dtype=float)
-                    for m in range(transits):
-                        # the angle travelled to reach each sector centre on this transit
-                        delta = (direction * (g.phi_centers - phi0)) % two_pi + m * two_pi
-                        Rk = np.interp(delta, travelled, Rl, left=np.nan, right=np.nan)
-                        Zk = np.interp(delta, travelled, Zl, left=np.nan, right=np.nan)
-                        i_r = np.searchsorted(g.r_edges, Rk) - 1
-                        i_z = np.searchsorted(g.z_edges, Zk) - 1
-                        ok = np.isfinite(Rk) & (i_r >= 0) & (i_r < g.n_r) & (i_z >= 0) & (i_z < g.n_z)
-                        ok[ok] &= inside_rz[i_r[ok], i_z[ok]]
-                        k = np.flatnonzero(ok)
-                        lst = passes.setdefault((direction, m), ([], []))
-                        lst[0].append(G.eps_index(i_r[k], k, i_z[k]))
-                        lst[1].append(np.full(k.size, p))
-        if p and p % 200 == 0:
-            say(f"  traced {p}/{ir.size} pixels ({time.perf_counter() - t0:.0f} s)")
-
-    sector = G.sector_of_voxel()
-    M = sp.csr_matrix((g.n_voxels, ir.size))
-    for (direction, m), (vox_l, pix_l) in passes.items():
-        vox, pix = np.concatenate(vox_l), np.concatenate(pix_l)
-        hits = sp.csr_matrix((np.ones(vox.size), (vox, pix)), shape=(g.n_voxels, ir.size))
-        count = np.asarray(hits.sum(axis=1)).ravel()
-        k = sector  # weight by the angle travelled to each voxel's sector on this pass
-        delta = (direction * (g.phi_centers[k] - phi0)) % two_pi + m * two_pi
-        w = np.exp(-decay * delta**2) / np.maximum(count, 1.0)
-        M = M + sp.diags(np.where(count > 0, w, 0.0)) @ hits
-    say(f"  mapping built: {ir.size} pixels x {substeps * substeps} lines x 2 directions x {transits} transit(s) in {time.perf_counter() - t0:.0f} s")
-    return sp.csr_matrix(M)
 
 
 # ---------------------------------------------------------------------------
@@ -397,8 +324,16 @@ def main(argv=None) -> int:
         K = kernel_axisymmetric(G, rows, ir, iz)
         M = None
     else:
-        say(f"tracing field lines from {ir.size} pixels on the plane {np.rad2deg(phi0):.0f} deg (decay {args.decay})")
-        M = mapping_field_aligned(G, ir, iz, gfile, phi0, args.decay, args.transits, args.substeps, progress=say)
+        # the cached field-line mapping of this matrix (emis3d.fieldline_map; also the helical model's)
+        from emis3d.fieldline_map import get_or_build
+
+        fmap, mpath = get_or_build(e.ws, G, e.info["tokamakName"], args.matrix, eq_name, float(e.info["injectionLocation"]),
+                                   transits=args.transits, substeps=args.substeps, psi_max=args.psi_max, progress=say)
+        say(f"field-line mapping: {mpath} (decay {args.decay})")
+        ir, iz = fmap.ir, fmap.iz  # the mapping's own source pixels
+        _, _, index = pixel_grid(G, psi_norm, args.psi_max)
+        L = laplacian(ir, iz, index)
+        M = fmap.matrix(args.decay)
         K = sp.csr_matrix(G.rows[rows] @ M)
 
     lams = [args.lam] if args.lam is not None else list(np.logspace(-8, 4, 25))

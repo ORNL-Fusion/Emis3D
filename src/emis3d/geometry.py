@@ -159,6 +159,10 @@ class GeometryMatrix:
         per voxel edge (default: supersampling(radDist)). With only_seen,
         only the voxels some channel sees are evaluated; the rest are zero.
         """
+        if hasattr(radDist, "voxel_emissivity"):  # already on this grid (a field-aligned source)
+            eps = np.asarray(radDist.voxel_emissivity(self), dtype=float)
+            eps[~self.inside_wall] = 0.0
+            return eps
         g = self.grid
         n_rz, n_ph = supersample if supersample is not None else self.supersampling(radDist)
         eps = np.zeros(g.n_voxels)
