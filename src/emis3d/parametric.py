@@ -53,6 +53,8 @@ MODELS = {
     "helical": {"distType": "FieldAligned", "emission": "fieldAligned", "field_aligned": True,
                 "params": {"startR": None, "startZ": None, "sigma_R": (0.02, 0.5), "sigma_z": (0.02, 0.5)}},
 }
+# The helical model's source plane: with vary_peak_rad_location the toroidal angle phi_source [deg]
+# is fitted within peak_shift_max_degrees of the injector (the whole structure rotates with it)
 NEEDS_EQUILIBRIUM = ("shell", "asymshell", "helical")
 SCALE_DEFS = ("constant", "exponential", "linear", "step")
 
@@ -129,7 +131,8 @@ class ParametricFit:
 
     def __init__(self, model: str, template, matrices: list, data: dict, scale_def: str, injection_deg: float,
                  bounds: dict | None = None, fixed: dict | None = None, supersample=None,
-                 a_bounds: tuple | None = None, b_bounds: tuple | None = None):
+                 a_bounds: tuple | None = None, b_bounds: tuple | None = None,
+                 vary_peak: bool = False, peak_shift_max_degrees: float = 180.0):
         from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
 
         if model not in MODELS:
@@ -151,8 +154,16 @@ class ParametricFit:
                 continue
             self.bounds[name] = tuple((bounds or {}).get(name) or b or defaults[name])
         self.field_aligned = bool(self.spec.get("field_aligned"))
+        self.injection_deg = float(injection_deg)
         if self.field_aligned:  # the decay along the field lines is the model's own toroidal shape
             self.bounds["decay"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS["exponential"])
+            if "phi_source" in self.fixed:
+                pass
+            elif vary_peak:  # the source plane's toroidal angle, around the injector
+                self.bounds["phi_source"] = tuple((bounds or {}).get("phi_source")
+                                                  or (self.injection_deg - float(peak_shift_max_degrees), self.injection_deg + float(peak_shift_max_degrees)))
+            else:
+                self.fixed["phi_source"] = self.injection_deg
         self.has_decay = scale_def in DECAY_BOUNDS and not self.field_aligned
         if self.has_decay:
             self.bounds["b"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS[scale_def])

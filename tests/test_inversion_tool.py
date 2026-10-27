@@ -166,3 +166,42 @@ def test_camera_angles_follow_the_channels_not_the_names(mock_tok):
     angles = inv.camera_angles(G, Tok(), ["D1", "D2", "S1", "S2"], ["DISRADU", "DISRADU", "SX90MF", "SX90MF"])
     assert angles["DISRADU"] == pytest.approx(np.deg2rad(135.0)) and angles["SX90MF"] == pytest.approx(np.deg2rad(270.0))
     assert inv.camera_angles(G, Tok(), ["X1"], ["UNKNOWN"]) == {}                         # no channel in the matrix: none, no crash
+
+
+def test_mirrored_helicity_reverses_the_poloidal_winding(mock_tok):
+    from emis3d.fieldline_tracer import Fieldline_Tracer
+
+    g = mock_tok.gfile
+    turns = {}
+    for mirror in (False, True):
+        tr = Fieldline_Tracer(StartR=2.0, StartZ=0.0, StartPhi=0.0, gfile=g, NumTor=200, mirror_helicity=mirror)
+        tr.trace(NumTransits=0.25)
+        R, Z = np.asarray(tr.data["R"]), np.asarray(tr.data["z"])
+        theta = np.unwrap(np.arctan2(Z - g.zmagx, R - g.rmagx))
+        turns[mirror] = (theta[-1] - theta[0], np.hypot(R[-1] - g.rmagx, Z[-1] - g.zmagx))
+    assert turns[True][0] == pytest.approx(-turns[False][0], rel=1e-6)                 # the same angle, the other way
+    assert turns[True][1] == pytest.approx(turns[False][1], rel=1e-6)                  # on the same flux surface
+
+
+def test_mirrored_mapping_is_cached_separately(tmp_path):
+    from emis3d.fieldline_map import map_path
+
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    normal = map_path(ws, "D3D", "low", "g184407.02121", 225.0, 1)
+    mirrored = map_path(ws, "D3D", "low", "g184407.02121", 225.0, 1, mirror_helicity=True)
+    assert normal != mirrored and mirrored.name.endswith("_mirrored.npz")
+
+
+def test_rotation_matches_a_mapping_traced_at_the_shifted_plane(mock_tok):
+    from emis3d.fieldline_map import FieldLineMap
+
+    G = small_G(mock_tok, dR=0.15, n_phi=12)
+    phi0 = float(G.grid.phi_centers[3])
+    A = FieldLineMap.build(G, mock_tok.gfile, phi0, "t", mock.EQ_FILE, transits=1, substeps=1)
+    B = FieldLineMap.build(G, mock_tok.gfile, phi0 + 2 * A.sector_width, "t", mock.EQ_FILE, transits=1, substeps=1)
+    src = A.gaussian_source(1.9, 0.2, 0.15, 0.2)
+    np.testing.assert_allclose(A.apply(src, 0.7, shift=2 * A.sector_width), B.apply(src, 0.7), atol=1e-12)   # exact for whole sectors
+    np.testing.assert_allclose(A.matrix(0.7, shift=2.5 * A.sector_width) @ src, A.apply(src, 0.7, shift=2.5 * A.sector_width), atol=1e-12)
+    half = A.apply(src, 0.7, shift=0.5 * A.sector_width)
+    np.testing.assert_allclose(half, 0.5 * (A.apply(src, 0.7) + A.apply(src, 0.7, shift=A.sector_width)), atol=1e-12)   # a blend
+    np.testing.assert_allclose(A.apply(src, 0.7, shift=2 * np.pi), A.apply(src, 0.7), atol=1e-12)                      # a full turn

@@ -307,7 +307,9 @@ class Emis3D:
 
             fit = ParametricFit(model, template, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
                                 bounds=(cfg.get("bounds") or {}).get(model), fixed=fixed, supersample=cfg.get("supersample"),
-                                a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds())
+                                a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds(),
+                                vary_peak=bool(self.info.get("vary_peak_rad_location", False)),
+                                peak_shift_max_degrees=float(self.info.get("peak_shift_max_degrees", 180.0)))
             logger.info("→ Parametric fit (%s) at t=%s through %s", model, evalTime, ", ".join(names))
             result = fit.search(seed=int(cfg.get("seed", 0)), maxiter=int(cfg.get("maxiter", 60)), popsize=int(cfg.get("popsize", 12)),
                                 progress=lambda text: logger.info(text))
@@ -1478,10 +1480,14 @@ class Emis3D:
         ax = f.add_subplot(gs[0, -1])
         tok._plot_first_wall(ax)
         inj = float(best["synthetic_dict"]["injectionLocation"])
+        where = "At the injector"
+        if best["radDist"].info.get("phi_source") is not None:  # a rotated helical source plane
+            inj = float(best["radDist"].info["phi_source"])
+            where = "At the source plane"
         cf = best["radDist"].plotCrossSection(phi=np.deg2rad(inj), ax=ax)
         if cf is not None:
             f.colorbar(cf, ax=ax, label="emissivity [arb.]", shrink=0.85)
-        ax.set_title(f"At the injector ({inj:.1f}°)\n{self._raddist_description(evalTime)}", fontsize=10)
+        ax.set_title(f"{where} ({inj:.1f}°)\n{self._raddist_description(evalTime)}", fontsize=10)
         ax.set_xlabel("R [m]")
         ax.set_ylabel("z [m]")
 

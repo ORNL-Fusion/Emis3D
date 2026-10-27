@@ -38,7 +38,9 @@ class RunConfig:
     # --- Toroidal shape of the radiation (how emission falls off away from the injector)
     scale_def: str = "linear"  # "linear", "exponential", "constant" or "step"
     enable_dphi_scaling: bool = True  # fit the fall-off (b); False keeps b fixed and fits only the amplitude
-    vary_peak_rad_location: bool = False  # True fits the peak's toroidal location instead of fixing it at the injector
+    vary_peak_rad_location: bool = False  # fit the radiation peak's toroidal location instead of assuming the injector's:
+    #   library solver: the toroidal scale's peak moves (the radDists' structure is fixed);
+    #   parametric helical model: the source plane rotates (phi_source), the whole structure with it
     peak_shift_max_degrees: float = 180.0  # how far the fitted peak may move from the injector [deg]
     helical_endpoint_weight: float = 1.0  # ties clockwise/counterclockwise helical endpoints; 0 = off; helical only
 

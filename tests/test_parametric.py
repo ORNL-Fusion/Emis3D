@@ -517,3 +517,28 @@ def test_helical_and_ring_compared_end_to_end(rings, tmp_path, monkeypatch):
     assert map_path(ws, "MOCK", "low", mock.EQ_FILE, float(e.info["injectionLocation"]), 1).is_file()   # built once, cached
     helical = next(r for r in best["parametric_models"] if r.model == "helical")
     assert "decay" in helical.values and helical.n_params == 6
+
+
+# ---------------------------------------------------------------------------
+# The helical source plane's toroidal angle (vary_peak_rad_location)
+# ---------------------------------------------------------------------------
+
+def test_rotated_source_plane_is_recovered(helical_setup):
+    G, fmap, template = helical_setup
+    truth = {**HELICAL_TRUE, "phi_source": 225.0 + 40.0}                                    # 40 deg past the injector
+    probe = ParametricFit("helical", template, [G], {t: (1.0, 1.0) for t in G.channels}, "constant", 225.0, vary_peak=True,
+                          peak_shift_max_degrees=90.0)
+    assert "phi_source" in probe.names and probe.bounds["phi_source"] == (135.0, 315.0)
+    signal = probe.model_signals(G, truth)
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    data = {t: (float(s), float(e)) for t, s, e in zip(G.channels, signal, sigma, strict=True)}
+    fit = ParametricFit("helical", template, [G], data, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0,
+                        bounds={"startR": (1.5, 2.2), "startZ": (-0.5, 0.5)})
+    res = fit.search(seed=0, maxiter=60)
+    assert res.values["phi_source"] == pytest.approx(265.0, abs=12.0)
+    assert res.values["startR"] == pytest.approx(HELICAL_TRUE["startR"], abs=0.08)
+    assert res.chi2 / res.n_data < 0.5
+
+    fixed = ParametricFit("helical", template, [G], data, "constant", 225.0)                 # not varied: at the injector
+    assert "phi_source" not in fixed.names and fixed.fixed["phi_source"] == 225.0
+    assert fixed.chi2(G, {**HELICAL_TRUE})[0] > res.chi2 + 1.0                                # which cannot explain rotated data

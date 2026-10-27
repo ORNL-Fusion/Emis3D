@@ -42,10 +42,10 @@ def pixel_grid(G, psi_norm=None, psi_max=None):
     return ir, iz, index
 
 
-def map_path(ws, machine: str, matrix_name: str, equilibrium: str, phi0_deg: float, transits: int) -> Path:
-    """Where a mapping lives: <cache>/<machine>/geometry/<matrix>_map_<equilibrium>_<phi0>deg_<transits>t.npz."""
+def map_path(ws, machine: str, matrix_name: str, equilibrium: str, phi0_deg: float, transits: int, mirror_helicity: bool = False) -> Path:
+    """Where a mapping lives: <cache>/<machine>/geometry/<matrix>_map_<equilibrium>_<phi0>deg_<transits>t[_mirrored].npz."""
     eq = Path(str(equilibrium)).stem.replace(" ", "_")
-    return ws.path("cache") / machine / "geometry" / f"{matrix_name}_map_{eq}_{phi0_deg:g}deg_{int(transits)}t.npz"
+    return ws.path("cache") / machine / "geometry" / f"{matrix_name}_map_{eq}_{phi0_deg:g}deg_{int(transits)}t{'_mirrored' if mirror_helicity else ''}.npz"
 
 
 @dataclass
@@ -85,20 +85,63 @@ class FieldLineMap:
         two_pi = 2.0 * np.pi
         return (direction * (self.phi_centers[self.sector_of_voxel] - self.phi0)) % two_pi + transit * two_pi
 
-    def apply(self, source: np.ndarray, decay: float) -> np.ndarray:
-        """The voxel emissivity of a source on the plane (per pixel), with decay exp(-decay dphi^2)."""
+    @property
+    def sector_width(self) -> float:
+        return 2.0 * np.pi / self.n_phi
+
+    def _shift_sectors(self, shift: float) -> tuple[int, float]:
+        """A toroidal shift [rad] as (whole sectors, fraction of a sector towards the next)."""
+        s = float(shift) / self.sector_width
+        k = int(np.floor(s))
+        return k % self.n_phi, s - k
+
+    def rotate(self, eps: np.ndarray, shift: float) -> np.ndarray:
+        """
+        A voxel field rotated toroidally by `shift` [rad]. The equilibrium is
+        axisymmetric, so the field-line geometry is the same at every angle:
+        rotating the mapped emission is exact for whole sectors (an index
+        shift) and a linear blend of the two neighbouring whole-sector
+        shifts in between. The cameras do not rotate, which is the point.
+        """
+        n_r, n_z = self.r_centers.size, self.z_centers.size
+        field = np.asarray(eps, dtype=float).reshape(n_r, self.n_phi, n_z)
+        k, f = self._shift_sectors(shift)
+        out = (1.0 - f) * np.roll(field, k, axis=1)
+        if f > 0:
+            out = out + f * np.roll(field, k + 1, axis=1)
+        return out.ravel()
+
+    def apply(self, source: np.ndarray, decay: float, shift: float = 0.0) -> np.ndarray:
+        """
+        The voxel emissivity of a source on the plane (per pixel), with decay
+        exp(-decay dphi^2); `shift` [rad] rotates the result toroidally, i.e.
+        moves the source plane to phi0 + shift (see rotate).
+        """
         eps = np.zeros(self.n_voxels)
         for direction, transit, M in self.passes:
             w = np.exp(-float(decay) * self.travelled(direction, transit) ** 2)
             eps += w * np.asarray(M @ np.asarray(source, dtype=float)).ravel()
-        return eps
+        return self.rotate(eps, shift) if shift else eps
 
-    def matrix(self, decay: float) -> sp.csr_matrix:
-        """The mapping as one sparse matrix (voxels x pixels) for a decay."""
+    def _permutation(self, k: int) -> sp.csr_matrix:
+        """The voxel permutation of a whole-sector shift k (voxels x voxels)."""
+        n_r, n_z = self.r_centers.size, self.z_centers.size
+        idx = np.arange(self.n_voxels).reshape(n_r, self.n_phi, n_z)
+        src = np.roll(idx, k, axis=1).ravel()  # out[j] = in[src[j]], as np.roll(field, k) does
+        return sp.csr_matrix((np.ones(self.n_voxels), (np.arange(self.n_voxels), src)), shape=(self.n_voxels, self.n_voxels))
+
+    def matrix(self, decay: float, shift: float = 0.0) -> sp.csr_matrix:
+        """The mapping as one sparse matrix (voxels x pixels) for a decay, with the source plane rotated by `shift` [rad]."""
         total = sp.csr_matrix((self.n_voxels, self.n_pixels))
         for direction, transit, M in self.passes:
             w = np.exp(-float(decay) * self.travelled(direction, transit) ** 2)
             total = total + sp.diags(w) @ M
+        if shift:
+            k, f = self._shift_sectors(shift)
+            rotated = (1.0 - f) * (self._permutation(k) @ total)
+            if f > 0:
+                rotated = rotated + f * (self._permutation(k + 1) @ total)
+            total = rotated
         return sp.csr_matrix(total)
 
     def gaussian_source(self, R0: float, z0: float, sigma_R: float, sigma_z: float) -> np.ndarray:
@@ -108,7 +151,8 @@ class FieldLineMap:
     # ------------------------------------------------------------------
     @classmethod
     def build(cls, G, gfile, phi0: float, matrix_name: str, equilibrium: str, transits: int = 1, substeps: int = 2,
-              psi_norm=None, psi_max: float | None = None, n_tor: int | None = None, progress=None) -> "FieldLineMap":
+              psi_norm=None, psi_max: float | None = None, n_tor: int | None = None, progress=None,
+              mirror_helicity: bool = False) -> "FieldLineMap":
         """
         Trace every source pixel's field line (substeps x substeps lines per
         pixel, both directions, `transits` turns) and record, per pass, the
@@ -129,13 +173,14 @@ class FieldLineMap:
         hits: dict = {}
         t0 = time.perf_counter()
         say(f"tracing field lines from {ir.size} pixels on the plane {np.rad2deg(phi0):.1f} deg "
-            f"({substeps * substeps} per pixel, both directions, {transits} transit(s))")
+            f"({substeps * substeps} per pixel, both directions, {transits} transit(s)"
+            + (", HELICITY MIRRORED" if mirror_helicity else "") + ")")
         for p, (r, z) in enumerate(zip(ir, iz, strict=True)):
             for a in offs:
                 for b in offs:
                     R0, Z0 = g.r_centers[r] + a * dR, g.z_centers[z] + b * dz
                     for direction in (1, -1):
-                        tr = Fieldline_Tracer(StartR=R0, StartZ=Z0, StartPhi=phi0, gfile=gfile, NumTor=n_tor)
+                        tr = Fieldline_Tracer(StartR=R0, StartZ=Z0, StartPhi=phi0, gfile=gfile, NumTor=n_tor, mirror_helicity=mirror_helicity)
                         tr.trace(NumTransits=float(direction * transits))
                         phi_line = np.asarray(tr.data["phi"], dtype=float)
                         travelled = direction * (phi_line - phi0)
@@ -166,7 +211,8 @@ class FieldLineMap:
         return cls(machine=G.machine, matrix_name=matrix_name, equilibrium=str(equilibrium), phi0=float(phi0), transits=int(transits),
                    substeps=int(substeps), n_voxels=g.n_voxels, n_phi=g.n_phi, phi_centers=g.phi_centers, sector_of_voxel=sector,
                    ir=ir, iz=iz, r_centers=g.r_centers, z_centers=g.z_centers, passes=passes,
-                   provenance={"built_in": round(time.perf_counter() - t0, 1), "n_tor": n_tor, "psi_max": psi_max})
+                   provenance={"built_in": round(time.perf_counter() - t0, 1), "n_tor": n_tor, "psi_max": psi_max,
+                               "mirror_helicity": bool(mirror_helicity)})
 
     # ------------------------------------------------------------------
     def save(self, path) -> Path:
@@ -216,9 +262,9 @@ def cached_map(path) -> FieldLineMap:
 
 
 def get_or_build(ws, G, machine: str, matrix_name: str, equilibrium: str, phi0_deg: float, transits: int = 1, substeps: int = 2,
-                 psi_max: float | None = None, progress=None) -> tuple[FieldLineMap, Path]:
+                 psi_max: float | None = None, progress=None, mirror_helicity: bool = False) -> tuple[FieldLineMap, Path]:
     """The cached mapping for these settings, built (and saved) if it does not exist yet."""
-    path = map_path(ws, machine, matrix_name, equilibrium, phi0_deg, transits)
+    path = map_path(ws, machine, matrix_name, equilibrium, phi0_deg, transits, mirror_helicity)
     if path.is_file():
         return cached_map(path), path
     from emis3d.tokamak import Tokamak
@@ -236,7 +282,7 @@ def get_or_build(ws, G, machine: str, matrix_name: str, equilibrium: str, phi0_d
         interp = RegularGridInterpolator((Rg, Zg), (np.asarray(gf.psi, float) - gf.simagx) / (gf.sibdry - gf.simagx), bounds_error=False, fill_value=1e6)
         psi_norm = lambda R, Z: interp(np.column_stack([R, Z]))  # noqa: E731
     fmap = FieldLineMap.build(G, tok.gfile, float(np.deg2rad(phi0_deg)) % (2.0 * np.pi), matrix_name, equilibrium, transits, substeps,
-                              psi_norm, psi_max, progress=progress)
+                              psi_norm, psi_max, progress=progress, mirror_helicity=mirror_helicity)
     fmap.provenance.update(ws.provenance())
     fmap.save(path)
     _LOADED[str(path.resolve())] = fmap

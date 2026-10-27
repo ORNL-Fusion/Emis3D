@@ -44,9 +44,18 @@ class Fieldline_Tracer:
         StartPhi=None,
         gfile=None,
         NumTor=50000,
+        mirror_helicity: bool = False,
     ):
+        """
+        mirror_helicity: flip the toroidal field's sign relative to the
+        poloidal field, so field lines wind the opposite way poloidally per
+        toroidal turn. A diagnostic of the sign conventions (a g-file not in
+        COCOS 1): with the right convention, data from field-aligned
+        radiation fit clearly worse with the helicity mirrored.
+        """
         self.gfile = gfile
         self.numTor = NumTor
+        self.mirror_helicity = bool(mirror_helicity)
         self.startR = StartR
         self.startZ = StartZ
         self.startPhi = StartPhi
@@ -104,9 +113,11 @@ class Fieldline_Tracer:
         self.psiI = psiI
         self.F_of_psin = F_of_psin
 
+        helicity = 1.0 if self.mirror_helicity else -1.0  # -1: the sign the tracer has always used
+
         def B_phi(tR: float, tZ: float) -> float:
             psin = float((psiI.ev(tR, tZ) - simagx) / (sibdry - simagx))
-            return -F_of_psin(psin) / tR
+            return helicity * F_of_psin(psin) / tR
 
         self.B_phi = B_phi
 

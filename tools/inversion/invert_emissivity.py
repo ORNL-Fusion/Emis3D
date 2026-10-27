@@ -261,7 +261,7 @@ def plot(path, mode, G, ir, iz, x, eps_vox, K, d, sig, tags, cams, chosen, resul
     psin = psi_norm(RR.ravel(), ZZ.ravel()).reshape(shape) if psi_norm is not None else None
     cam_names = list(dict.fromkeys(cams))
 
-    maps = [("reconstruction" if mode == "axisymmetric" else f"source on the injector plane ({np.rad2deg(phi0):.0f} deg)", as_map(x, ir, iz, shape))]
+    maps = [("reconstruction" if mode == "axisymmetric" else f"source on the plane at {np.rad2deg(phi0):.0f} deg", as_map(x, ir, iz, shape))]
     if mode == "field-aligned":
         for cam in cam_names:
             if cam not in camera_phi:
@@ -329,6 +329,12 @@ def main(argv=None) -> int:
     ap.add_argument("--transits", type=int, default=1, help="field-aligned: toroidal turns followed in each direction (default 1)")
     ap.add_argument("--substeps", type=int, default=2, help="field-aligned: field lines per pixel edge (default 2)")
     ap.add_argument("--psi-max", type=float, default=None, help="only pixels with psi_N <= this (default: all inside the wall)")
+    ap.add_argument("--source-plane", type=float, default=None,
+                    help="field-aligned: toroidal angle [deg] of the source plane (default: the injector); the injector's "
+                         "mapping is rotated there, no retracing")
+    ap.add_argument("--mirror-helicity", action="store_true",
+                    help="field-aligned: wind the field lines the opposite way (a check of the sign conventions: with "
+                         "the right ones the mirrored case needs a rougher map, i.e. weaker regularization, to fit)")
     ap.add_argument("--lam", type=float, default=None, help="regularization (relative); default: scanned, chi2/N = target")
     ap.add_argument("--target-chi2", type=float, default=1.0, help="chi2/N the scan aims for (default 1)")
     ap.add_argument("--out", help="output folder (default: the run config's folder)")
@@ -362,6 +368,7 @@ def main(argv=None) -> int:
     ir, iz, index = pixel_grid(G, psi_norm, args.psi_max)
     L = laplacian(ir, iz, index)
     phi0 = float(np.deg2rad(e.info["injectionLocation"])) % (2.0 * np.pi)
+    shift = 0.0
     if args.mode == "axisymmetric":
         K = kernel_axisymmetric(G, rows, ir, iz)
         M = None
@@ -370,12 +377,16 @@ def main(argv=None) -> int:
         from emis3d.fieldline_map import get_or_build
 
         fmap, mpath = get_or_build(e.ws, G, e.info["tokamakName"], args.matrix, eq_name, float(e.info["injectionLocation"]),
-                                   transits=args.transits, substeps=args.substeps, psi_max=args.psi_max, progress=say)
+                                   transits=args.transits, substeps=args.substeps, psi_max=args.psi_max, progress=say,
+                                   mirror_helicity=args.mirror_helicity)
         say(f"field-line mapping: {mpath} (decay {args.decay})")
         ir, iz = fmap.ir, fmap.iz  # the mapping's own source pixels
         _, _, index = pixel_grid(G, psi_norm, args.psi_max)
         L = laplacian(ir, iz, index)
-        M = fmap.matrix(args.decay)
+        shift = (np.deg2rad(args.source_plane) - phi0) if args.source_plane is not None else 0.0
+        if shift:
+            say(f"source plane rotated to {args.source_plane:g} deg ({np.rad2deg(shift):+.1f} deg from the injector)")
+        M = fmap.matrix(args.decay, shift=shift)
         K = sp.csr_matrix(G.rows[rows] @ M)
 
     lams = [args.lam] if args.lam is not None else list(np.logspace(-8, 4, 25))
@@ -393,7 +404,7 @@ def main(argv=None) -> int:
     P_sector = (eps_vox.reshape(g.n_r, g.n_phi, g.n_z) * volume).sum(axis=(0, 2))
     total = float(P_sector.sum())
     tpf = float(P_sector.max() / P_sector.mean()) if P_sector.mean() > 0 else float("nan")
-    say(f"chosen lambda {lam:.2e}: chi2/N {c:.2f}; total radiated power {total:.3g} W; TPF {tpf:.2f}"
+    say(f"chosen lambda {lam:.2e}: chi2/N {c:.2f}, roughness {rough:.3g}; total radiated power {total:.3g} W; TPF {tpf:.2f}"
         + (" (axisymmetric by construction)" if M is None else ""))
     by_cam = per_camera_chi2(K, x, d, sig, cams)
     say("chi2/N per camera: " + ", ".join(f"{cam} {v:.2f}" for cam, v in by_cam.items()))
@@ -405,11 +416,14 @@ def main(argv=None) -> int:
 
     out = Path(args.out) if args.out else Path(args.run_config).resolve().parent
     out.mkdir(parents=True, exist_ok=True)
-    stem = out / f"inversion_{args.mode}_t{args.time:g}"
+    stem = out / f"inversion_{args.mode}_t{args.time:g}" if args.mode == "axisymmetric" else \
+        out / f"inversion_{args.mode}_t{args.time:g}_decay{args.decay:g}{f'_plane{args.source_plane:g}' if args.source_plane is not None else ''}{'_mirrored' if args.mirror_helicity else ''}"
     title = (f"{e.info['tokamakName']} {e.info['shot']}  t = {args.time:g}  {args.mode} inversion"
-             + (f" (decay {args.decay:g}, {args.transits} transit(s))" if M is not None else "")
-             + f"\nlambda {lam:.1e}   chi2/N {c:.2f}   total power {total:.3g} W   TPF {tpf:.2f}")
-    plot(stem.with_suffix(".png"), args.mode, G, ir, iz, x, eps_vox, K, d, sig, tags, cams, chosen, results, phi0, camera_phi, psi_norm, title)
+             + (f" (decay {args.decay:g}, {args.transits} transit(s)" + (f", source plane {args.source_plane:g} deg" if args.source_plane is not None else "")
+                + f"{', HELICITY MIRRORED' if args.mirror_helicity else ''})" if M is not None else "")
+             + f"\nlambda {lam:.1e}   chi2/N {c:.2f}   roughness {rough:.3g}   total power {total:.3g} W   TPF {tpf:.2f}")
+    plane = phi0 + shift if M is not None else phi0
+    plot(stem.with_suffix(".png"), args.mode, G, ir, iz, x, eps_vox, K, d, sig, tags, cams, chosen, results, plane, camera_phi, psi_norm, title)
     np.savez_compressed(stem.with_suffix(".npz"), x=x, ir=ir, iz=iz, r_centers=g.r_centers, z_centers=g.z_centers, phi_centers=g.phi_centers,
                         P_sector=P_sector, lam=lam, chi2_per_point=c, tags=np.array(tags), data=d, sigma=sig, model=np.asarray(K @ x).ravel(),
                         mode=args.mode, decay=args.decay)

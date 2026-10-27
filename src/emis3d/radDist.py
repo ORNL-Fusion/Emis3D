@@ -1747,10 +1747,12 @@ class FieldAlignedSource(RadDist):
     field lines in both directions with a decay exp(-decay dphi^2). Its
     emissivity lives on the mapping's voxel grid (the geometry matrix's);
     elsewhere it is interpolated, as a simulation radDist's is. Settings:
-    mapPath (the mapping file), decay, and the source's shape.
+    mapPath (the mapping file), decay, the source's shape, and phi_source
+    [deg]: the source plane's toroidal angle (default the mapping's, the
+    injector's); the mapped structure is rotated there (FieldLineMap.rotate).
     """
 
-    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("decay", "decay"))
+    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("decay", "decay"), ("phi_source", "phi"))
 
     def __init__(self, startR=None, startZ=None, config=None):
         config = {} if config is None else config
@@ -1774,11 +1776,12 @@ class FieldAlignedSource(RadDist):
         if f is None:
             raise ValueError("no field-line mapping for this geometry matrix (emis3d build-mapping, or list it in parametric.matrices)")
         src = f.gaussian_source(float(self.info["startR"]), float(self.info["startZ"]), float(self.info["sigma_R"]), float(self.info["sigma_z"]))
-        return f.apply(src, float(self.info["decay"]))
+        shift = (np.deg2rad(float(self.info["phi_source"])) - f.phi0) if self.info.get("phi_source") is not None else 0.0
+        return f.apply(src, float(self.info["decay"]), shift=shift)
 
     def _interpolator(self):
         """3-D linear interpolation of the voxel emissivity (periodic in phi), rebuilt when the settings change."""
-        key = tuple(float(self.info[k]) for k in ("startR", "startZ", "sigma_R", "sigma_z", "decay"))
+        key = tuple(float(self.info[k]) for k in ("startR", "startZ", "sigma_R", "sigma_z", "decay")) + (float(self.info.get("phi_source") or -1e9),)
         if self._grid_eps is None or self._grid_eps[0] != key:
             from scipy.interpolate import RegularGridInterpolator
 
