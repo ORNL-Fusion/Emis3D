@@ -128,6 +128,9 @@ class Tokamak(object):
             self.info = {}
 
         self.info["tokamakName"] = tokamakName
+        from emis3d.injector import load_injectors
+
+        self.injectors = load_injectors(self.info, f"{tokamakName}_settings.yaml")  # SPI geometry, if any
         self.info["mode"] = mode
         self.info["reflections"] = reflections
         self.info["eqFileName"] = eqFileName

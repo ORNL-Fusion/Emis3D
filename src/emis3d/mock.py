@@ -173,6 +173,11 @@ def settings(spec: MockSpec = DEFAULT) -> dict:
             "numInjectors": 1,
         },
         "BOLOMETERS": {c.name: {"configFileName": f"{c.name}_config.yaml"} for c in spec.cameras},
+        # An example SPI injector (emis3d.injector): breaks near the outer wall above the midplane, sprays at the axis
+        "INJECTORS": {
+            "SPI225": {"phi_deg": 225.0, "shatter_R": 2.25, "shatter_Z": 0.35, "divergence_deg": 20.0, "speed": 200.0,
+                       "speed_spread": 0.15, "verified": True, "note": "MOCK example injector"},
+        },
     }
 
 

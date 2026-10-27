@@ -395,6 +395,19 @@ class Emis3D:
             warnings.simplefilter("ignore")
             return radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
 
+    @staticmethod
+    def _mark_ranges_unavailable(best: dict, why: str) -> None:
+        """Ranges that cannot be computed are reported as unavailable, not as a zero-width interval around the best fit."""
+        ranges = best.get("ranges")
+        if ranges is None:
+            return
+        ranges["unavailable"] = why
+        for key in ("total", "statistical"):
+            for q in ("tpf", "total_power"):
+                ranges.get(key, {}).pop(q, None)
+        ranges.pop("profile_band", None)
+        logger.warning("Ranges unavailable: %s", why)
+
     def _parametric_ranges(self, evalTime: float) -> None:
         """
         For a parametric fit, the TPF, total-power and profile ranges come from
@@ -409,7 +422,11 @@ class Emis3D:
         result = getattr(self, "parametric", {}).get(evalTime)
         fit = getattr(self, "_parametric_fits", {}).get(evalTime)
         best = self.bestFits.get(evalTime, {}) if hasattr(self, "bestFits") else {}
-        if result is None or fit is None or result.fit is None or "ranges" not in best:
+        if result is None or fit is None or "ranges" not in best:
+            return
+        if result.fit is None or getattr(result.fit, "covar", None) is None:
+            # (sample_parameters would return copies of the best fit: a zero-width range that reads as certainty)
+            self._mark_ranges_unavailable(best, "the parametric fit's covariance could not be computed (often: parameters on their bounds)")
             return
         cfg = uncertainty.UncertaintyConfig.from_info(self.info)
         n = int(min(cfg.n_samples, 300))  # each draw re-evaluates the model: a few ms each
@@ -417,6 +434,7 @@ class Emis3D:
         if not samples:
             for flag in flags:
                 logger.info("Parametric ranges at t=%s: %s", evalTime, flag)
+            self._mark_ranges_unavailable(best, "the parametric fit's covariance could not be computed (often: parameters on their bounds)")
             return
         G = fit.matrices[-1]
         P_best_sec = fit.sector_profile(G, result.values)
@@ -555,6 +573,24 @@ class Emis3D:
                 run_paths=self.info.get("paths"),
             )
         set_workspace(self.ws)  # tokamaks and radDists built later use the same locations
+
+        # --- The SPI injector, if the run names one: its toroidal angle is the injection location
+        self.injector = None
+        if self.info.get("injector"):
+            from emis3d.injector import machine_injectors
+
+            injectors = machine_injectors(self.ws, tokamakName)
+            name = self.info["injector"]
+            if name not in injectors:
+                raise ValueError(f"injector {name!r} is not in {tokamakName}'s settings (INJECTORS: {sorted(injectors) or 'none'})")
+            self.injector = injectors[name]
+            given = raw.get("injectionLocation")
+            if given is not None and abs(((float(given) - self.injector.phi_deg + 180.0) % 360.0) - 180.0) > 0.5:
+                raise ValueError(f"injectionLocation {given} does not match injector {name}'s phi_deg {self.injector.phi_deg:g} "
+                                 "(give one or the other, in Emis3D coordinates)")
+            self.info["injectionLocation"] = self.injector.phi_deg
+            if not self.injector.verified:
+                logger.warning("Injector %s: UNVERIFIED geometry%s", name, f" ({self.injector.note})" if self.injector.note else "")
 
         self.info["tokamakName"] = tokamakName
         self.info["runConfigName"] = runConfigName
@@ -1552,15 +1588,29 @@ class Emis3D:
         cf = best["radDist"].plotCrossSection(phi=np.deg2rad(inj), ax=ax)
         if cf is not None:
             f.colorbar(cf, ax=ax, label="emissivity [arb.]", shrink=0.85)
-        ax.set_title(f"{where} ({inj:.1f}°)\n{self._raddist_description(evalTime)}", fontsize=10)
+        model = best["parametric"].model if "parametric" in best else best["radDist"].info.get("distType", "")
+        ax.set_title(f"{where} ({inj:.1f}°): {model}", fontsize=10)
         ax.set_xlabel("R [m]")
         ax.set_ylabel("z [m]")
+        # the fitted parameters in a box inside the panel (a title this long ran into the figure's)
+        ax.text(0.02, 0.02, self._wrapped_description(evalTime), transform=ax.transAxes, fontsize=6.5, va="bottom", ha="left",
+                family="monospace", bbox={"boxstyle": "round,pad=0.3", "fc": "white", "ec": "0.6", "alpha": 0.8}, zorder=10)
+        # the SPI spray, in the injector's poloidal plane
+        spi = getattr(self, "injector", None)
+        if spi is not None:
+            g = getattr(tok, "gfile", None)
+            R_ax, Z_ax = (float(g.rmagx), float(g.zmagx)) if g is not None else (float(np.mean(ax.get_xlim())), 0.0)
+            same_plane = abs(((inj - spi.phi_deg + 180.0) % 360.0) - 180.0) < 1.0
+            spi.plot(ax, R_ax, Z_ax, label=f"{spi.name}" + ("" if same_plane else f" (its plane, {spi.phi_deg:g}°)"))
+            ax.legend(loc="upper right", fontsize=7, framealpha=0.8)
 
         # --- Toroidal profile with its ranges, below it
         self._plot_tpf_panel(f.add_subplot(gs[1, -1]), evalTime, tok=tok)
 
-        f.suptitle(self._figure_title(evalTime), fontsize=12)
-        f.subplots_adjust(left=0.05, right=0.97, top=0.91, bottom=0.06)
+        title = self._figure_title(evalTime)
+        f.suptitle(title, fontsize=12)
+        n_lines = title.count("\n") + 1
+        f.subplots_adjust(left=0.05, right=0.97, top=min(0.92, 0.955 - 0.028 * n_lines), bottom=0.06)  # room for every title line
 
         if save:
             if "shot" in self.info and "tokamakName" in self.info:
@@ -1589,8 +1639,18 @@ class Emis3D:
             f"fit: {self.info['fit_method']}   AIC = {score:.1f}"
         )
         if best.get("at_bounds"):
-            title += "\nAT BOUNDS: " + "; ".join(best["at_bounds"])
+            import textwrap
+
+            title += "\n" + "\n".join(textwrap.wrap("AT BOUNDS: " + "; ".join(best["at_bounds"]), width=150))
         return title
+
+    def _wrapped_description(self, evalTime: float, width: int = 38) -> str:
+        """The best fit's parameters, one component per paragraph, wrapped for a box inside the panel."""
+        import textwrap
+
+        text = self._raddist_description(evalTime)
+        paragraphs = [p.strip() for p in text.split(" | ")]
+        return "\n".join("\n".join(textwrap.wrap(p, width=width, subsequent_indent="  ")) for p in paragraphs if p)
 
     def _raddist_description(self, evalTime: float) -> str:
         """The chosen shape's parameters, from its class's SAVE_KEYS, and its start position."""
@@ -1731,13 +1791,13 @@ class Emis3D:
         y = np.asarray(rad["total_power"], dtype=float)[order]
 
         y_max = np.nanmax(y)
-        if ranges is not None:
-            y_max = max(y_max, np.nanmax(ranges["profile_band"]["95%"][1]))
+        band = ranges.get("profile_band") if ranges is not None else None
+        if band is not None:
+            y_max = max(y_max, np.nanmax(band["95%"][1]))
         scale = np.floor(np.log10(y_max)) if np.isfinite(y_max) and y_max > 0 else 0.0
         norm = 10.0**scale
 
-        if ranges is not None:
-            band = ranges["profile_band"]
+        if band is not None:
             for level, colour in (("95%", "0.85"), ("68%", "0.65")):
                 lo = np.asarray(band[level][0])[order] / norm
                 hi = np.asarray(band[level][1])[order] / norm
@@ -1775,6 +1835,8 @@ class Emis3D:
         if ranges is not None and "tpf" in ranges["total"]:
             lo, hi = ranges["total"]["tpf"]["68%"]
             title += f" (68%: {lo:.2f}–{hi:.2f})"
+        elif ranges is not None and ranges.get("unavailable"):
+            title += " (range unavailable)"
         if P_tot is not None:
             title += f"\ntotal power {P_tot:.3g}"
             if ranges is not None and "total_power" in ranges["total"]:

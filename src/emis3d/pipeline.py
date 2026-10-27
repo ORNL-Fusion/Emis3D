@@ -478,6 +478,24 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
 
     ok(f"solver: {cfg.solver}; bounds a {cfg.amplitude_bounds()}, b {cfg.decay_bounds()}")
 
+    # --- The SPI injector, if the run names one
+    if cfg.injector:
+        from emis3d.injector import machine_injectors
+
+        try:
+            injectors = machine_injectors(ws, cfg.tokamakName)
+        except ValueError as e:
+            err(str(e))
+            injectors = {}
+        inj = injectors.get(cfg.injector)
+        if inj is None:
+            err(f"injector {cfg.injector!r} is not in {cfg.tokamakName}'s settings (INJECTORS: {sorted(injectors) or 'none'})")
+        else:
+            given = raw.get("injectionLocation") if isinstance(raw, dict) else None
+            if given is not None and abs(((float(given) - inj.phi_deg + 180.0) % 360.0) - 180.0) > 0.5:
+                err(f"injectionLocation {given} does not match injector {inj.name}'s phi_deg {inj.phi_deg:g}")
+            (ok if inj.verified else warn)(inj.describe())
+
     # --- Parametric fit: its geometry matrices must be in the cache
     if cfg.solver == "parametric":
         from emis3d.geometry import matrix_path

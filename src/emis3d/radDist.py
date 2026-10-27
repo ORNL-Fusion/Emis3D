@@ -910,7 +910,7 @@ class RadDist(ABC):
             return f"{name} radDist: {Path(str(self.info['sourceFile'])).stem}, timestep {self.info.get('timestep')}"
         return f"{name} radDist at R {float(self.info.get('startR', 0)):.2f}, z {float(self.info.get('startZ', 0)):.2f} m"
 
-    def plotCrossSection(self, phi: float = 0.0, ax=None):
+    def plotCrossSection(self, phi: float = 0.0, ax=None, cmap: str = "RdYlBu_r"):
         """
         Contour plot of the radDist's emissivity at a given phi location.
         Returns the filled contour set, for a colorbar.
@@ -945,7 +945,7 @@ class RadDist(ABC):
         z_unique = RZarray[:, 1]
         n_levels = 50
 
-        cf = ax.tricontourf(R_unique, z_unique, emiss, levels=n_levels)  # , cmap="CMRmap_r")
+        cf = ax.tricontourf(R_unique, z_unique, emiss, levels=n_levels, cmap=cmap)
         ax.tricontour(
             R_unique,
             z_unique,

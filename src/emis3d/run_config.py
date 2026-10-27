@@ -27,6 +27,9 @@ class RunConfig:
     radDistDirectories_LocIndependent: list = field(default_factory=list)  # e.g. elongated rings
     radDistDirectories_LocDependent: list = field(default_factory=list)  # e.g. helical; combined per injector
     injectionLocation: float = 0.0  # injector angle [deg]; must match the radDists' (the fit uses theirs; plots use this)
+    # An SPI injector from the machine settings' INJECTORS block: its toroidal angle sets injectionLocation
+    # (which, if also given, must agree), and its spray is drawn on the figures
+    injector: str | None = None
 
     # --- Times: Nt evenly spaced evaluation times from tstart to tend, inclusive
     # (see eval_times; tstart alone, or tend == tstart, gives one time)
@@ -126,6 +129,8 @@ class RunConfig:
         if self.solver not in SOLVERS:
             raise ValueError(f"solver must be one of {SOLVERS}, got {self.solver!r}")
         self._check_bounds()
+        if self.injector is not None and not (isinstance(self.injector, str) and self.injector):
+            raise ValueError(f"injector must be the name of an injector in the machine settings, got {self.injector!r}")
         if self.solver == "parametric":
             self._check_parametric()
         elif not (self.radDistDirectories_LocDependent or self.radDistDirectories_LocIndependent):

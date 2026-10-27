@@ -229,6 +229,8 @@ def cmd_run(args) -> int:
         tpf = best.get("ranges", {}).get("total", {}).get("tpf")
         if tpf:
             line += f" (68%: {tpf['68%'][0]:.3f}-{tpf['68%'][1]:.3f})"
+        elif best.get("ranges", {}).get("unavailable"):
+            line += " (range unavailable: " + best["ranges"]["unavailable"] + ")"
         print(line)
         if best.get("parametric_models"):
             from emis3d.parametric import comparison_table
