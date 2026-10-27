@@ -217,16 +217,24 @@ class Emis3D:
         t_start = time.time()
         if self.config is not None and self.config.solver == "parametric":
             self._fit_parametric(evalTime=evalTime)
-        self._prepare_fits(evalTime=evalTime)
-        self._minimize_radDists(evalTime=evalTime)
-        logger.info(f"→ Fitting done in {time.time() - t_start:.2f} seconds")
+        # a composite's toroidal shapes are inside it: the pipeline uses a constant scale for it
+        override = getattr(self, "_scale_override", {}).get(evalTime)
+        saved_scale = self.info["scale_def"]
+        if override:
+            self.info["scale_def"] = override
+        try:
+            self._prepare_fits(evalTime=evalTime)
+            self._minimize_radDists(evalTime=evalTime)
+            logger.info(f"→ Fitting done in {time.time() - t_start:.2f} seconds")
 
-        t_start = time.time()
-        self._post_process_fit_arrangement(evalTime=evalTime)
-        self._post_process_bolo_locations(evalTime=evalTime)
-        self._post_process_calculations(evalTime=evalTime)
-        self._post_process_uncertainty(evalTime=evalTime)  # needs the other candidates
-        self._step_ranges(evalTime=evalTime)
+            t_start = time.time()
+            self._post_process_fit_arrangement(evalTime=evalTime)
+            self._post_process_bolo_locations(evalTime=evalTime)
+            self._post_process_calculations(evalTime=evalTime)
+            self._post_process_uncertainty(evalTime=evalTime)  # needs the other candidates
+            self._parametric_ranges(evalTime=evalTime)
+        finally:
+            self.info["scale_def"] = saved_scale
         logger.info(f"→ Post-processing done in {time.time() - t_start:.2f} seconds")
 
         if cleanup:
@@ -243,7 +251,7 @@ class Emis3D:
         """
         import emis3d.radDist as radDist_module
         from emis3d.geometry import cached_matrix, matrix_path
-        from emis3d.parametric import MODELS, ParametricFit, comparison_table
+        from emis3d.parametric import CompositeFit, ParametricFit, comparison_table
         from emis3d.radDistFitting import RadDistFitting
 
         cfg = self.config.parametric
@@ -276,50 +284,57 @@ class Emis3D:
             for tag, v, err in zip(self.channel_order["channel_list"][ii], vals, errs, strict=True):
                 data[tag] = (float(v), float(err))
 
-        # --- Fit every listed model; the best by AIC becomes the candidate
-        results, templates = [], {}
-        for model in cfg["models"]:
-            spec = MODELS[model]
-            template_cfg = {
-                "distType": spec["distType"], "tokamakName": self.info["tokamakName"], "units": "Brightness",
-                "injectionLocation": float(self.info["injectionLocation"]), "eqFileName": cfg.get("equilibrium"),
-                "saveRunsDirectoryName": "parametric", "rayMethod": "matrix", "matrixPath": str(matrix_path(self.ws, self.info["tokamakName"], names[-1])),
-                "BOLOMETER_PROPS": {"pixelSamples": 1, "seed": 0}, "numBins": 100,
-            }
-            # A starting shape (the middle of each default range), so the template builds
-            template_cfg.update({k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b})
-            fixed = (cfg.get("fixed") or {}).get(model) or {}
-            template_cfg.update(fixed)
-            if spec.get("field_aligned"):
-                # the field-line mapping for every matrix in the search (built once and cached)
-                from emis3d.fieldline_map import get_or_build
-
-                paths = []
-                for name, G in zip(names, matrices, strict=True):
-                    _, mpath = get_or_build(self.ws, G, self.info["tokamakName"], name, cfg["equilibrium"], float(self.info["injectionLocation"]),
-                                            transits=int(cfg.get("transits", 1)), substeps=int(cfg.get("substeps", 2)),
-                                            psi_max=cfg.get("psi_max"), progress=lambda text: logger.info(text))
-                    paths.append(str(mpath))
-                template_cfg["mapPath"], template_cfg["mapPaths"] = paths[-1], paths
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                template = radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
-
-            fit = ParametricFit(model, template, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
-                                bounds=(cfg.get("bounds") or {}).get(model), fixed=fixed, supersample=cfg.get("supersample"),
-                                a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds(),
-                                vary_peak=bool(self.info.get("vary_peak_rad_location", False)),
-                                peak_shift_max_degrees=float(self.info.get("peak_shift_max_degrees", 180.0)))
+        # --- Fit every listed model and composite; the best by AIC becomes the candidate
+        composites = cfg.get("composites") or {}
+        vary_peak = bool(self.info.get("vary_peak_rad_location", False))
+        peak_max = float(self.info.get("peak_shift_max_degrees", 180.0))
+        results, templates, fits = [], {}, {}
+        # single models first: a composite starts from its components fitted alone
+        ordered = [m for m in cfg["models"] if m not in composites] + [m for m in cfg["models"] if m in composites]
+        for model in ordered:
+            if model in composites:
+                cdef = composites[model]
+                comps = []
+                for comp in cdef["components"]:
+                    t = self._parametric_template(comp["model"], cfg, names, matrices, comp.get("fixed") or {})
+                    comps.append((comp["name"], comp["model"], t, comp.get("bounds"), comp.get("fixed")))
+                fit = CompositeFit(model, comps, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
+                                   shared_toroidal=bool(cdef.get("shared_toroidal", False)), supersample=cfg.get("supersample"),
+                                   a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds(),
+                                   vary_peak=vary_peak, peak_shift_max_degrees=peak_max)
+                template = comps[0][2]
+            else:
+                fixed = (cfg.get("fixed") or {}).get(model) or {}
+                template = self._parametric_template(model, cfg, names, matrices, fixed)
+                fit = ParametricFit(model, template, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
+                                    bounds=(cfg.get("bounds") or {}).get(model), fixed=fixed, supersample=cfg.get("supersample"),
+                                    a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds(),
+                                    vary_peak=vary_peak, peak_shift_max_degrees=peak_max)
             logger.info("→ Parametric fit (%s) at t=%s through %s", model, evalTime, ", ".join(names))
+            start = fit.start_from({r.model: r for r in results}) if isinstance(fit, CompositeFit) else None
             result = fit.search(seed=int(cfg.get("seed", 0)), maxiter=int(cfg.get("maxiter", 60)), popsize=int(cfg.get("popsize", 12)),
-                                progress=lambda text: logger.info(text))
+                                progress=lambda text: logger.info(text), start=start)
             logger.info("→ %s", result.summary())
             results.append(result)
             templates[model] = template
+            fits[model] = fit
 
         results.sort(key=lambda r: r.aic)
         result = results[0]
         template = templates[result.model]
+        best_fit = fits[result.model]
+        if not hasattr(self, "_parametric_fits"):
+            self._parametric_fits = {}
+        self._parametric_fits[evalTime] = best_fit
+        if isinstance(best_fit, CompositeFit):
+            # the summed structure as one radDist; its toroidal shapes are inside it, so the
+            # pipeline treats it with a constant scale at this time
+            template = radDist_module.Composite(best_fit, result.values, config={
+                "tokamakName": self.info["tokamakName"], "units": "Brightness", "injectionLocation": float(self.info["injectionLocation"]),
+                "eqFileName": cfg.get("equilibrium"), "saveRunsDirectoryName": "parametric", "numBins": 100, "rayMethod": "matrix"})
+            if not hasattr(self, "_scale_override"):
+                self._scale_override = {}
+            self._scale_override[evalTime] = "constant"
         logger.info("→ Models at t=%s, best first:\n%s", evalTime, comparison_table(results))
         # The best model's template holds its fitted shape (each fit leaves its template at its result)
         if not hasattr(self, "parametric"):
@@ -330,6 +345,9 @@ class Emis3D:
         self.parametric_models[evalTime] = results
 
         # --- The fitted shape as the normal pipeline's single candidate
+        if not hasattr(self, "_parametric_radDist"):
+            self._parametric_radDist = {}
+        self._parametric_radDist[evalTime] = template
         template.calc_radiated_power()
         template.observe_with_matrix(matrices[-1])
         template._get_observed_phi_loc()
@@ -345,47 +363,87 @@ class Emis3D:
         candidate._map_signals()
         self.data["synthetic"] = {"locIndependent": {0: candidate}, "locDependent": {}}
 
-    def _step_ranges(self, evalTime: float) -> None:
+    def _parametric_template(self, model: str, cfg: dict, names: list, matrices: list, fixed: dict):
+        """A model's radDist template for the parametric search (its field-line mappings built once and cached)."""
+        import emis3d.radDist as radDist_module
+        from emis3d.geometry import matrix_path
+        from emis3d.parametric import MODELS
+
+        spec = MODELS[model]
+        template_cfg = {
+            "distType": spec["distType"], "tokamakName": self.info["tokamakName"], "units": "Brightness",
+            "injectionLocation": float(self.info["injectionLocation"]), "eqFileName": cfg.get("equilibrium"),
+            "saveRunsDirectoryName": "parametric", "rayMethod": "matrix", "matrixPath": str(matrix_path(self.ws, self.info["tokamakName"], names[-1])),
+            "BOLOMETER_PROPS": {"pixelSamples": 1, "seed": 0}, "numBins": 100,
+        }
+        # A starting shape (the middle of each default range), so the template builds
+        template_cfg.update({k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b})
+        if spec.get("source"):
+            template_cfg["source"] = spec["source"]
+        template_cfg.update(fixed or {})
+        if spec.get("field_aligned"):
+            from emis3d.fieldline_map import get_or_build
+
+            paths = []
+            for name, G in zip(names, matrices, strict=True):
+                _, mpath = get_or_build(self.ws, G, self.info["tokamakName"], name, cfg["equilibrium"], float(self.info["injectionLocation"]),
+                                        transits=int(cfg.get("transits", 1)), substeps=int(cfg.get("substeps", 2)),
+                                        psi_max=cfg.get("psi_max"), progress=lambda text: logger.info(text))
+                paths.append(str(mpath))
+            template_cfg["mapPath"], template_cfg["mapPaths"] = paths[-1], paths
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return radDist_module.from_info({**template_cfg, "startR": template_cfg.get("startR", 0.0), "startZ": template_cfg.get("startZ", 0.0)})
+
+    def _parametric_ranges(self, evalTime: float) -> None:
         """
-        For a parametric step fit, the TPF, total-power and profile ranges come
-        from the step amplitudes' covariance (the parametric fit's): the step
-        is built into the candidate, so the pipeline's own ranges only see an
-        overall amplitude, which cannot change the TPF. Each sample's profile
-        is the best fit's, rescaled location by location by the sampled
-        amplitudes.
+        For a parametric fit, the TPF, total-power and profile ranges come from
+        the parametric fit's own covariance: shape, toroidal parameters
+        (decay, source plane, step amplitudes) and amplitudes together. Each
+        draw's toroidal power profile is re-evaluated through the model's
+        voxel fields (on the finest matrix) and mapped onto the pipeline's
+        profile by its ratio to the best fit's, so the best fit is reproduced
+        exactly. The pipeline's own ranges only see an overall amplitude
+        (and, for some models, a decay) with the shape held fixed.
         """
         result = getattr(self, "parametric", {}).get(evalTime)
+        fit = getattr(self, "_parametric_fits", {}).get(evalTime)
         best = self.bestFits.get(evalTime, {}) if hasattr(self, "bestFits") else {}
-        if result is None or not result.toroidal or "ranges" not in best or result.fit is None:
+        if result is None or fit is None or result.fit is None or "ranges" not in best:
             return
         cfg = uncertainty.UncertaintyConfig.from_info(self.info)
-        samples, flags = uncertainty.sample_parameters(result.fit, cfg.n_samples, np.random.default_rng(cfg.seed))
-        names = [f"a_{int(round(d))}" for d in result.toroidal["locations_deg"]]
-        locs = np.deg2rad(np.asarray(result.toroidal["locations_deg"], dtype=float))
-        best_rel = np.asarray(result.toroidal["amplitudes"], dtype=float)
+        n = int(min(cfg.n_samples, 300))  # each draw re-evaluates the model: a few ms each
+        samples, flags = uncertainty.sample_parameters(result.fit, n, np.random.default_rng(cfg.seed))
+        if not samples:
+            for flag in flags:
+                logger.info("Parametric ranges at t=%s: %s", evalTime, flag)
+            return
+        G = fit.matrices[-1]
+        P_best_sec = fit.sector_profile(G, result.values)
+        fit._apply(result.values)  # leave the templates at the best fit
 
         rad = best["radiation_distribution"]
         phi = np.asarray(rad["phi"], dtype=float)
         P_best = np.asarray(rad["total_power"], dtype=float)
-        gap = np.abs((phi[:, None] - locs + np.pi) % (2.0 * np.pi) - np.pi)
-        nearest = np.argmin(gap, axis=1)
-        f_best = best_rel[nearest]
-        profiles, tpf, total = [], [], []
+        sec_phi = np.concatenate([G.grid.phi_centers - 2.0 * np.pi, G.grid.phi_centers, G.grid.phi_centers + 2.0 * np.pi])
+        floor = 1e-9 * max(float(np.max(np.abs(P_best_sec))), 1e-300)
         total_best = float(rad.get("quantities", {}).get("total_power", np.mean(P_best) * 2.0 * np.pi))
+        profiles, tpf, total = [], [], []
         for smp in samples:
-            rel = np.array([smp[n] for n in names])
-            P = P_best * np.divide(rel[nearest], f_best, out=np.zeros_like(f_best), where=f_best > 0)
-            if P.mean() <= 0:
+            values = {**result.values, **{k: float(v) for k, v in smp.items()}}
+            P_sec = fit.sector_profile(G, values)
+            ratio = np.where(np.abs(P_best_sec) > floor, P_sec / np.where(np.abs(P_best_sec) > floor, P_best_sec, 1.0), 1.0)
+            P = P_best * np.interp(phi % (2.0 * np.pi), sec_phi, np.tile(ratio, 3))
+            if not np.isfinite(P).all() or P.mean() <= 0:
                 continue
             profiles.append(P)
             tpf.append(P.max() / P.mean())
             total.append(total_best * P.mean() / P_best.mean())
+        fit._apply(result.values)
         if not profiles:
             return
 
         def entry(v, best_value):
-            # the interval always contains the best fit: with several amplitudes on their bounds,
-            # the clipped draws can all lie to one side of it
             v = np.asarray(v)
             out = {"median": float(np.median(v)), "n": int(v.size)}
             for c in cfg.intervals:
@@ -402,11 +460,11 @@ class Emis3D:
         band = {"phi": phi, "median": np.median(prof, axis=0)}
         for c in (0.68, 0.95):
             lo, hi = np.percentile(prof, [50 * (1 - c), 50 * (1 + c)], axis=0)
-            band[f"{int(round(100 * c))}%"] = (lo, hi)
+            band[f"{int(round(100 * c))}%"] = (np.minimum(lo, P_best), np.maximum(hi, P_best))
         ranges["profile_band"] = band
-        ranges["note"] = "step scale: TPF, total power and profile ranges from the step amplitudes' covariance (parametric fit)"
+        ranges["note"] = "parametric fit: TPF, total power and profile ranges from the fit's covariance (shape, toroidal parameters and amplitudes)"
         for flag in flags:
-            logger.info("Step ranges at t=%s: %s", evalTime, flag)
+            logger.info("Parametric ranges at t=%s: %s", evalTime, flag)
 
     @staticmethod
     def _apply_fitted_step(radDist, toroidal: dict) -> None:
@@ -1105,8 +1163,13 @@ class Emis3D:
 
         info = rad_.info
 
-        # --- Create the radDist (any type, simulation radDists included)
-        radDist_ = radDist_module.from_info(info)
+        # --- Create the radDist (any type, simulation radDists included). A parametric
+        # fit's radDist already exists (a composite cannot be rebuilt from its settings)
+        fitted = getattr(self, "_parametric_radDist", {}).get(evalTime)
+        if fitted is not None and str(fitted.info.get("distType")) == str(info.get("distType")):
+            radDist_ = fitted
+        else:
+            radDist_ = radDist_module.from_info(info)
 
         # --- Update the information
         if radDist_.info is not None:
@@ -1116,6 +1179,8 @@ class Emis3D:
         radDist_.data = dict(rad_.data)
 
         # --- Build the tokamak
+        if radDist_.info is None:
+            raise RuntimeError("the rebuilt radDist has no settings")
         radDist_._build_tokamak(
             tokamakName=radDist_.info["tokamakName"],
             mode="Build",
@@ -1532,6 +1597,8 @@ class Emis3D:
         best = self.bestFits[evalTime]
         rd = best.get("radDist")
         info = best.get("radDistInfo", {})
+        if info.get("composite_description"):
+            return str(info["composite_description"])
         parts = []
         for key, label in getattr(rd, "SAVE_KEYS", ()):
             if info.get(key) is not None:

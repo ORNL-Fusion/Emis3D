@@ -338,9 +338,16 @@ class UncertaintyResult:
     flags: dict                # candidate id -> sorted list of flags
     calibration_factors: list = field(default_factory=list)
     config: UncertaintyConfig | None = None
+    best_values: dict = field(default_factory=dict)  # the best candidate's own derived quantities (no sampling)
+    best_profile: np.ndarray | None = None  # its toroidal profile
 
     def summary(self, which: str = "total") -> dict:
-        """Median and central intervals per quantity for 'total', 'statistical' or 'model'."""
+        """
+        Median and central intervals per quantity for 'total', 'statistical'
+        or 'model'. Every interval contains the best fit's own value: draws
+        held on parameter bounds, or a wide (reduced-chi2-scaled)
+        covariance, can put most of the draws on one side of it.
+        """
         mask = {
             "statistical": self.source == 0,          # best radDist, parameter covariance
             "model": self.source == 1,                # + other radDists that fit nearly as well
@@ -353,8 +360,12 @@ class UncertaintyResult:
             if v.size == 0:
                 continue
             entry = {"median": float(np.median(v)), "n": int(v.size)}
+            anchor = self.best_values.get(q)
+            anchor = float(anchor) if anchor is not None and np.isfinite(anchor) else None
             for c in (self.config or UncertaintyConfig()).intervals:
                 lo, hi = np.percentile(v, [50 * (1 - c), 50 * (1 + c)])
+                if anchor is not None:
+                    lo, hi = min(lo, anchor), max(hi, anchor)
                 entry[f"{int(round(100 * c))}%"] = (float(lo), float(hi))
             out[q] = entry
         return out
@@ -364,6 +375,8 @@ class UncertaintyResult:
         band: dict = {"phi": self.phi, "median": np.median(prof, axis=0)}
         for c in levels:
             lo, hi = np.percentile(prof, [50 * (1 - c), 50 * (1 + c)], axis=0)
+            if self.best_profile is not None and self.best_profile.shape == lo.shape:  # the band contains the best fit
+                lo, hi = np.minimum(lo, self.best_profile), np.maximum(hi, self.best_profile)
             band[f"{int(round(100 * c))}%"] = (lo, hi)
         return band
 
@@ -438,6 +451,8 @@ def propagate(
 
     # --- source 0: best candidate only (statistical term)
     best = int(np.argmax(weights))
+    cid_b, fit_b, synth_b = nominal[best]
+    best_values, best_profile = derived_quantities(fit_b.params.valuesdict(), synth_b, scale_def, bolo_phi_locs, cfg.window_deg)
     counts = np.zeros(len(nominal), int)
     counts[best] = per_real
     add_samples(nominal, counts, 0)
@@ -477,6 +492,8 @@ def propagate(
         flags={cid: sorted(v) for cid, v in flags.items()},
         calibration_factors=cal_factors,
         config=cfg,
+        best_values={k: float(v) for k, v in best_values.items() if isinstance(v, (int, float, np.floating))},
+        best_profile=np.asarray(best_profile, dtype=float) if best_profile is not None else None,
     )
 
 

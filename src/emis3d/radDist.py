@@ -1743,8 +1743,16 @@ class FieldAlignedSource(RadDist):
     """
     A helical radiation structure from a field-line mapping
     (emis3d.fieldline_map): a Gaussian source on the injector's poloidal
-    plane (startR, startZ, sigma_R, sigma_z, peak 1) carried along the
-    field lines in both directions with a decay exp(-decay dphi^2). Its
+    plane carried along the field lines in both directions with a decay
+    exp(-decay dphi^2). The source (peak 1) is either
+      source: rz   a Gaussian in (R, z): startR, startZ, sigma_R, sigma_z
+                   (a blob; an ellipse aligned with the axes), or
+      source: psi  a Gaussian in flux coordinates: psi_center, psi_width in
+                   normalized flux and theta_center, theta_width in poloidal
+                   angle about the magnetic axis [deg; 0 outboard, 90 top]:
+                   thin across flux surfaces and extended along one (a band,
+                   up to a full ring), which an (R, z) ellipse cannot follow.
+    Its
     emissivity lives on the mapping's voxel grid (the geometry matrix's);
     elsewhere it is interpolated, as a simulation radDist's is. Settings:
     mapPath (the mapping file), decay, the source's shape, and phi_source
@@ -1752,7 +1760,9 @@ class FieldAlignedSource(RadDist):
     injector's); the mapped structure is rotated there (FieldLineMap.rotate).
     """
 
-    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("decay", "decay"), ("phi_source", "phi"))
+    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("psi_center", "psi"), ("psi_width", "dpsi"),
+                 ("theta_center", "theta"), ("theta_width", "dtheta"), ("decay", "decay"), ("phi_source", "phi"))
+    SOURCE_PARAMS = {"rz": ("startR", "startZ", "sigma_R", "sigma_z"), "psi": ("psi_center", "psi_width", "theta_center", "theta_width")}
 
     def __init__(self, startR=None, startZ=None, config=None):
         config = {} if config is None else config
@@ -1761,6 +1771,10 @@ class FieldAlignedSource(RadDist):
         self.info["distType"] = "fieldAligned"
         self.info["emissionNames"] = ["fieldAligned"]
         self.info.setdefault("decay", 0.0)
+        self.info.setdefault("source", "rz")
+        self.info.setdefault("psi_max", 1.2)
+        if self.info["source"] not in self.SOURCE_PARAMS:
+            raise ValueError(f"source must be rz or psi, got {self.info['source']!r}")
         self._grid_eps = None
         if "mapPath" in self.info:
             from emis3d.fieldline_map import cached_map
@@ -1768,6 +1782,10 @@ class FieldAlignedSource(RadDist):
             self.fmap = cached_map(self.info["mapPath"])  # the finest: plots and the saved radDist use it
             self.fmaps = {m.n_voxels: m for m in (cached_map(p) for p in self.info.get("mapPaths", [self.info["mapPath"]]))}
             self._build_tokamak(tokamakName=self.info["tokamakName"], mode="Build", reflections=False, eqFileName=self.info.get("eqFileName"))
+            if self.info["source"] == "psi":
+                if self.tokamak.gfile is None:
+                    raise ValueError("source: psi needs an equilibrium (eqFileName) for the flux coordinates")
+                self.info["startR"], self.info["startZ"] = float(self.tokamak.gfile.rmagx), float(self.tokamak.gfile.zmagx)
             logger.info("→ Building field-aligned radDist from the source at R=%.3f, z=%.3f", self.info["startR"], self.info["startZ"])
 
     def voxel_emissivity(self, G=None) -> np.ndarray:
@@ -1775,13 +1793,44 @@ class FieldAlignedSource(RadDist):
         f = self.fmap if G is None else self.fmaps.get(G.grid.n_voxels)
         if f is None:
             raise ValueError("no field-line mapping for this geometry matrix (emis3d build-mapping, or list it in parametric.matrices)")
-        src = f.gaussian_source(float(self.info["startR"]), float(self.info["startZ"]), float(self.info["sigma_R"]), float(self.info["sigma_z"]))
+        src = self.source_on(f)
         shift = (np.deg2rad(float(self.info["phi_source"])) - f.phi0) if self.info.get("phi_source") is not None else 0.0
         return f.apply(src, float(self.info["decay"]), shift=shift)
 
+    def source_on(self, f) -> np.ndarray:
+        """The source on a mapping's pixels (peak 1), by the source type."""
+        if self.info["source"] == "rz":
+            return f.gaussian_source(float(self.info["startR"]), float(self.info["startZ"]), float(self.info["sigma_R"]), float(self.info["sigma_z"]))
+        psin, theta = self._flux_coordinates(f)
+        c, w = float(self.info["psi_center"]), float(self.info["psi_width"])
+        tc, tw = np.deg2rad(float(self.info["theta_center"])), np.deg2rad(float(self.info["theta_width"]))
+        dtheta = (theta - tc + np.pi) % (2.0 * np.pi) - np.pi  # the shorter way round
+        src = np.exp(-0.5 * ((psin - c) / w) ** 2) * np.exp(-0.5 * (dtheta / tw) ** 2)
+        src[psin > float(self.info["psi_max"])] = 0.0
+        return src
+
+    def _flux_coordinates(self, f) -> tuple[np.ndarray, np.ndarray]:
+        """psi_N and the poloidal angle about the magnetic axis at a mapping's pixels (cached per mapping)."""
+        cache = getattr(self, "_flux_cache", {})
+        if id(f) not in cache:
+            from scipy.interpolate import RegularGridInterpolator
+
+            g = self.tokamak.gfile
+            if g is None:
+                raise RuntimeError("source: psi needs a loaded equilibrium")
+            Rg = np.linspace(g.rleft, g.rleft + g.rdim, g.nx)
+            Zg = np.linspace(g.zmid - g.zdim / 2, g.zmid + g.zdim / 2, g.ny)
+            psin_grid = (np.asarray(g.psi, dtype=float) - g.simagx) / (g.sibdry - g.simagx)
+            interp = RegularGridInterpolator((Rg, Zg), psin_grid, bounds_error=False, fill_value=1e6)
+            psin = np.asarray(interp(np.column_stack([f.pixel_R, f.pixel_z])), dtype=float)
+            theta = np.arctan2(f.pixel_z - float(g.zmagx), f.pixel_R - float(g.rmagx))
+            cache[id(f)] = (psin, theta)
+            self._flux_cache = cache
+        return cache[id(f)]
+
     def _interpolator(self):
         """3-D linear interpolation of the voxel emissivity (periodic in phi), rebuilt when the settings change."""
-        key = tuple(float(self.info[k]) for k in ("startR", "startZ", "sigma_R", "sigma_z", "decay")) + (float(self.info.get("phi_source") or -1e9),)
+        key = tuple(float(self.info[k]) for k in self.SOURCE_PARAMS[self.info["source"]] + ("decay",)) + (float(self.info.get("phi_source") or -1e9),)
         if self._grid_eps is None or self._grid_eps[0] != key:
             from scipy.interpolate import RegularGridInterpolator
 
@@ -1810,6 +1859,85 @@ class FieldAlignedSource(RadDist):
             return []
         phi = float(np.deg2rad(bolo_info["CAMERA_POSITION_R_Z_PHI"][2])) % (2.0 * np.pi)
         return [[phi] for _ in bolo_info["CHANNEL_TAGS"]]
+
+
+class Composite(RadDist):
+    """
+    A parametric fit's result as one radDist (emis3d.parametric): the fitted
+    emissivity on the geometry matrices' voxels, every component's
+    amplitude and toroidal shape included, and interpolated elsewhere (as
+    a simulation radDist is). Built from a fit and its fitted values; used
+    for composites (two or more structures), whose summed shape no single
+    radDist type can hold.
+    """
+
+    SAVE_KEYS = ()
+    TOROIDALLY_UNIFORM = False
+
+    def __init__(self, fit=None, values=None, config=None):
+        config = dict(config or {})
+        super().__init__(startR=float(config.get("startR", 0.0)), startZ=float(config.get("startZ", 0.0)), config=config)
+        self.info["distType"] = "composite"
+        self.info["emissionNames"] = ["composite"]
+        self._fields: dict = {}
+        self._grid_eps = None
+        if fit is not None:
+            self.tokamak = fit.template.tokamak
+            for G in fit.matrices:  # every matrix of the search, finest last
+                # every voxel: the radiated power, cross-sections and 3-D views need the whole structure
+                self._fields[G.grid.n_voxels] = (G.grid, np.asarray(fit.voxel_field(G, values, only_seen=False), dtype=float))
+            fit._apply(values)
+            self._finest = fit.matrices[-1].grid.n_voxels
+            self.info["composite_description"] = describe_parametric(fit, values)
+
+    def voxel_emissivity(self, G=None) -> np.ndarray:
+        key = self._finest if G is None else G.grid.n_voxels
+        if key not in self._fields:
+            raise ValueError("this composite was fitted on other geometry matrices")
+        return self._fields[key][1]
+
+    def _evaluate(self, R, z, phi, emissionName=None):
+        if emissionName is None:
+            emissionName = self.emissionName
+        if self._grid_eps is None:
+            from scipy.interpolate import RegularGridInterpolator
+
+            g, eps = self._fields[self._finest]
+            field = eps.reshape(g.n_r, g.n_phi, g.n_z)
+            ph = np.concatenate([g.phi_centers, [g.phi_centers[0] + 2.0 * np.pi]])  # periodic
+            vals = np.concatenate([field, field[:, :1, :]], axis=1)
+            self._grid_eps = (g, RegularGridInterpolator((g.r_centers, ph, g.z_centers), vals, bounds_error=False, fill_value=0.0))
+        g, interp = self._grid_eps
+        R, z = np.ravel(R), np.ravel(z)
+        phi_w = (np.ravel(np.broadcast_to(phi, R.shape)) - g.phi_centers[0]) % (2.0 * np.pi) + g.phi_centers[0]
+        return {emissionName: np.asarray(interp(np.column_stack([R, phi_w, z])), dtype=float)}
+
+    def _scaling_factor(self, bolo_info=None, emissionName=None):
+        return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
+
+    def _observed_phi_loc(self, bolo_info=None, emissionName=None):
+        if not bolo_info:
+            return []
+        phi = float(np.deg2rad(bolo_info["CAMERA_POSITION_R_Z_PHI"][2])) % (2.0 * np.pi)
+        return [[phi] for _ in bolo_info["CHANNEL_TAGS"]]
+
+
+def describe_parametric(fit, values) -> str:
+    """A composite's components and their fitted parameters, for figures and logs."""
+    parts = []
+    for comp in getattr(fit, "comps", []):
+        cname = comp["name"]
+
+        def val(key, default=0.0):
+            return float(values.get(key, fit.fixed.get(key, default)))
+
+        shape = ", ".join(f"{p} {val(cname + '_' + p):.3g}" for p in comp["shape"])
+        tor = []
+        if comp["decay"]:
+            tor.append(f"decay {val(comp['decay']):.3g}")
+        tor.append(f"phi {val(comp['phi'], fit.injection_deg):.0f}")
+        parts.append(f"{cname} ({comp['model']}): {shape}; {', '.join(tor)}")
+    return " | ".join(parts)
 
 
 class SimulationRadDist(RadDist):

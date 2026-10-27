@@ -246,3 +246,26 @@ def test_calibration_prints_an_uncertainty_block():
                             best_raddist=["r"] * 3, chi2=[1.0] * 3)
     block = yaml.safe_load(res.uncertainty_block())["uncertainty"]["calibration"]
     assert block["A"] == 0.0 and block["B"] == pytest.approx(np.hypot(res.spread["B"], res.statistical_error["B"]), rel=1e-2)
+
+
+def test_intervals_contain_the_best_fit_even_when_the_draws_are_skewed(monkeypatch):
+    """A wide covariance or draws held on bounds can put most draws on one side of the best fit (a total-power
+    range of 15 to 2e5 W around a best fit of 3.2e6 W on DIII-D); the interval must still contain it."""
+    dd = make_data(fake_raddist(), 0.3, rng=np.random.default_rng(3))
+    cand = prepared_candidate(fake_raddist(), dd)
+    name = next(k for k in cand[1].params if k.startswith("b_"))
+    best_b = cand[1].params[name].value
+
+    def skewed(fit, n, rng):  # every draw has a much larger decay than the best fit
+        base = fit.params.valuesdict()
+        return [{**base, name: best_b + 5.0 + rng.uniform(0, 3)} for _ in range(n)], set()
+
+    monkeypatch.setattr(U, "sample_parameters", skewed)
+    res = U.propagate([cand], dd, "exponential", list(GROUPS), U.UncertaintyConfig(n_samples=100))
+    best_q = res.best_values
+    for q in ("tpf", "total_power"):
+        for which in ("total", "statistical"):
+            lo, hi = res.summary(which)[q]["68%"]
+            assert lo - 1e-9 <= best_q[q] <= hi + 1e-9, (q, which, lo, hi, best_q[q])
+    band = res.profile_band()
+    assert np.all(band["68%"][0] <= res.best_profile + 1e-9) and np.all(band["68%"][1] >= res.best_profile - 1e-9)

@@ -137,7 +137,7 @@ def test_run_config_solver_and_parametric_block():
     for block, match in bad:
         with pytest.raises(ValueError, match=match):
             RunConfig.from_dict({**RUN, "solver": "parametric", "parametric": block})
-    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical"}
+    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical", "helical_psi"}
 
 
 def test_run_config_a_and_b_bounds():
@@ -433,7 +433,7 @@ def test_step_end_to_end_through_emis3d(rings, tmp_path):
     lo, hi = best["ranges"]["total"]["tpf"]["68%"]
     tpf = best["radiation_distribution"]["toroidal_peaking_factor"]
     assert hi > lo and lo - 1e-9 <= tpf <= hi + 1e-9                                         # a real range, containing the best fit
-    assert "step amplitudes" in best["ranges"]["note"]
+    assert "covariance" in best["ranges"]["note"]
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +451,7 @@ def test_asymmetric_shell_is_brighter_on_its_side(rings):
     shell.info["asym_amp"] = 0.0
     sym = shell.calc_emissivity(np.array([R0, R0]), np.array([z0 + 0.55, z0 - 0.55]), phi=np.array([0.0]), emissionName="fluxShell")["fluxShell"]
     assert sym[0] == pytest.approx(top / 2) and sym[1] > 0
-    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical"}
+    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical", "helical_psi"}
 
 
 @pytest.fixture(scope="module")
@@ -542,3 +542,242 @@ def test_rotated_source_plane_is_recovered(helical_setup):
     fixed = ParametricFit("helical", template, [G], data, "constant", 225.0)                 # not varied: at the injector
     assert "phi_source" not in fixed.names and fixed.fixed["phi_source"] == 225.0
     assert fixed.chi2(G, {**HELICAL_TRUE})[0] > res.chi2 + 1.0                                # which cannot explain rotated data
+
+
+# ---------------------------------------------------------------------------
+# helical_psi: a source in flux coordinates
+# ---------------------------------------------------------------------------
+
+PSI_TRUE = {"psi_center": 0.8, "psi_width": 0.12, "theta_center": 120.0, "theta_width": 40.0, "decay": 0.5}   # widths the 10 cm test grid resolves
+
+
+@pytest.fixture(scope="module")
+def psi_template(helical_setup):
+    _, _, rz_template = helical_setup
+    with contextlib.redirect_stdout(io.StringIO()):
+        return RD.FieldAlignedSource(config={**BASE, "distType": "FieldAligned", "eqFileName": mock.EQ_FILE, "source": "psi",
+                                             "mapPath": rz_template.info["mapPath"], **PSI_TRUE})
+
+
+def test_psi_source_lies_on_its_flux_surface(psi_template):
+    t = psi_template
+    f = t.fmap
+    src = t.source_on(f)
+    psin, theta = t._flux_coordinates(f)
+    on = src > 0.5
+    assert on.sum() > 3 and np.all(np.abs(psin[on] - 0.8) < 0.15)                            # thin across surfaces
+    assert np.rad2deg(np.ptp(theta[on])) > 40                                               # extended along one
+    deg = np.rad2deg(theta[on])
+    assert np.all((deg > 60) & (deg < 180))                                                 # around 120 deg (top-inboard)
+    # the poloidal angle wraps: a band centred at 175 deg weighs +165 and -175 deg equally (no seam at +-180)
+    t.info["theta_center"], t.info["theta_width"] = 175.0, 20.0
+    t._flux_cache = {id(f): (np.full(3, 0.8), np.deg2rad([165.0, -175.0, 90.0]))}
+    w = t.source_on(f)
+    assert w[0] == pytest.approx(w[1], rel=1e-9) and w[2] < 1e-3
+    t._flux_cache = {}
+    t.info.update(PSI_TRUE)
+    assert t.info["startR"] == pytest.approx(1.772, abs=0.01)                               # the magnetic axis
+
+
+def test_helical_psi_recovers_a_band(helical_setup, psi_template):
+    G, fmap, _ = helical_setup
+    t = psi_template
+    probe = ParametricFit("helical_psi", t, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0)
+    assert probe.names == ["psi_center", "psi_width", "theta_center", "theta_width", "decay"]
+    signal = probe.model_signals(G, PSI_TRUE)
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    data = {c: (float(s), float(e)) for c, s, e in zip(G.channels, signal, sigma, strict=True)}
+    fit = ParametricFit("helical_psi", t, [G], data, "constant", 225.0, bounds={"psi_width": (0.05, 0.3), "theta_width": (5.0, 90.0)})
+    res = fit.search(seed=0, maxiter=60)
+    assert res.values["psi_center"] == pytest.approx(0.8, abs=0.1)
+    assert abs(((res.values["theta_center"] - 120.0 + 180) % 360) - 180) < 25
+    assert res.chi2 / res.n_data < 0.5
+    assert not any("theta_center" in fl for fl in res.at_bounds)
+    assert "psi_0.8" in t._save_names()[0] and "theta_120" in t._save_names()[0]
+
+
+def test_helical_psi_through_emis3d(rings, tmp_path):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], solver="parametric", scale_def="constant",
+                          parametric={"models": ["helical_psi"], "matrices": ["low"], "equilibrium": mock.EQ_FILE, "maxiter": 4, "substeps": 1})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings).save(matrix_path(ws, "MOCK", "low"))
+    e = Emis3D(runConfigName=str(run))
+    e._perform_fits()
+    res = e.bestFits[10.0]["parametric"]
+    assert res.model == "helical_psi" and {"psi_center", "theta_width", "decay"} <= set(res.values)
+    assert "psi" in e._raddist_description(10.0) and "theta" in e._raddist_description(10.0)
+
+
+# ---------------------------------------------------------------------------
+# Composites: two structures fitted together
+# ---------------------------------------------------------------------------
+
+def composite_components(helical_setup, psi_template):
+    _, _, spot = helical_setup
+    return [("band", "helical_psi", psi_template, {"psi_width": (0.05, 0.3), "theta_width": (5.0, 90.0)}, None),
+            ("spot", "helical", spot, {"startR": (1.6, 2.2), "startZ": (-0.4, 0.4), "sigma_R": (0.05, 0.2), "sigma_z": (0.05, 0.2)}, None)]
+
+
+COMPOSITE_TRUE = {"band_psi_center": 0.8, "band_psi_width": 0.12, "band_theta_center": 120.0, "band_theta_width": 40.0,
+                  "band_decay": 0.5, "band_phi_source": 200.0, "spot_startR": 1.95, "spot_startZ": 0.1, "spot_sigma_R": 0.1,
+                  "spot_sigma_z": 0.1, "spot_decay": 2.0, "spot_phi_source": 240.0}
+
+
+def test_composite_names_amplitudes_and_consistency(helical_setup, psi_template):
+    from emis3d.parametric import CompositeFit
+
+    G, _, _ = helical_setup
+    comps = composite_components(helical_setup, psi_template)
+    fit = CompositeFit("band_spot", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0)
+    assert fit.amp_names == ["a_band", "a_spot"] and fit.a_bounds[0] == 0.0
+    assert {"band_decay", "band_phi_source", "spot_decay", "spot_phi_source"} <= set(fit.names)
+    cols = fit.voxel_columns(G, COMPOSITE_TRUE)
+    rows = fit._rows[id(G)][0]
+    np.testing.assert_allclose(np.column_stack([G.signals(c)[rows] for c in cols]), fit.design(G, COMPOSITE_TRUE), rtol=1e-12)
+
+    shared = CompositeFit("band_spot", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, shared_toroidal=True,
+                          vary_peak=True, peak_shift_max_degrees=90.0)
+    assert "decay" in shared.names and "phi_peak" in shared.names and not any(n.endswith("_phi_source") for n in shared.names)
+    fixed_peak = CompositeFit("band_spot", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0)
+    assert fixed_peak.fixed["band_phi_source"] == 225.0 and "band_phi_source" not in fixed_peak.names
+
+
+def test_composite_recovers_two_structures_at_different_toroidal_locations(helical_setup, psi_template):
+    from emis3d.parametric import CompositeFit
+
+    G, _, _ = helical_setup
+    comps = composite_components(helical_setup, psi_template)
+    probe = CompositeFit("band_spot", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0)
+    signal = probe.design(G, COMPOSITE_TRUE) @ np.array([1.0, 0.6])
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    data = {c: (float(s), float(e)) for c, s, e in zip(G.channels, signal, sigma, strict=True)}
+    fit = CompositeFit("band_spot", comps, [G], data, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0)
+    chi2, a = fit.chi2(G, COMPOSITE_TRUE)
+    assert chi2 < 1e-12 and a[1] / a[0] == pytest.approx(0.6, rel=1e-6)                   # amplitudes exact for the true shapes
+    res = fit.search(seed=0, maxiter=40)
+    for k in ("band_psi_center", "band_phi_source", "spot_startR", "spot_phi_source"):
+        assert res.values[k] == pytest.approx(COMPOSITE_TRUE[k], abs=0.1 * max(1.0, abs(COMPOSITE_TRUE[k]) / 10))
+    assert res.n_params == len(fit.names) + 2 and [c["name"] for c in res.components] == ["band", "spot"]
+    assert res.components[1]["values"]["phi"] == pytest.approx(240.0, abs=5.0)
+
+
+def test_composite_radDist_reproduces_the_fit(helical_setup, psi_template):
+    from emis3d.parametric import CompositeFit
+
+    G, _, _ = helical_setup
+    comps = composite_components(helical_setup, psi_template)
+    probe = CompositeFit("band_spot", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0)
+    signal = probe.design(G, COMPOSITE_TRUE) @ np.array([1.0, 0.6])
+    data = {c: (float(s), 0.05 * signal.max()) for c, s in zip(G.channels, signal, strict=True)}
+    fit = CompositeFit("band_spot", comps, [G], data, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0)
+    _, a = fit.chi2(G, COMPOSITE_TRUE)
+    values = {**COMPOSITE_TRUE, "a_band": a[0], "a_spot": a[1]}
+    with contextlib.redirect_stdout(io.StringIO()):
+        rd = RD.Composite(fit, values, config={**BASE, "eqFileName": mock.EQ_FILE, "numBins": 36})
+    np.testing.assert_allclose(G.signals(rd.voxel_emissivity(G)), signal, rtol=1e-9)        # the composite reproduces the data
+    assert "band (helical_psi)" in rd.info["composite_description"] and "spot (helical)" in rd.info["composite_description"]
+    rd.calc_radiated_power()
+    P = np.asarray(rd.data["toroidalRadiatedPower"]["composite"]["P_pol"])
+    assert P.max() > 0 and P.max() / P.mean() > 1.2                                         # toroidally peaked
+
+
+def test_composite_through_emis3d(rings, tmp_path):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    composites = {"band_spot": {"components": [{"model": "helical_psi", "name": "band"},
+                                                {"model": "ring", "name": "core", "bounds": {"startR": [1.6, 1.9], "startZ": [0.0, 0.3]}}],
+                                 "shared_toroidal": False}}
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], solver="parametric", scale_def="exponential",
+                          parametric={"models": ["band_spot"], "matrices": ["low"], "equilibrium": mock.EQ_FILE, "maxiter": 3, "substeps": 1,
+                                      "composites": composites})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings).save(matrix_path(ws, "MOCK", "low"))
+    e = Emis3D(runConfigName=str(run))
+    e._perform_fits()
+    best = e.bestFits[10.0]
+    res = best["parametric"]
+    assert res.model == "band_spot" and {"a_band", "a_core", "band_decay", "core_b"} <= set(res.values)
+    assert e.info["scale_def"] == "exponential"                                             # the override is per time and restored
+    assert "band (helical_psi)" in e._raddist_description(10.0)
+    lo, hi = best["ranges"]["total"]["tpf"]["68%"]
+    assert lo - 1e-9 <= best["radiation_distribution"]["toroidal_peaking_factor"] <= hi + 1e-9
+    e._plot_bestFit(save=True)
+    assert list((tmp_path / "runs").rglob("*.png"))
+
+
+def test_composite_config_validation():
+    base = {"BOLOMETERS": {"A": {"dataFileName": "a.h5"}}, "shot": 1, "solver": "parametric"}
+    good = {"components": [{"model": "helical_psi", "name": "band"}, {"model": "helical", "name": "spot"}]}
+    RunConfig.from_dict({**base, "parametric": {"models": ["bs"], "equilibrium": "g", "composites": {"bs": good}}})
+    with pytest.raises(ValueError, match="equilibrium"):
+        RunConfig.from_dict({**base, "parametric": {"models": ["bs"], "composites": {"bs": good}}})
+    with pytest.raises(ValueError, match="unknown model"):
+        RunConfig.from_dict({**base, "parametric": {"models": ["nope"], "composites": {"bs": good}}})
+    with pytest.raises(ValueError, match="is a model's"):
+        RunConfig.from_dict({**base, "parametric": {"models": ["ring"], "composites": {"ring": good}}})
+    with pytest.raises(ValueError, match="shared_toroidal"):
+        RunConfig.from_dict({**base, "parametric": {"models": ["bs"], "equilibrium": "g", "composites": {"bs": {**good, "shared_toroidal": "yes"}}}})
+
+
+def test_composite_starts_from_its_components_fitted_alone(helical_setup, psi_template):
+    """Seeded with a component's own best fit, the composite can only do at least as well as that component."""
+    from emis3d.parametric import CompositeFit
+
+    G, _, spot = helical_setup
+    probe = ParametricFit("helical", spot, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0)
+    signal = probe.model_signals(G, HELICAL_TRUE)
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    data = {c: (float(s), float(e)) for c, s, e in zip(G.channels, signal, sigma, strict=True)}
+    alone = ParametricFit("helical", spot, [G], data, "constant", 225.0, bounds={"startR": (1.5, 2.2), "startZ": (-0.5, 0.5)}).search(seed=0, maxiter=30)
+    comps = composite_components(helical_setup, psi_template)
+    comps[1] = ("spot", "helical", spot, {"startR": (1.5, 2.2), "startZ": (-0.5, 0.5)}, None)
+    fit = CompositeFit("band_spot", comps, [G], data, "constant", 225.0)
+    start = fit.start_from({"helical": alone})
+    assert start["spot_startR"] == alone.values["startR"] and start["spot_decay"] == alone.values["decay"]
+    res = fit.search(seed=1, maxiter=3, start=start)                                          # a tiny budget
+    assert res.chi2 <= alone.chi2 * 1.05 + 1e-9
+
+
+def test_power_profile_counts_every_voxel_not_only_the_seen_ones(rings):
+    """Radiated power must come from every voxel; evaluating only the voxels a camera sees made the profile
+    peak where the cameras look (a TPF of 8 for a ring whose true TPF is 2)."""
+    _, truth, template = rings
+    G = synthetic_G(truth)                                                     # sparse rows: many voxels are unseen
+    data, _ = fabricate(G, truth)
+    fit = ParametricFit("ring", template, [G], data, "exponential", 225.0)
+    values = {**{k: TRUE[k] for k in ("startR", "startZ", "sigma_R", "sigma_z", "rotationAngle")}, "b": 0.3, "a": 1.0}
+    P = fit.sector_profile(G, values)
+    envelope = np.exp(-0.3 * U.find_dphi(G.grid.phi_centers, np.deg2rad(225.0), "elongatedRing") ** 2)
+    assert P.max() / P.mean() == pytest.approx(envelope.max() / envelope.mean(), rel=1e-6)   # a ring: the envelope's TPF
+    seen_only = fit.voxel_field(G, values, only_seen=True)
+    assert np.count_nonzero(seen_only) < np.count_nonzero(fit.voxel_field(G, values, only_seen=False))
+    rows = fit._rows[id(G)][0]
+    np.testing.assert_allclose(G.signals(seen_only)[rows], G.signals(fit.voxel_field(G, values, only_seen=False))[rows], rtol=1e-12)
+
+
+def test_composite_power_includes_unseen_voxels(helical_setup, psi_template):
+    from emis3d.parametric import CompositeFit
+
+    G, _, _ = helical_setup
+    comps = composite_components(helical_setup, psi_template)
+    fit = CompositeFit("band_spot", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, vary_peak=True, peak_shift_max_degrees=90.0)
+    values = {**COMPOSITE_TRUE, "a_band": 1.0, "a_spot": 0.6}
+    with contextlib.redirect_stdout(io.StringIO()):
+        rd = RD.Composite(fit, values, config={**BASE, "eqFileName": mock.EQ_FILE, "numBins": 36})
+    np.testing.assert_allclose(rd.voxel_emissivity(G), fit.voxel_field(G, values, only_seen=False))
+
+
+def test_a_start_on_or_beyond_a_bound_is_accepted(rings):
+    _, truth, template = rings
+    G = synthetic_G(truth)
+    data, _ = fabricate(G, truth)
+    fit = ParametricFit("ring", template, [G], data, "exponential", 225.0, bounds={"rotationAngle": (0, 90)})
+    hi = {n: fit.bounds[n][1] for n in fit.names}                                            # every value on its upper bound
+    res = fit.search(seed=0, maxiter=2, start={**hi, "startR": float("nan"), "sigma_R": 99.0})
+    assert np.isfinite(res.chi2)

@@ -157,17 +157,18 @@ class RunConfig:
         if not p:
             raise ValueError("solver: parametric needs a parametric block (models, matrices, ...)")
         allowed = {"models", "matrices", "equilibrium", "bounds", "fixed", "maxiter", "popsize", "seed", "supersample",
-                   "transits", "substeps", "psi_max"}
+                   "transits", "substeps", "psi_max", "composites"}
         unknown = sorted(set(p) - allowed)
         if unknown:
             hint = " (use models: [ring], a list)" if "model" in unknown else ""
             raise ValueError(f"Unknown parametric options {unknown}{hint}; the block takes {sorted(allowed)}")
+        composites = self._check_composites(p.get("composites") or {}, MODELS)
         models = p.get("models")
         if not isinstance(models, list) or not models:
-            raise ValueError(f"parametric.models must be a list of models to fit and compare, from {sorted(MODELS)}")
-        bad = sorted(set(models) - set(MODELS))
+            raise ValueError(f"parametric.models must be a list of models to fit and compare, from {sorted(MODELS)} or parametric.composites")
+        bad = sorted(set(models) - set(MODELS) - set(composites))
         if bad:
-            raise ValueError(f"parametric.models: unknown model(s) {bad}; choose from {sorted(MODELS)}")
+            raise ValueError(f"parametric.models: unknown model(s) {bad}; choose from {sorted(MODELS)} or the composites {sorted(composites)}")
         matrices = p.get("matrices") or ["medium"]
         if not isinstance(matrices, list) or not all(isinstance(m, str) for m in matrices):
             raise ValueError("parametric.matrices must be a list of matrix names (coarsest first), e.g. [low, medium]")
@@ -188,11 +189,59 @@ class RunConfig:
                             raise ValueError(f"parametric.bounds.{model}.{name} must be [low, high] with low < high, got {v!r}")
         from emis3d.parametric import NEEDS_EQUILIBRIUM
 
-        needing = [m for m in models if m in NEEDS_EQUILIBRIUM]
+        used = [m for m in models if m in MODELS] + [c["model"] for m in models if m in composites for c in composites[m]["components"]]
+        needing = sorted({m for m in used if m in NEEDS_EQUILIBRIUM})
         if needing and not p.get("equilibrium"):
             raise ValueError(f"parametric.equilibrium (a g-file name) is required for the {', '.join(needing)} model(s)")
         if self.scale_def.lower() not in ("constant", "exponential", "linear", "step"):
             raise ValueError("the parametric solver supports scale_def constant, exponential, linear or step")
+
+    @staticmethod
+    def _check_composites(composites, MODELS) -> dict:
+        """
+        parametric.composites: {name: {components: [{model, name, bounds, fixed}], shared_toroidal}}.
+        Two or more components, distinct identifier names, known models, and bounds and fixed values
+        only for parameters the component's model has (plus decay / phi_source / phi_peak bounds).
+        """
+        if not isinstance(composites, dict):
+            raise ValueError("parametric.composites must map composite names to {components: [...], shared_toroidal: ...}")
+        for cname, cdef in composites.items():
+            where = f"parametric.composites.{cname}"
+            if cname in MODELS:
+                raise ValueError(f"{where}: the name is a model's; choose another")
+            if not isinstance(cdef, dict) or not isinstance(cdef.get("components"), list):
+                raise ValueError(f"{where} needs components: a list of {{model, name}}")
+            extra = sorted(set(cdef) - {"components", "shared_toroidal"})
+            if extra:
+                raise ValueError(f"{where}: unknown key(s) {extra}; it takes components and shared_toroidal")
+            if not isinstance(cdef.get("shared_toroidal", False), bool):
+                raise ValueError(f"{where}.shared_toroidal must be true or false")
+            comps = cdef["components"]
+            if len(comps) < 2:
+                raise ValueError(f"{where} needs at least two components")
+            seen = set()
+            for k, comp in enumerate(comps):
+                cw = f"{where}.components[{k}]"
+                if not isinstance(comp, dict) or "model" not in comp or "name" not in comp:
+                    raise ValueError(f"{cw} needs model and name")
+                extra = sorted(set(comp) - {"model", "name", "bounds", "fixed"})
+                if extra:
+                    raise ValueError(f"{cw}: unknown key(s) {extra}; it takes model, name, bounds, fixed")
+                if comp["model"] not in MODELS:
+                    raise ValueError(f"{cw}: unknown model {comp['model']!r}; choose from {sorted(MODELS)}")
+                if not str(comp["name"]).isidentifier() or comp["name"] in seen:
+                    raise ValueError(f"{cw}: name must be a distinct identifier (letters, digits, _), got {comp['name']!r}")
+                seen.add(comp["name"])
+                params = set(MODELS[comp["model"]]["params"])
+                for key in ("bounds", "fixed"):
+                    allowed_keys = params | ({"decay", "phi_source", "phi_peak"} if key == "bounds" else set())
+                    stray = sorted(set(comp.get(key) or {}) - allowed_keys)
+                    if stray:
+                        raise ValueError(f"{cw}.{key} names {stray}, which the {comp['model']} model does not have ({sorted(params)})")
+                for name, v in (comp.get("bounds") or {}).items():
+                    if not (isinstance(v, (list, tuple)) and len(v) == 2 and v[0] < v[1]):
+                        raise ValueError(f"{cw}.bounds.{name} must be [low, high] with low < high, got {v!r}")
+        return composites
 
     def eval_times(self) -> list[float]:
         """
