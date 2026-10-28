@@ -46,22 +46,24 @@ def _exp(dphi: np.ndarray, kappa: float = 0.0) -> np.ndarray:
     return np.exp(-1.0 * kappa * (dphi**2))
 
 
-def scale_exp(A: float, B: float, dphi: np.ndarray) -> np.ndarray:
-    """Gaussian (exponential) scaling. Peak is A at dphi = 0"""
-    return A * _exp(dphi, B)
+def scale_exp(A: float, B: float, dphi: np.ndarray, C: float = 0.0) -> np.ndarray:
+    """Gaussian (exponential) scaling: A at dphi = 0 above a toroidally uniform floor C (0: none)."""
+    return A * _exp(dphi, B) + C
 
 
 def scale_linear(
     A: float,
     B: float,
     dphi: np.ndarray,
+    C: float = 0.0,
 ) -> np.ndarray:
     """
     Triangular profile centered at mu: A at dphi = 0, falling linearly with
-    slope |B| and staying at zero beyond A / |B|. (It used to take abs(),
-    which made the profile rise again far along a field line.)
+    slope |B| to zero beyond A / |B|, above a toroidally uniform floor C
+    (0: none). (It used to take abs(), which made the profile rise again
+    far along a field line.)
     """
-    return np.maximum(A - np.abs(B) * np.asarray(dphi, dtype=float), 0.0)
+    return np.maximum(A - np.abs(B) * np.asarray(dphi, dtype=float), 0.0) + C
 
 
 def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
@@ -102,6 +104,7 @@ def scale_wrapper(
     emissionName: str | None = None,
     dphi: np.ndarray | None = None,
     bolo_phi_locs: np.ndarray | None = None,
+    c: float = 0.0,
 ):
     """
     Wrapper for the scale function; returns a scaling factor array based on
@@ -116,6 +119,7 @@ def scale_wrapper(
     scale_def     : One of 'exponential', 'linear', 'constant'
     emissionName  : Name of the emission distribution (e.g. 'clockwise')
     dphi          : Pre-computed dphi; calculated from phi/mu if None
+    c             : Toroidally uniform floor added to the exponential and linear profiles (0: none)
     numRevolutions: Number of toroidal revolutions for helical distributions
     bolo_phi_locs : Toroidal locations of the bolometers (radians)
     """
@@ -135,9 +139,9 @@ def scale_wrapper(
         return
 
     if scale_def == "exponential":
-        return scale_exp(a, b, dphi)
+        return scale_exp(a, b, dphi, c)
     elif scale_def == "linear":
-        return scale_linear(a, b, dphi)
+        return scale_linear(a, b, dphi, c)
     elif scale_def == "constant":
         return scale_constant(a, dphi)
     elif scale_def == "step":
@@ -325,6 +329,7 @@ def helical_endpoint_penalty(
             P_pol = np.asarray(sub["P_pol"], dtype=float)
 
             b = params.get(f"b_{name}_{tag}", 0.0)
+            c = params.get(f"c_{tag}", 0.0)
 
             # Distance along this direction for every sample of its revolution
             dphi = find_dphi(phi_arr, mu, name)
@@ -339,6 +344,7 @@ def helical_endpoint_penalty(
                 dphi=dphi,
                 scale_def=scale_def,
                 emissionName=name,
+                c=c,
             )
 
             if scale is None:
@@ -417,6 +423,7 @@ def residual(
         tag = loc_tag(synthetic_dict["injectionLocation"])
         a = params[f"a_{tag}"]
         b = params[f"b_{emissionName}_{tag}"]
+        c = params.get(f"c_{tag}", 0.0)  # the toroidal floor, when fitted
 
         # --- Loop over each bolometer group
         for ii in range(len(synthetic_dict[emissionName]["data"])):
@@ -448,6 +455,7 @@ def residual(
                 scale_def=scale_def,
                 emissionName=emissionName,
                 bolo_phi_locs=bolo_phis,
+                c=c,
             )
 
             if scale_ is None:

@@ -179,6 +179,7 @@ class RadDistFitting:
         peak_shift_max_degrees: float = 180.0,
         a_bounds: tuple | None = None,
         b_bounds: tuple | None = None,
+        toroidal_floor: bool = False,
     ) -> None:
         """
         Creates the LMFIT parameters for the radDist. peak_shift_max_degrees
@@ -211,6 +212,13 @@ class RadDistFitting:
             params.add("peak_shift", value=0.0, min=-window, max=window)
             params.add("peak_rad_loc", expr="(injector_phi + peak_shift) % (2*pi)")
             self.fitSynthetic["params"]["paramName"] += ["peak_shift", "peak_rad_loc"]
+
+        # --- A toroidally uniform floor under the peak (exponential and linear only): one per candidate,
+        # added to each emission's scale; solved with the amplitude, bounded at zero
+        if toroidal_floor and scale_def.lower() in ("exponential", "linear"):
+            paramName = f"c_{loc_tag(self.info['injectionLocation'])}"
+            self.fitSynthetic["params"]["paramName"].append(paramName)
+            params.add(paramName, value=0.01 * float(np.clip(1.0, a_lo, a_hi)), min=0.0, max=a_hi)
 
         # --- The exponential decay factor for each emission, only do one for helical directions
         for emissionName in self.info["emissionNames"]:

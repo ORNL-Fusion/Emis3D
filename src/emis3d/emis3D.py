@@ -288,6 +288,7 @@ class Emis3D:
         composites = cfg.get("composites") or {}
         vary_peak = bool(self.info.get("vary_peak_rad_location", False))
         peak_max = float(self.info.get("peak_shift_max_degrees", 180.0))
+        floor = bool(self.info.get("toroidal_floor", False))
         results, templates, fits = [], {}, {}
         # single models first: a composite starts from its components fitted alone
         ordered = [m for m in cfg["models"] if m not in composites] + [m for m in cfg["models"] if m in composites]
@@ -301,7 +302,7 @@ class Emis3D:
                 fit = CompositeFit(model, comps, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
                                    shared_toroidal=bool(cdef.get("shared_toroidal", False)), supersample=cfg.get("supersample"),
                                    a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds(),
-                                   vary_peak=vary_peak, peak_shift_max_degrees=peak_max)
+                                   vary_peak=vary_peak, peak_shift_max_degrees=peak_max, toroidal_floor=floor)
                 template = comps[0][2]
             else:
                 fixed = (cfg.get("fixed") or {}).get(model) or {}
@@ -309,7 +310,7 @@ class Emis3D:
                 fit = ParametricFit(model, template, matrices, data, self.config.scale_def, float(self.info["injectionLocation"]),
                                     bounds=(cfg.get("bounds") or {}).get(model), fixed=fixed, supersample=cfg.get("supersample"),
                                     a_bounds=self.config.amplitude_bounds(), b_bounds=self.config.decay_bounds(),
-                                    vary_peak=vary_peak, peak_shift_max_degrees=peak_max)
+                                    vary_peak=vary_peak, peak_shift_max_degrees=peak_max, toroidal_floor=floor)
             logger.info("→ Parametric fit (%s) at t=%s through %s", model, evalTime, ", ".join(names))
             start = fit.start_from({r.model: r for r in results}) if isinstance(fit, CompositeFit) else None
             result = fit.search(seed=int(cfg.get("seed", 0)), maxiter=int(cfg.get("maxiter", 60)), popsize=int(cfg.get("popsize", 12)),
@@ -597,6 +598,14 @@ class Emis3D:
             self.info["injectionLocation"] = self.injector.phi_deg
             if not self.injector.verified:
                 logger.warning("Injector %s: UNVERIFIED geometry%s", name, f" ({self.injector.note})" if self.injector.note else "")
+
+        # --- Can the cameras determine the toroidal profile? (more free parameters than points they sample)
+        if self.config is not None:
+            from emis3d.diagnostic import camera_angles
+
+            problem = self.config.toroidal_identifiability(camera_angles(self.ws, tokamakName), float(self.info["injectionLocation"]))
+            if problem:
+                logger.warning("Toroidal profile: %s", problem)
 
         self.info["tokamakName"] = tokamakName
         self.info["runConfigName"] = runConfigName
@@ -980,6 +989,7 @@ class Emis3D:
                         peak_shift_max_degrees=self.info["peak_shift_max_degrees"],
                         a_bounds=self.config.amplitude_bounds() if self.config else None,
                         b_bounds=self.config.decay_bounds() if self.config else None,
+                        toroidal_floor=bool(self.info.get("toroidal_floor", False)),
                     )
                     if "ERROR CHANNELS" in radD.info and print_minor_error:
                         print_error(radD)
@@ -996,6 +1006,7 @@ class Emis3D:
                     peak_shift_max_degrees=self.info["peak_shift_max_degrees"],
                     a_bounds=self.config.amplitude_bounds() if self.config else None,
                     b_bounds=self.config.decay_bounds() if self.config else None,
+                    toroidal_floor=bool(self.info.get("toroidal_floor", False)),
                 )
 
                 if "ERROR CHANNELS" in radD.info and print_minor_error:

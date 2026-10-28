@@ -45,6 +45,9 @@ class RunConfig:
     #   library solver: the toroidal scale's peak moves (the radDists' structure is fixed);
     #   parametric helical model: the source plane rotates (phi_source), the whole structure with it
     peak_shift_max_degrees: float = 180.0  # how far the fitted peak may move from the injector [deg]
+    # A toroidally uniform floor under the peaked profile (exponential and linear): a * g(dphi) + c, with
+    # c >= 0 solved with the amplitude; compared by AIC against the same model without it
+    toroidal_floor: bool = False
     helical_endpoint_weight: float = 1.0  # ties clockwise/counterclockwise helical endpoints; 0 = off; helical only
 
     # --- Channel errors (util_emis3D.channel_error). floor_relative:
@@ -129,6 +132,11 @@ class RunConfig:
         if self.solver not in SOLVERS:
             raise ValueError(f"solver must be one of {SOLVERS}, got {self.solver!r}")
         self._check_bounds()
+        if not isinstance(self.toroidal_floor, bool):
+            raise ValueError("toroidal_floor must be true or false")
+        if self.toroidal_floor and self.scale_def.lower() not in ("exponential", "linear"):
+            raise ValueError(f"toroidal_floor needs scale_def exponential or linear (with {self.scale_def!r} "
+                             "there is no peak for a floor to sit under)")
         if self.injector is not None and not (isinstance(self.injector, str) and self.injector):
             raise ValueError(f"injector must be the name of an injector in the machine settings, got {self.injector!r}")
         if self.solver == "parametric":
@@ -252,6 +260,54 @@ class RunConfig:
                     if not (isinstance(v, (list, tuple)) and len(v) == 2 and v[0] < v[1]):
                         raise ValueError(f"{cw}.bounds.{name} must be [low, high] with low < high, got {v!r}")
         return composites
+
+    def toroidal_unknowns(self) -> list[str]:
+        """
+        The toroidal profile's free parameters per radDist: its amplitude, the
+        decay (exponential and linear, when fitted), the floor, and the peak's
+        location (vary_peak_rad_location). The step scale has one amplitude
+        per camera location, exactly as many as it can determine.
+        """
+        s = self.scale_def.lower()
+        if s in ("constant", "step"):
+            return ["a"] if s == "constant" else []
+        out = ["a"]
+        if self.enable_dphi_scaling or self.solver == "parametric":
+            out.append("b")
+        if self.toroidal_floor:
+            out.append("c (floor)")
+        if self.vary_peak_rad_location:
+            out.append("peak location")
+        return out
+
+    def toroidal_points(self, camera_angles: dict, injection_deg: float) -> list[float]:
+        """
+        The points of the toroidal profile the cameras sample. With the peak at
+        the injector the profile is symmetric about it, so cameras the same
+        angle away on either side sample the same point: the points are the
+        distinct distances from the injector. With a fitted peak location they
+        are the distinct camera angles.
+        """
+        angles = [float(camera_angles[c]) % 360.0 for c in self.BOLOMETERS if c in camera_angles]
+        if self.vary_peak_rad_location:
+            return sorted({round(a, 1) for a in angles})
+        return sorted({round(abs((a - injection_deg + 180.0) % 360.0 - 180.0), 1) for a in angles})
+
+    def toroidal_identifiability(self, camera_angles: dict, injection_deg: float | None = None) -> str | None:
+        """
+        A warning when the toroidal profile has more free parameters than
+        points the cameras sample (camera_angles: {camera: phi [deg]}), else None.
+        """
+        inj = float(self.injectionLocation if injection_deg is None else injection_deg)
+        points = self.toroidal_points(camera_angles, inj)
+        unknowns = self.toroidal_unknowns()
+        if points and len(unknowns) > len(points):
+            where = (f"camera angles {', '.join(f'{p:g}' for p in points)} deg" if self.vary_peak_rad_location
+                     else f"{', '.join(f'{p:g}' for p in points)} deg from the injector")
+            return (f"the toroidal profile has {len(unknowns)} free parameters ({', '.join(unknowns)}) but the cameras sample "
+                    f"only {len(points)} point(s) of it ({where}): they cannot all be determined at one time; drop one "
+                    "(toroidal_floor, vary_peak_rad_location, or fix b) or add a camera at another distance from the injector")
+        return None
 
     def eval_times(self) -> list[float]:
         """

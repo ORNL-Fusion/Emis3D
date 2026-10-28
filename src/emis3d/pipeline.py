@@ -478,6 +478,24 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
 
     ok(f"solver: {cfg.solver}; bounds a {cfg.amplitude_bounds()}, b {cfg.decay_bounds()}")
 
+    # --- Can the cameras determine the toroidal profile?
+    from emis3d.diagnostic import camera_angles
+
+    inj_deg = cfg.injectionLocation
+    if cfg.injector:
+        try:
+            from emis3d.injector import machine_injectors
+
+            found = machine_injectors(ws, cfg.tokamakName).get(cfg.injector)
+            inj_deg = found.phi_deg if found is not None else inj_deg
+        except (AttributeError, ValueError):
+            pass
+    problem = cfg.toroidal_identifiability(camera_angles(ws, cfg.tokamakName), inj_deg)
+    if problem:
+        warn(problem)
+    else:
+        ok(f"toroidal profile: {len(cfg.toroidal_unknowns())} free parameter(s) ({', '.join(cfg.toroidal_unknowns()) or 'none'})")
+
     # --- The SPI injector, if the run names one
     if cfg.injector:
         from emis3d.injector import machine_injectors

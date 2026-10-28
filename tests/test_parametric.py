@@ -880,3 +880,58 @@ def test_spray_spot_needs_an_injector_and_runs_through_emis3d(rings, tmp_path):
     e._perform_fits()
     res = e.bestFits[10.0]["parametric"]
     assert res.model == "spray_spot" and {"spray_s", "spray_offset_deg"} <= set(res.values) and "phi_source" not in res.values
+
+# A toroidal floor under the peak (toroidal_floor)
+# ---------------------------------------------------------------------------
+
+def test_parametric_floor_is_an_exactly_solved_column(rings):
+    _, truth, template = rings
+    G = synthetic_G(truth)
+    shape = {k: TRUE[k] for k in ("startR", "startZ", "sigma_R", "sigma_z", "rotationAngle")}
+    probe = ParametricFit("ring", template, [G], {c: (1.0, 1.0) for c in G.channels}, "exponential", 225.0, toroidal_floor=True)
+    assert probe.amp_names == ["a", "c"] and probe.amp_bounds("c")[0] == 0.0
+    vals = {**shape, "b": 1.0}
+    X = probe.design(G, vals)
+    rows = probe._rows[id(G)][0]
+    np.testing.assert_allclose(np.column_stack([G.signals(c)[rows] for c in probe.voxel_columns(G, vals)]), X, rtol=1e-12)
+    signal = X[:, 0] + 0.25 * X[:, 1]                                                       # a floor a quarter of the peak
+    sigma = 0.02 * signal.max() * np.ones_like(signal)
+    data = {c: (float(s), float(e)) for c, s, e in zip(G.channels, signal, sigma, strict=True)}
+    fit = ParametricFit("ring", template, [G], data, "exponential", 225.0, fixed=shape, toroidal_floor=True)
+    res = fit.search(seed=0, maxiter=20)
+    assert res.values["c"] / res.values["a"] == pytest.approx(0.25, abs=0.02) and res.values["b"] == pytest.approx(1.0, abs=0.1)
+    without = ParametricFit("ring", template, [G], data, "exponential", 225.0, fixed=shape).search(seed=0, maxiter=20)
+    assert without.chi2 > 10 * max(res.chi2, 1e-9) and res.aic < without.aic
+
+    none = {c: (float(s), float(e)) for c, s, e in zip(G.channels, X[:, 0], sigma, strict=True)}
+    res0 = ParametricFit("ring", template, [G], none, "exponential", 225.0, fixed=shape, toroidal_floor=True).search(seed=0, maxiter=20)
+    assert res0.values["c"] < 0.02 * res0.values["a"] and not any(f.startswith("c ") for f in res0.at_bounds)   # zero is an answer, not a flag
+
+
+def test_floor_only_for_peaked_axisymmetric_profiles(rings, helical_setup):
+    _, _, template = rings
+    G, _, spot = helical_setup
+    assert "c" not in ParametricFit("ring", template, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, toroidal_floor=True).amp_names
+    assert "c" not in ParametricFit("helical", spot, [G], {c: (1.0, 1.0) for c in G.channels}, "exponential", 225.0, toroidal_floor=True).amp_names
+
+
+def test_composite_floor_on_its_axisymmetric_components(rings, helical_setup):
+    from emis3d.parametric import CompositeFit
+
+    _, _, ring = rings
+    G, _, spot = helical_setup
+    fit = CompositeFit("core_spot", [("core", "ring", ring, None, None), ("spot", "helical", spot, None, None)], [G],
+                       {c: (1.0, 1.0) for c in G.channels}, "exponential", 225.0, toroidal_floor=True)
+    assert fit.amp_names == ["a_core", "c_core", "a_spot"] and fit.amp_bounds("c_core")[0] == 0.0
+
+
+def test_floor_with_a_spray_spot_component(rings, helical_setup, spray_template):
+    from emis3d.parametric import CompositeFit
+
+    _, _, ring = rings
+    G, _, _ = helical_setup
+    t, _ = spray_template
+    fit = CompositeFit("core_spray", [("core", "ring", ring, None, None), ("spot", "spray_spot", t, None, None)], [G],
+                       {c: (1.0, 1.0) for c in G.channels}, "exponential", 225.0, toroidal_floor=True, vary_peak=True)
+    assert fit.amp_names == ["a_core", "c_core", "a_spot"]                                 # the spray spot takes no floor
+    assert not any(n.startswith("spot_phi") for n in fit.names)                            # and stays in the injector's plane

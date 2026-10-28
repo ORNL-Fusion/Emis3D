@@ -152,6 +152,7 @@ def toroidal_profile(
             scale_def=scale_def,
             emissionName=name,
             bolo_phi_locs=bolo_phi_locs,
+            c=float(params.get(f"c_{tag}", 0.0)),  # the toroidal floor, when fitted
         )
         P_e = P_pol * np.asarray(scale, dtype=float) * float(sub["scaleSynth"])
         per_emission[name] = {"multiplication_factor": np.asarray(scale), "power": P_e}
@@ -200,6 +201,8 @@ def derived_quantities(
         "power_fraction_window": float(P[in_window].sum() / P.sum()) if P.sum() > 0 else np.nan,
         "amplitude": float(params[f"a_{tag}"]),
     }
+    if f"c_{tag}" in params:  # the toroidal floor, as a fraction of the peak amplitude
+        out["floor_fraction"] = float(params[f"c_{tag}"]) / out["amplitude"] if out["amplitude"] > 0 else np.nan
     for name in synth["emissionNames"]:
         b = float(params.get(f"b_{name}_{tag}", 0.0))
         out[f"decay_length_deg[{name}]"] = _decay_length_deg(scale_def, out["amplitude"], b)

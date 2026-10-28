@@ -160,7 +160,7 @@ class ParametricFit:
     def __init__(self, model: str, template, matrices: list, data: dict, scale_def: str, injection_deg: float,
                  bounds: dict | None = None, fixed: dict | None = None, supersample=None,
                  a_bounds: tuple | None = None, b_bounds: tuple | None = None,
-                 vary_peak: bool = False, peak_shift_max_degrees: float = 180.0):
+                 vary_peak: bool = False, peak_shift_max_degrees: float = 180.0, toroidal_floor: bool = False):
         from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
 
         if model not in MODELS:
@@ -228,6 +228,10 @@ class ParametricFit:
                 gap = np.abs((G.grid.phi_centers[:, None] - locs[None, :] + np.pi) % (2.0 * np.pi) - np.pi)
                 self._regions[id(G)] = np.argmin(gap, axis=1)
         self.amp_names = [f"a_{int(round(d))}" for d in self.step_deg] if self.step_deg else ["a"]
+        # a toroidally uniform floor under the peak: one more amplitude, solved exactly with a
+        self.floor = bool(toroidal_floor) and self.has_decay and not self.step_deg
+        if self.floor:
+            self.amp_names.append("c")
         self._f_cache = {}
         self.evaluations = 0
 
@@ -260,7 +264,10 @@ class ParametricFit:
         if self.step_deg:
             region = self._regions[id(G)]
             return np.column_stack([P[:, region == j].sum(axis=1) for j in range(len(self.step_deg))])
-        return (P @ self._toroidal(G, values.get("b", 0.0)))[:, None]
+        peaked = P @ self._toroidal(G, values.get("b", 0.0))
+        if self.floor:
+            return np.column_stack([peaked, P.sum(axis=1)])  # the peak, and the uniform floor
+        return peaked[:, None]
 
     def voxel_columns(self, G, values: dict, only_seen: bool = True) -> list:
         """
@@ -276,7 +283,8 @@ class ParametricFit:
         if self.step_deg:
             region = self._regions[id(G)][sector]
             return [eps * (region == j) for j in range(len(self.step_deg))]
-        return [eps * self._toroidal(G, values.get("b", 0.0))[sector]]
+        cols = [eps * self._toroidal(G, values.get("b", 0.0))[sector]]
+        return cols + [eps] if self.floor else cols
 
     def voxel_field(self, G, values: dict, only_seen: bool = True) -> np.ndarray:
         """
@@ -310,17 +318,25 @@ class ParametricFit:
         peak_d = float(np.max(np.abs(d))) if d.size else 0.0
         return peak_d / peak_m if peak_m > 0 and peak_d > 0 else 1.0
 
+    def amp_bounds(self, name: str) -> tuple:
+        """An amplitude's bounds: a toroidal floor (c, c_<component>) may vanish; the others take a_bounds."""
+        if name == "c" or name.startswith("c_"):
+            return (0.0, float(self.a_bounds[1]))
+        return tuple(self.a_bounds)
+
     def _amplitudes(self, X: np.ndarray, d: np.ndarray, sig: np.ndarray) -> tuple[np.ndarray, float]:
         """The amplitudes (relative) solved exactly within their bounds, and the scale to absolute."""
         from scipy.optimize import lsq_linear
 
         ref = self._scale_ref(d, X.sum(axis=1))
         A = (X * ref) / sig[:, None]
+        lo = np.array([self.amp_bounds(n)[0] for n in self.amp_names], dtype=float)
+        hi = np.array([self.amp_bounds(n)[1] for n in self.amp_names], dtype=float)
         if X.shape[1] == 1:  # one amplitude: the bounded optimum is the clipped one
             denom = float(A[:, 0] @ A[:, 0])
             a = float(A[:, 0] @ (d / sig)) / denom if denom > 0 else 0.0
-            return np.array([np.clip(a, self.a_bounds[0], self.a_bounds[1])]), ref
-        res = lsq_linear(A, d / sig, bounds=(self.a_bounds[0], self.a_bounds[1]))
+            return np.array([np.clip(a, lo[0], hi[0])]), ref
+        res = lsq_linear(A, d / sig, bounds=(lo, hi))
         return np.asarray(res.x, dtype=float), ref
 
     def chi2(self, G, values: dict) -> tuple[float, np.ndarray | float]:
@@ -374,7 +390,8 @@ class ParametricFit:
             pars.add(n, value=float(np.clip(best[n], lo[self.names.index(n)], hi[self.names.index(n)])), min=self.bounds[n][0], max=self.bounds[n][1])
         _, a_start = self.chi2(G1, best)
         for name, a0 in zip(self.amp_names, np.atleast_1d(a_start), strict=True):
-            pars.add(name, value=float(np.clip(a0, self.a_bounds[0], self.a_bounds[1])), min=self.a_bounds[0], max=self.a_bounds[1])
+            lo_a, hi_a = self.amp_bounds(name)
+            pars.add(name, value=float(np.clip(a0, lo_a, hi_a)), min=lo_a, max=hi_a)
 
         def residual(p):
             vals = {n: p[n].value for n in self.names}
@@ -391,7 +408,11 @@ class ParametricFit:
         say(f"  polish ({G1.grid.describe()}): chi2/N {chi2_1 / max(self.n_data, 1):.2f} after {self.evaluations} evaluations, "
             f"{time.perf_counter() - t0:.0f} s")
         # a periodic parameter's range ends (the tilt, a poloidal angle) are not limits in any meaningful sense
-        flags = at_bounds(values, {**{k: v for k, v in self.bounds.items() if not is_periodic(k)}, **{n: self.a_bounds for n in self.amp_names}})
+        flags = at_bounds(values, {**{k: v for k, v in self.bounds.items() if not is_periodic(k)},
+                                   **{n: self.amp_bounds(n) for n in self.amp_names if not (n == "c" or n.startswith("c_"))}})
+        # a floor at zero is an answer (none needed), not a limit; at its upper bound it is flagged
+        flags += [f"{n} at its upper bound {self.amp_bounds(n)[1]:g}" for n in self.amp_names
+                  if (n == "c" or n.startswith("c_")) and values.get(n, 0.0) >= self.amp_bounds(n)[1] * (1 - 1e-6)]
         for flag in flags:
             logger.warning("%s fit: %s (widen the bound, or consider another model)", self.model, flag)
         X = self.design(G1, {n: values[n] for n in self.names})
@@ -431,7 +452,7 @@ class CompositeFit(ParametricFit):
 
     def __init__(self, name: str, components: list, matrices: list, data: dict, scale_def: str, injection_deg: float,
                  shared_toroidal: bool = False, supersample=None, a_bounds: tuple | None = None, b_bounds: tuple | None = None,
-                 vary_peak: bool = False, peak_shift_max_degrees: float = 180.0):
+                 vary_peak: bool = False, peak_shift_max_degrees: float = 180.0, toroidal_floor: bool = False):
         from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
 
         if scale_def not in SCALE_DEFS:
@@ -536,6 +557,10 @@ class CompositeFit(ParametricFit):
             else:
                 comp["amps"] = [f"a_{comp['name']}"]
                 comp["step_deg"] = []
+            # an axisymmetric component with a peaked profile may have a uniform floor under it
+            comp["floor"] = bool(toroidal_floor) and not comp["field_aligned"] and not comp["step_deg"] and bool(comp["decay"])
+            if comp["floor"]:
+                comp["amps"].append(f"c_{comp['name']}")
             self.amp_names += comp["amps"]
         self._f_cache = {}
         self.evaluations = 0
@@ -581,6 +606,8 @@ class CompositeFit(ParametricFit):
                 f = np.asarray(Util_emis3D.scale_wrapper(a=1.0, b=decay, phi=G.grid.phi_centers, mu=float(np.deg2rad(phi)),
                                                          scale_def=self.scale_def, emissionName=comp["emission"]), dtype=float)
                 cols.append(eps * f[sector])
+                if comp["floor"]:
+                    cols.append(eps)  # the uniform floor
             else:
                 cols.append(eps)
         return cols

@@ -404,3 +404,27 @@ class Bolometer(object):
         for c_ in self.bolometer_camera.children:
             if c_.name == "Housing with Aperture":
                 c_.material = mat
+
+
+def camera_angles(ws, machine: str) -> dict:
+    """
+    {camera: toroidal angle [deg]} for a machine's cameras, by the names in its
+    settings' BOLOMETERS block (the names run configs use), from each
+    camera's config (CAMERA_POSITION_R_Z_PHI). Cameras whose config cannot be
+    read are left out.
+    """
+    settings_path = ws.machine_file(machine, f"{machine}_settings.yaml", required=False)
+    if settings_path is None:
+        return {}
+    settings = config_loader(settings_path) or {}
+    out = {}
+    for name, entry in (settings.get("BOLOMETERS") or {}).items():
+        try:
+            path = ws.machine_file(machine, "inputs", "sxrInfo", entry["configFileName"], required=False)
+            info = config_loader(path) if path is not None else None
+            if info is None:
+                continue
+            out[name] = float(info["CAMERA_POSITION_R_Z_PHI"][2])
+        except (KeyError, TypeError, ValueError, OSError):
+            continue
+    return out
