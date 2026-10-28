@@ -7,6 +7,8 @@ and end to end through Emis3D on MOCK (ray tracing).
 """
 
 import contextlib
+import tempfile
+from pathlib import Path
 import io
 
 import h5py
@@ -137,7 +139,7 @@ def test_run_config_solver_and_parametric_block():
     for block, match in bad:
         with pytest.raises(ValueError, match=match):
             RunConfig.from_dict({**RUN, "solver": "parametric", "parametric": block})
-    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical", "helical_psi"}
+    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical", "helical_psi", "spray_spot"}
 
 
 def test_run_config_a_and_b_bounds():
@@ -451,7 +453,7 @@ def test_asymmetric_shell_is_brighter_on_its_side(rings):
     shell.info["asym_amp"] = 0.0
     sym = shell.calc_emissivity(np.array([R0, R0]), np.array([z0 + 0.55, z0 - 0.55]), phi=np.array([0.0]), emissionName="fluxShell")["fluxShell"]
     assert sym[0] == pytest.approx(top / 2) and sym[1] > 0
-    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical", "helical_psi"}
+    assert set(MODELS) == {"ring", "tube", "shell", "asymshell", "helical", "helical_psi", "spray_spot"}
 
 
 @pytest.fixture(scope="module")
@@ -781,3 +783,100 @@ def test_a_start_on_or_beyond_a_bound_is_accepted(rings):
     hi = {n: fit.bounds[n][1] for n in fit.names}                                            # every value on its upper bound
     res = fit.search(seed=0, maxiter=2, start={**hi, "startR": float("nan"), "sigma_R": 99.0})
     assert np.isfinite(res.chi2)
+
+
+# ---------------------------------------------------------------------------
+# spray_spot: a spot on the SPI spray, in the injector's plane
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def spray_template(helical_setup):
+    import dataclasses
+
+    from emis3d.injector import machine_injectors
+
+    _, _, rz = helical_setup
+    ws = Workspace.resolve(env={}, user_config=Path(tempfile.mktemp()))
+    inj = machine_injectors(ws, "MOCK")["SPI225"]                                              # aimed at the axis, 20 deg cone
+    with contextlib.redirect_stdout(io.StringIO()):
+        t = RD.FieldAlignedSource(config={**BASE, "distType": "FieldAligned", "eqFileName": mock.EQ_FILE, "source": "spray",
+                                          "injector": dataclasses.asdict(inj), "mapPath": rz.info["mapPath"],
+                                          "sigma_R": 0.08, "sigma_z": 0.08, "decay": 0.5})
+    return t, inj
+
+
+SPRAY_TRUE = {"spray_s": 0.35, "spray_offset_deg": 4.0, "sigma_R": 0.08, "sigma_z": 0.08, "decay": 0.5}
+
+
+def test_spray_source_lies_on_the_spray(spray_template):
+    t, inj = spray_template
+    g = t.tokamak.gfile
+    assert 0.3 < t.info["spray_length"] < 2.0                                                  # to where the centre line leaves the vessel
+    t.info.update(spray_s=0.0, spray_offset_deg=0.0)
+    assert t.spray_position() == pytest.approx((inj.shatter_R, inj.shatter_Z))
+    t.info.update(spray_s=0.3, spray_offset_deg=0.0)
+    R0, Z0 = t.spray_position()
+    assert inj.in_cone(R0, Z0, g.rmagx, g.zmagx) and np.hypot(R0 - inj.shatter_R, Z0 - inj.shatter_Z) == pytest.approx(0.3)
+    t.info.update(spray_offset_deg=12.0)                                                       # past the 10 deg half-cone
+    assert not inj.in_cone(*t.spray_position(), g.rmagx, g.zmagx)
+    t.info.update(SPRAY_TRUE)
+    src = t.source_on(t.fmap)
+    peak = int(np.argmax(src))
+    R0, Z0 = t.spray_position()
+    assert abs(t.fmap.pixel_R[peak] - R0) < 0.1 and abs(t.fmap.pixel_z[peak] - Z0) < 0.1
+
+
+def test_spray_spot_keeps_the_injector_plane_and_recovers_its_place(helical_setup, spray_template):
+    G, _, _ = helical_setup
+    t, inj = spray_template
+    probe = ParametricFit("spray_spot", t, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, vary_peak=True)
+    assert "phi_source" not in probe.names and probe.fixed["phi_source"] == 225.0                 # fragments fly in the injector's plane
+    assert probe.bounds["spray_s"] == (0.0, t.info["spray_length"]) and probe.bounds["spray_offset_deg"] == (-10.0, 10.0)
+    signal = probe.model_signals(G, SPRAY_TRUE)
+    sigma = 0.05 * signal.max() + 0.05 * signal
+    data = {c: (float(s), float(e)) for c, s, e in zip(G.channels, signal, sigma, strict=True)}
+    res = ParametricFit("spray_spot", t, [G], data, "constant", 225.0, vary_peak=True).search(seed=0, maxiter=40)
+    assert res.values["spray_s"] == pytest.approx(0.35, abs=0.06)
+    assert res.values["spray_offset_deg"] == pytest.approx(4.0, abs=3.0)
+    assert res.chi2 / res.n_data < 0.5
+
+
+def test_band_with_a_spray_spot(helical_setup, psi_template, spray_template):
+    from emis3d.parametric import CompositeFit
+
+    G, _, _ = helical_setup
+    t, _ = spray_template
+    comps = [("band", "helical_psi", psi_template, {"psi_width": (0.05, 0.3), "theta_width": (5.0, 90.0)}, None),
+             ("spot", "spray_spot", t, None, None)]
+    fit = CompositeFit("band_spray", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, vary_peak=True,
+                       peak_shift_max_degrees=90.0)
+    assert "band_phi_source" in fit.names and "spot_decay" in fit.names
+    assert not any(n.startswith("spot_phi") for n in fit.names)                               # the spot stays in the injector's plane
+    shared = CompositeFit("band_spray", comps, [G], {c: (1.0, 1.0) for c in G.channels}, "constant", 225.0, shared_toroidal=True, vary_peak=True)
+    assert "phi_peak" in shared.names and "decay" in shared.names                              # the band still moves; the spot does not
+    values = {**{f"band_{k}": v for k, v in PSI_TRUE.items() if k != "decay"}, "band_decay": 0.5, "band_phi_source": 200.0,
+              **{f"spot_{k}": v for k, v in SPRAY_TRUE.items() if k != "decay"}, "spot_decay": 0.5, "a_band": 1.0, "a_spot": 0.5}
+    fit._apply(values)
+    assert t.info["phi_source"] == 225.0
+    from emis3d.radDist import describe_parametric
+
+    assert "spot (spray_spot)" in describe_parametric(fit, values) and "(at R" in describe_parametric(fit, values)
+
+
+def test_spray_spot_needs_an_injector_and_runs_through_emis3d(rings, tmp_path):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    base = {"BOLOMETERS": {"A": {"dataFileName": "a.h5"}}, "shot": 1, "solver": "parametric"}
+    with pytest.raises(ValueError, match="needs injector"):
+        RunConfig.from_dict({**base, "parametric": {"models": ["spray_spot"], "equilibrium": "g"}})
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], solver="parametric", scale_def="constant",
+                          injector="SPI225", vary_peak_rad_location=True,
+                          parametric={"models": ["spray_spot"], "matrices": ["low"], "equilibrium": mock.EQ_FILE, "maxiter": 3, "substeps": 1})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings).save(matrix_path(ws, "MOCK", "low"))
+    e = Emis3D(runConfigName=str(run))
+    e._perform_fits()
+    res = e.bestFits[10.0]["parametric"]
+    assert res.model == "spray_spot" and {"spray_s", "spray_offset_deg"} <= set(res.values) and "phi_source" not in res.values

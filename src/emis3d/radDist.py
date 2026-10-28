@@ -1760,9 +1760,10 @@ class FieldAlignedSource(RadDist):
     injector's); the mapped structure is rotated there (FieldLineMap.rotate).
     """
 
-    SAVE_KEYS = (("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("psi_center", "psi"), ("psi_width", "dpsi"),
-                 ("theta_center", "theta"), ("theta_width", "dtheta"), ("decay", "decay"), ("phi_source", "phi"))
-    SOURCE_PARAMS = {"rz": ("startR", "startZ", "sigma_R", "sigma_z"), "psi": ("psi_center", "psi_width", "theta_center", "theta_width")}
+    SAVE_KEYS = (("spray_s", "s"), ("spray_offset_deg", "off"), ("sigma_R", "sigma_R"), ("sigma_z", "sigma_z"), ("psi_center", "psi"),
+                 ("psi_width", "dpsi"), ("theta_center", "theta"), ("theta_width", "dtheta"), ("decay", "decay"), ("phi_source", "phi"))
+    SOURCE_PARAMS = {"rz": ("startR", "startZ", "sigma_R", "sigma_z"), "psi": ("psi_center", "psi_width", "theta_center", "theta_width"),
+                     "spray": ("spray_s", "spray_offset_deg", "sigma_R", "sigma_z")}
 
     def __init__(self, startR=None, startZ=None, config=None):
         config = {} if config is None else config
@@ -1774,7 +1775,9 @@ class FieldAlignedSource(RadDist):
         self.info.setdefault("source", "rz")
         self.info.setdefault("psi_max", 1.2)
         if self.info["source"] not in self.SOURCE_PARAMS:
-            raise ValueError(f"source must be rz or psi, got {self.info['source']!r}")
+            raise ValueError(f"source must be rz, psi or spray, got {self.info['source']!r}")
+        if self.info["source"] == "spray" and not isinstance(self.info.get("injector"), dict):
+            raise ValueError("source: spray needs the injector's settings (the run config's injector:)")
         self._grid_eps = None
         if "mapPath" in self.info:
             from emis3d.fieldline_map import cached_map
@@ -1786,6 +1789,8 @@ class FieldAlignedSource(RadDist):
                 if self.tokamak.gfile is None:
                     raise ValueError("source: psi needs an equilibrium (eqFileName) for the flux coordinates")
                 self.info["startR"], self.info["startZ"] = float(self.tokamak.gfile.rmagx), float(self.tokamak.gfile.zmagx)
+            if self.info["source"] == "spray":
+                self._setup_spray()
             logger.info("→ Building field-aligned radDist from the source at R=%.3f, z=%.3f", self.info["startR"], self.info["startZ"])
 
     def voxel_emissivity(self, G=None) -> np.ndarray:
@@ -1797,8 +1802,50 @@ class FieldAlignedSource(RadDist):
         shift = (np.deg2rad(float(self.info["phi_source"])) - f.phi0) if self.info.get("phi_source") is not None else 0.0
         return f.apply(src, float(self.info["decay"]), shift=shift)
 
+    def _setup_spray(self) -> None:
+        """
+        The spray's centre-line direction (in the injector's plane) and how far
+        it runs inside the vessel, from the injector's settings: the bounds of
+        spray_s are 0 to that length.
+        """
+        from emis3d.injector import Injector
+
+        inj = Injector(**self.info["injector"])
+        g = self.tokamak.gfile
+        if g is not None:
+            R_ax, Z_ax = float(g.rmagx), float(g.zmagx)
+        else:
+            w = self.tokamak.wall
+            if w is None:
+                raise RuntimeError("source: spray needs the machine's wall or an equilibrium")
+            R_ax, Z_ax = 0.5 * (w["minr"] + w["maxr"]), 0.5 * (w["minz"] + w["maxz"])
+        self.info["spray_direction"] = inj.direction(R_ax, Z_ax)
+        s = np.arange(0.0, 4.0, 0.005)
+        R, Z = inj.shatter_R + s * np.cos(self.info["spray_direction"]), inj.shatter_Z + s * np.sin(self.info["spray_direction"])
+        inside = np.asarray(self.tokamak._inside_tokamak(np.column_stack([R, Z])), dtype=bool)
+        if not inside.any():
+            raise ValueError(f"injector {inj.name}: the spray's centre line never enters the vessel; check shatter_R/Z and the aim")
+        first = int(np.argmax(inside))
+        after = np.flatnonzero(~inside[first:])
+        self.info["spray_length"] = float(s[first + after[0] - 1] if after.size else s[-1])
+        self.info.setdefault("spray_s", 0.5 * self.info["spray_length"])
+        self.info.setdefault("spray_offset_deg", 0.0)
+        self.spray_position()
+
+    def spray_position(self) -> tuple[float, float]:
+        """The spot's centre for the current spray_s and spray_offset_deg (also stored as startR, startZ)."""
+        inj = self.info["injector"]
+        th = float(self.info["spray_direction"]) + np.deg2rad(float(self.info["spray_offset_deg"]))
+        R0 = float(inj["shatter_R"]) + float(self.info["spray_s"]) * np.cos(th)
+        Z0 = float(inj["shatter_Z"]) + float(self.info["spray_s"]) * np.sin(th)
+        self.info["startR"], self.info["startZ"] = R0, Z0
+        return R0, Z0
+
     def source_on(self, f) -> np.ndarray:
         """The source on a mapping's pixels (peak 1), by the source type."""
+        if self.info["source"] == "spray":  # a spot on the SPI spray, in the injector's plane
+            R0, Z0 = self.spray_position()
+            return f.gaussian_source(R0, Z0, float(self.info["sigma_R"]), float(self.info["sigma_z"]))
         if self.info["source"] == "rz":
             return f.gaussian_source(float(self.info["startR"]), float(self.info["startZ"]), float(self.info["sigma_R"]), float(self.info["sigma_z"]))
         psin, theta = self._flux_coordinates(f)
@@ -1936,6 +1983,10 @@ def describe_parametric(fit, values) -> str:
         if comp["decay"]:
             tor.append(f"decay {val(comp['decay']):.3g}")
         tor.append(f"phi {val(comp['phi'], fit.injection_deg):.0f}")
+        t = comp["template"]
+        if t.info.get("source") == "spray":  # where on the spray: the spot's centre in the injector's plane
+            R0, Z0 = t.spray_position()
+            shape += f" (at R {R0:.2f}, z {Z0:.2f})"
         parts.append(f"{cname} ({comp['model']}): {shape}; {', '.join(tor)}")
     return " | ".join(parts)
 

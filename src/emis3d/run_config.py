@@ -195,6 +195,11 @@ class RunConfig:
         from emis3d.parametric import NEEDS_EQUILIBRIUM
 
         used = [m for m in models if m in MODELS] + [c["model"] for m in models if m in composites for c in composites[m]["components"]]
+        from emis3d.parametric import NEEDS_INJECTOR
+
+        spray = sorted({m for m in used if m in NEEDS_INJECTOR})
+        if spray and not self.injector:
+            raise ValueError(f"the {', '.join(spray)} model needs injector: (an SPI injector from the machine settings)")
         needing = sorted({m for m in used if m in NEEDS_EQUILIBRIUM})
         if needing and not p.get("equilibrium"):
             raise ValueError(f"parametric.equilibrium (a g-file name) is required for the {', '.join(needing)} model(s)")

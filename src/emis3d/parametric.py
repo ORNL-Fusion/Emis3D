@@ -56,10 +56,27 @@ MODELS = {
     # along one (theta_width, degrees; up to a full ring), centred at theta_center (0 outboard, 90 top)
     "helical_psi": {"distType": "FieldAligned", "emission": "fieldAligned", "field_aligned": True, "source": "psi",
                     "params": {"psi_center": (0.1, 1.15), "psi_width": (0.01, 0.4), "theta_center": (-180.0, 180.0), "theta_width": (3.0, 180.0)}},
+    # A spot on the SPI spray (the run config's injector): in the injector's plane (its source plane is
+    # fixed there), spray_s along the spray from the shatter point and spray_offset_deg from the centre
+    # line; the bounds default to the vessel and the cone. Carried along the field like the helical model
+    "spray_spot": {"distType": "FieldAligned", "emission": "fieldAligned", "field_aligned": True, "source": "spray", "fixed_plane": True,
+                   "params": {"spray_s": None, "spray_offset_deg": None, "sigma_R": (0.02, 0.3), "sigma_z": (0.02, 0.3)}},
 }
+NEEDS_INJECTOR = ("spray_spot",)
+
+
+def default_bounds(template) -> dict:
+    """Bounds a model takes from its template: the vessel for positions, the spray for a spray spot."""
+    wall = template.tokamak.wall
+    out = {"startR": (wall["minr"] + 0.05, wall["maxr"] - 0.05), "startZ": (wall["minz"] + 0.05, wall["maxz"] - 0.05)}
+    if template.info.get("source") == "spray":
+        half = float(template.info["injector"]["divergence_deg"]) / 2.0
+        out["spray_s"] = (0.0, float(template.info["spray_length"]))
+        out["spray_offset_deg"] = (-half, half)
+    return out
 # The helical model's source plane: with vary_peak_rad_location the toroidal angle phi_source [deg]
 # is fitted within peak_shift_max_degrees of the injector (the whole structure rotates with it)
-NEEDS_EQUILIBRIUM = ("shell", "asymshell", "helical", "helical_psi")
+NEEDS_EQUILIBRIUM = ("shell", "asymshell", "helical", "helical_psi", "spray_spot")
 PERIODIC_PARAMS = ("rotationAngle", "theta_center")  # their range's ends are not limits
 
 
@@ -157,8 +174,7 @@ class ParametricFit:
         self.supersample = supersample
         self.fixed = dict(fixed or {})
 
-        wall = template.tokamak.wall
-        defaults = {"startR": (wall["minr"] + 0.05, wall["maxr"] - 0.05), "startZ": (wall["minz"] + 0.05, wall["maxz"] - 0.05)}
+        defaults = default_bounds(template)
         self.bounds = {}
         for name, b in self.spec["params"].items():
             if name in self.fixed:
@@ -170,7 +186,7 @@ class ParametricFit:
             self.bounds["decay"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS["exponential"])
             if "phi_source" in self.fixed:
                 pass
-            elif vary_peak:  # the source plane's toroidal angle, around the injector
+            elif vary_peak and not self.spec.get("fixed_plane"):  # the source plane's toroidal angle, around the injector
                 self.bounds["phi_source"] = tuple((bounds or {}).get("phi_source")
                                                   or (self.injection_deg - float(peak_shift_max_degrees), self.injection_deg + float(peak_shift_max_degrees)))
             else:
@@ -445,8 +461,7 @@ class CompositeFit(ParametricFit):
                 raise ValueError(f"component names must be distinct identifiers, got {cname!r}")
             names_seen.add(cname)
             spec = MODELS[model]
-            wall = template.tokamak.wall
-            defaults = {"startR": (wall["minr"] + 0.05, wall["maxr"] - 0.05), "startZ": (wall["minz"] + 0.05, wall["maxz"] - 0.05)}
+            defaults = default_bounds(template)
             comp = {"name": cname, "model": model, "spec": spec, "template": template, "emission": spec["emission"],
                     "field_aligned": bool(spec.get("field_aligned")), "shape": []}
             for pname, b in spec["params"].items():
@@ -458,7 +473,12 @@ class CompositeFit(ParametricFit):
                 comp["shape"].append(pname)
             # --- toroidal parameters: shared, or the component's own
             has_decay = comp["field_aligned"] or scale_def in DECAY_BOUNDS
-            if self.shared:
+            if spec.get("fixed_plane"):  # in the injector's plane, whatever the others do
+                comp["decay"] = ("decay" if self.shared else f"{cname}_decay") if has_decay else None
+                comp["phi"] = None
+                if not self.shared and comp["decay"]:
+                    self.bounds[comp["decay"]] = tuple((cbounds or {}).get("decay") or decay_bounds)
+            elif self.shared:
                 comp["decay"] = "decay" if has_decay else None
                 comp["phi"] = "phi_peak"
             else:
@@ -474,10 +494,11 @@ class CompositeFit(ParametricFit):
         if self.shared:
             if any(c["decay"] for c in self.comps):
                 self.bounds["decay"] = decay_bounds
-            if vary_peak:
-                self.bounds["phi_peak"] = phi_bounds
-            else:
-                self.fixed["phi_peak"] = self.injection_deg
+            if any(c["phi"] for c in self.comps):
+                if vary_peak:
+                    self.bounds["phi_peak"] = phi_bounds
+                else:
+                    self.fixed["phi_peak"] = self.injection_deg
         self.names = list(self.bounds)
 
         # --- data aligned with each matrix's rows (as ParametricFit)
@@ -586,7 +607,7 @@ class CompositeFit(ParametricFit):
             if comp["decay"] and own_decay is not None and comp["decay"] not in start:
                 start[comp["decay"]] = own_decay
             own_phi = res.values.get("phi_source")
-            if own_phi is not None and comp["phi"] not in start:
+            if own_phi is not None and comp["phi"] and comp["phi"] not in start:
                 start[comp["phi"]] = own_phi
         return start
 

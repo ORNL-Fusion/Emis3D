@@ -380,6 +380,12 @@ class Emis3D:
         template_cfg.update({k: (b[0] + b[1]) / 2 for k, b in spec["params"].items() if b})
         if spec.get("source"):
             template_cfg["source"] = spec["source"]
+        if spec.get("source") == "spray":
+            import dataclasses
+
+            if self.injector is None:
+                raise ValueError(f"the {model} model needs the run config's injector: (an injector in {self.info['tokamakName']}'s settings)")
+            template_cfg["injector"] = dataclasses.asdict(self.injector)
         template_cfg.update(fixed or {})
         if spec.get("field_aligned"):
             from emis3d.fieldline_map import get_or_build
