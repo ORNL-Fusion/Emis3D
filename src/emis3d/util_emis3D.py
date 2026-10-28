@@ -422,7 +422,7 @@ def residual(
         data[emissionName] = {}
         tag = loc_tag(synthetic_dict["injectionLocation"])
         a = params[f"a_{tag}"]
-        b = params[f"b_{emissionName}_{tag}"]
+        b = params.get(f"b_{emissionName}_{tag}", 0.0)  # absent for scales without a decay
         c = params.get(f"c_{tag}", 0.0)  # the toroidal floor, when fitted
 
         # --- Loop over each bolometer group

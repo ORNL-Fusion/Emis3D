@@ -271,6 +271,8 @@ class RunConfig:
         s = self.scale_def.lower()
         if s in ("constant", "step"):
             return ["a"] if s == "constant" else []
+        if self.solver == "parametric" and not self._fits_axisymmetric():
+            return []  # field-aligned structures make their own toroidal profile (and carry it in their poloidal pattern)
         out = ["a"]
         if self.enable_dphi_scaling or self.solver == "parametric":
             out.append("b")
@@ -279,6 +281,16 @@ class RunConfig:
         if self.vary_peak_rad_location:
             out.append("peak location")
         return out
+
+    def _fits_axisymmetric(self) -> bool:
+        """Whether a parametric run fits any axisymmetric model (alone or as a composite component)."""
+        from emis3d.parametric import MODELS
+
+        p = self.parametric or {}
+        comps = p.get("composites") or {}
+        used = [m for m in p.get("models", []) if m in MODELS] + [c["model"] for m in p.get("models", []) if m in comps
+                                                                   for c in comps[m]["components"]]
+        return any(not MODELS[m].get("field_aligned") for m in used if m in MODELS)
 
     def toroidal_points(self, camera_angles: dict, injection_deg: float) -> list[float]:
         """

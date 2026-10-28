@@ -221,7 +221,8 @@ class RadDistFitting:
             params.add(paramName, value=0.01 * float(np.clip(1.0, a_lo, a_hi)), min=0.0, max=a_hi)
 
         # --- The exponential decay factor for each emission, only do one for helical directions
-        for emissionName in self.info["emissionNames"]:
+        # (only for scales that have a decay: with constant or step it would be a parameter with no effect)
+        for emissionName in self.info["emissionNames"] if scale_def.lower() in ("exponential", "linear") else []:
             min_, max_ = b_lo, b_hi
             paramName = f"b_{emissionName}_{loc_tag(self.info['injectionLocation'])}"
 

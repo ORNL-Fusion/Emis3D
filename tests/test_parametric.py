@@ -935,3 +935,58 @@ def test_floor_with_a_spray_spot_component(rings, helical_setup, spray_template)
                        {c: (1.0, 1.0) for c in G.channels}, "exponential", 225.0, toroidal_floor=True, vary_peak=True)
     assert fit.amp_names == ["a_core", "c_core", "a_spot"]                                 # the spray spot takes no floor
     assert not any(n.startswith("spot_phi") for n in fit.names)                            # and stays in the injector's plane
+
+
+# ---------------------------------------------------------------------------
+# Mixed runs: every winner is self-contained; the pipeline fits no second toroidal profile
+# ---------------------------------------------------------------------------
+
+def test_ring_peak_location_is_fitted_with_its_shape(rings):
+    _, truth, template = rings
+    G = synthetic_G(truth)
+    shape = {k: TRUE[k] for k in ("startR", "startZ", "sigma_R", "sigma_z", "rotationAngle")}
+    probe = ParametricFit("ring", template, [G], {c: (1.0, 1.0) for c in G.channels}, "exponential", 225.0, vary_peak=True,
+                          peak_shift_max_degrees=90.0)
+    assert probe.bounds["phi_peak"] == (135.0, 315.0)
+    signal = probe.model_signals(G, {**shape, "b": 1.0, "phi_peak": 260.0})
+    sigma = 0.02 * signal.max() * np.ones_like(signal)
+    data = {c: (float(s), float(e)) for c, s, e in zip(G.channels, signal, sigma, strict=True)}
+    res = ParametricFit("ring", template, [G], data, "exponential", 225.0, fixed=shape, vary_peak=True,
+                        peak_shift_max_degrees=90.0).search(seed=0, maxiter=30)
+    assert res.values["phi_peak"] == pytest.approx(260.0, abs=5.0) and res.values["b"] == pytest.approx(1.0, abs=0.15)
+    assert "phi_peak" not in ParametricFit("ring", template, [G], data, "exponential", 225.0).names   # off without vary_peak
+
+
+@pytest.mark.parametrize("models", [["helical"], ["ring"], ["ring", "helical"]])
+def test_the_pipeline_only_evaluates_a_parametric_winner(rings, tmp_path, models):
+    from emis3d.emis3D import Emis3D
+    from emis3d.geometry import matrix_path
+    from test_calibration import write_workspace
+
+    run = write_workspace(tmp_path, tstart=10.0, radDistDirectories_LocIndependent=[], solver="parametric", scale_def="exponential",
+                          vary_peak_rad_location=True, peak_shift_max_degrees=90.0,
+                          parametric={"models": models, "matrices": ["low"], "equilibrium": mock.EQ_FILE, "maxiter": 4, "substeps": 1})
+    ws = Workspace.resolve(workspace=tmp_path, env={}, user_config=tmp_path / "none.yaml")
+    matrix_for(rings).save(matrix_path(ws, "MOCK", "low"))
+    e = Emis3D(runConfigName=str(run))
+    e._perform_fits()
+    best = e.bestFits[10.0]
+    names = list(best["fit"].params)
+    assert not any(n.startswith("b_") or n == "peak_shift" for n in names), names                 # no second decay, no peak shift
+    assert best["radDist"].info["distType"] == "composite"
+    assert e.info["scale_def"] == "exponential" and e.info["vary_peak_rad_location"] is True       # the run's settings restored
+    fit = e._parametric_fits[10.0]
+    P_sec = fit.sector_profile(fit.matrices[-1], e.parametric[10.0].values)
+    tpf = best["radiation_distribution"]["toroidal_peaking_factor"]
+    assert tpf == pytest.approx(P_sec.max() / P_sec.mean(), rel=0.05)                            # the profile is the parametric fit's
+
+
+def test_identifiability_counts_only_axisymmetric_models():
+    base = {"BOLOMETERS": {"DISRADU": {"dataFileName": "a"}, "SX90MF": {"dataFileName": "b"}}, "shot": 1, "solver": "parametric",
+            "scale_def": "exponential", "vary_peak_rad_location": True, "injectionLocation": 225.0}
+    angles = {"DISRADU": 135.0, "SX90MF": 270.0}
+    helical_only = RunConfig.from_dict({**base, "parametric": {"models": ["helical_psi"], "equilibrium": "g"}})
+    assert helical_only.toroidal_unknowns() == [] and helical_only.toroidal_identifiability(angles) is None
+    with_ring = RunConfig.from_dict({**base, "parametric": {"models": ["helical_psi", "ring"], "equilibrium": "g"}})
+    assert with_ring.toroidal_unknowns() == ["a", "b", "peak location"]
+    assert "3 free parameters" in with_ring.toroidal_identifiability(angles)

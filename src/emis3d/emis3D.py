@@ -175,8 +175,8 @@ class Emis3D:
         if self.config is not None and self.config.solver == "parametric":
             self.data.setdefault("synthetic", {"locIndependent": {}, "locDependent": {}})  # filled per time by the fit
             if self.config.scale_def.lower() == "step":
-                # the fitted step is built into the candidate (_apply_fitted_step); its amplitude
-                # is then the pipeline's only toroidal parameter
+                # the fitted step is built into each time's winner (a self-contained radDist), so the
+                # pipeline only evaluates it
                 self.info["scale_def"] = "constant"
         else:
             self._load_radDists()
@@ -219,9 +219,10 @@ class Emis3D:
             self._fit_parametric(evalTime=evalTime)
         # a composite's toroidal shapes are inside it: the pipeline uses a constant scale for it
         override = getattr(self, "_scale_override", {}).get(evalTime)
-        saved_scale = self.info["scale_def"]
-        if override:
+        saved = {k: self.info[k] for k in ("scale_def", "vary_peak_rad_location")}
+        if override:  # a parametric winner carries its toroidal profile: evaluate it, fit no other
             self.info["scale_def"] = override
+            self.info["vary_peak_rad_location"] = False
         try:
             self._prepare_fits(evalTime=evalTime)
             self._minimize_radDists(evalTime=evalTime)
@@ -234,7 +235,7 @@ class Emis3D:
             self._post_process_uncertainty(evalTime=evalTime)  # needs the other candidates
             self._parametric_ranges(evalTime=evalTime)
         finally:
-            self.info["scale_def"] = saved_scale
+            self.info.update(saved)
         logger.info(f"→ Post-processing done in {time.time() - t_start:.2f} seconds")
 
         if cleanup:
@@ -327,15 +328,19 @@ class Emis3D:
         if not hasattr(self, "_parametric_fits"):
             self._parametric_fits = {}
         self._parametric_fits[evalTime] = best_fit
-        if isinstance(best_fit, CompositeFit):
-            # the summed structure as one radDist; its toroidal shapes are inside it, so the
-            # pipeline treats it with a constant scale at this time
-            template = radDist_module.Composite(best_fit, result.values, config={
-                "tokamakName": self.info["tokamakName"], "units": "Brightness", "injectionLocation": float(self.info["injectionLocation"]),
-                "eqFileName": cfg.get("equilibrium"), "saveRunsDirectoryName": "parametric", "numBins": 100, "rayMethod": "matrix"})
-            if not hasattr(self, "_scale_override"):
-                self._scale_override = {}
-            self._scale_override[evalTime] = "constant"
+        # The winner, single model or composite, as one self-contained radDist: its shape, toroidal
+        # profile (decay, peak location, floor, step amplitudes) and amplitudes all come from the
+        # parametric fit. The pipeline then only evaluates it (constant scale, no peak shift), so no
+        # second toroidal fit is laid over the model's own
+        fitted_template = template
+        template = radDist_module.Composite(best_fit, result.values, config={
+            "tokamakName": self.info["tokamakName"], "units": "Brightness", "injectionLocation": float(self.info["injectionLocation"]),
+            "eqFileName": cfg.get("equilibrium"), "saveRunsDirectoryName": "parametric", "numBins": 100, "rayMethod": "matrix"})
+        if not isinstance(best_fit, CompositeFit) and getattr(best_fit, "field_aligned", False):
+            template.info["phi_source"] = fitted_template.info.get("phi_source")  # the figure shows its source plane
+        if not hasattr(self, "_scale_override"):
+            self._scale_override = {}
+        self._scale_override[evalTime] = "constant"
         logger.info("→ Models at t=%s, best first:\n%s", evalTime, comparison_table(results))
         # The best model's template holds its fitted shape (each fit leaves its template at its result)
         if not hasattr(self, "parametric"):
@@ -352,8 +357,6 @@ class Emis3D:
         template.calc_radiated_power()
         template.observe_with_matrix(matrices[-1])
         template._get_observed_phi_loc()
-        if result.toroidal:
-            self._apply_fitted_step(template, result.toroidal)
         template.info["radDistFormat"] = RADDIST_FORMAT
         template.info["parametric"] = {"model": result.model, "values": result.values, "stderr": result.stderr, "at_bounds": result.at_bounds,
                                        "compared": {r.model: {"aic": r.aic, "chi2": r.chi2} for r in results}}

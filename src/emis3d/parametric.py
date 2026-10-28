@@ -194,6 +194,11 @@ class ParametricFit:
         self.has_decay = scale_def in DECAY_BOUNDS and not self.field_aligned
         if self.has_decay:
             self.bounds["b"] = tuple(b_bounds if b_bounds is not None else DECAY_BOUNDS[scale_def])
+            # with vary_peak the peaked profile's centre is fitted with the shape (as a field-aligned source plane is)
+            if vary_peak and "phi_peak" not in self.fixed:
+                inj = float(injection_deg)
+                self.bounds["phi_peak"] = tuple((bounds or {}).get("phi_peak")
+                                                or (inj - float(peak_shift_max_degrees), inj + float(peak_shift_max_degrees)))
         self.a_bounds = tuple(a_bounds if a_bounds is not None else AMPLITUDE_BOUNDS)
         self.names = list(self.bounds)  # search order
 
@@ -243,11 +248,12 @@ class ParametricFit:
             if k != "b":
                 self.template.info[k] = float(v)
 
-    def _toroidal(self, G, b: float) -> np.ndarray:
-        """The toroidal factor at each sector's angle (a = 1)."""
+    def _toroidal(self, G, b: float, values: dict | None = None) -> np.ndarray:
+        """The toroidal factor at each sector's angle (a = 1), peaked at phi_peak when it is fitted, else the injector."""
         if not self.has_decay:
             return np.ones(G.grid.n_phi)
-        return np.asarray(Util_emis3D.scale_wrapper(a=1.0, b=float(b), phi=G.grid.phi_centers, mu=self.mu, scale_def=self.scale_def,
+        mu = float(np.deg2rad(values["phi_peak"])) if values is not None and "phi_peak" in values else self.mu
+        return np.asarray(Util_emis3D.scale_wrapper(a=1.0, b=float(b), phi=G.grid.phi_centers, mu=mu, scale_def=self.scale_def,
                                                      emissionName=self.emission), dtype=float)
 
     def design(self, G, values: dict) -> np.ndarray:
@@ -264,7 +270,7 @@ class ParametricFit:
         if self.step_deg:
             region = self._regions[id(G)]
             return np.column_stack([P[:, region == j].sum(axis=1) for j in range(len(self.step_deg))])
-        peaked = P @ self._toroidal(G, values.get("b", 0.0))
+        peaked = P @ self._toroidal(G, values.get("b", 0.0), values)
         if self.floor:
             return np.column_stack([peaked, P.sum(axis=1)])  # the peak, and the uniform floor
         return peaked[:, None]
@@ -283,7 +289,7 @@ class ParametricFit:
         if self.step_deg:
             region = self._regions[id(G)][sector]
             return [eps * (region == j) for j in range(len(self.step_deg))]
-        cols = [eps * self._toroidal(G, values.get("b", 0.0))[sector]]
+        cols = [eps * self._toroidal(G, values.get("b", 0.0), values)[sector]]
         return cols + [eps] if self.floor else cols
 
     def voxel_field(self, G, values: dict, only_seen: bool = True) -> np.ndarray:

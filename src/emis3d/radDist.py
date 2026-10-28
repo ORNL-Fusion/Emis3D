@@ -1944,20 +1944,31 @@ class Composite(RadDist):
         return self._fields[key][1]
 
     def _evaluate(self, R, z, phi, emissionName=None):
+        """
+        The fitted emissivity, exactly as the fit saw it: constant within each
+        toroidal sector (a voxel spans one sector), interpolated in (R, z)
+        within the sector's plane.
+        """
         if emissionName is None:
             emissionName = self.emissionName
-        if self._grid_eps is None:
-            from scipy.interpolate import RegularGridInterpolator
+        from scipy.interpolate import RegularGridInterpolator
 
-            g, eps = self._fields[self._finest]
-            field = eps.reshape(g.n_r, g.n_phi, g.n_z)
-            ph = np.concatenate([g.phi_centers, [g.phi_centers[0] + 2.0 * np.pi]])  # periodic
-            vals = np.concatenate([field, field[:, :1, :]], axis=1)
-            self._grid_eps = (g, RegularGridInterpolator((g.r_centers, ph, g.z_centers), vals, bounds_error=False, fill_value=0.0))
-        g, interp = self._grid_eps
+        g, eps = self._fields[self._finest]
+        if self._grid_eps is None:
+            self._grid_eps = (g, eps.reshape(g.n_r, g.n_phi, g.n_z), {})
+        g, field, planes = self._grid_eps
         R, z = np.ravel(R), np.ravel(z)
-        phi_w = (np.ravel(np.broadcast_to(phi, R.shape)) - g.phi_centers[0]) % (2.0 * np.pi) + g.phi_centers[0]
-        return {emissionName: np.asarray(interp(np.column_stack([R, phi_w, z])), dtype=float)}
+        phi_b = np.ravel(np.broadcast_to(phi, R.shape))
+        width = 2.0 * np.pi / g.n_phi
+        start = g.phi_centers[0] - width / 2.0
+        sector = np.floor(((phi_b - start) % (2.0 * np.pi)) / width).astype(int) % g.n_phi
+        out = np.zeros(R.size)
+        for k in np.unique(sector):
+            if k not in planes:
+                planes[k] = RegularGridInterpolator((g.r_centers, g.z_centers), field[:, k, :], bounds_error=False, fill_value=0.0)
+            sel = sector == k
+            out[sel] = planes[k](np.column_stack([R[sel], z[sel]]))
+        return {emissionName: out}
 
     def _scaling_factor(self, bolo_info=None, emissionName=None):
         return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
@@ -1970,7 +1981,10 @@ class Composite(RadDist):
 
 
 def describe_parametric(fit, values) -> str:
-    """A composite's components and their fitted parameters, for figures and logs."""
+    """A fit's model (a composite: each component) and its fitted parameters, for figures and logs."""
+    if not hasattr(fit, "comps"):  # a single model
+        shown = [n for n in fit.names] + [n for n in fit.amp_names if n == "c"]
+        return f"{fit.model}: " + ", ".join(f"{n} {float(values[n]):.3g}" for n in shown if n in values)
     parts = []
     for comp in getattr(fit, "comps", []):
         cname = comp["name"]
