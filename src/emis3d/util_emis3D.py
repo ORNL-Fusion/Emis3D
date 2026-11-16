@@ -234,9 +234,16 @@ def find_dphi(
 
 
 def loc_tag(injectionLocation) -> str:
-    """Canonical tag for LMFIT parameter names ('a_240', 'b_ ... _ 240', etc.)
-    Float injection locations must be int to agree with the creation"""
-    return str(int(round(float(injectionLocation))))
+    """
+    Canonical tag for LMFIT parameter names ('a_240', 'b_ ... _ 240', etc.):
+    the injection location as a whole number of degrees in [0, 360).
+    Float injection locations must be int to agree with the creation.
+
+    The angle is wrapped because a parameter name must be a valid
+    identifier: -135 used to give 'a_-135', which LMFIT refuses. -135 and
+    225 deg are the same location and get the same tag.
+    """
+    return str(int(round(float(injectionLocation))) % 360)
 
 
 def _emission_pairs(emissionNames) -> list:
