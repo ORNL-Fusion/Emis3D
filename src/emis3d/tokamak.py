@@ -1141,15 +1141,53 @@ class Tokamak(object):
                         sidx = phi_arr.argsort()
                         self.fieldLines[startPhideg][direction]["phi_sidx"] = sidx
                         self.fieldLines[startPhideg][direction]["phi_sorted"] = phi_arr[sidx]
+                        # The part of the torus this revolution reaches: from its first
+                        # angle, `span` in its direction of travel. A whole revolution
+                        # reaches every angle; a fractional last one does not
+                        # (fieldline_covers).
+                        sign = 1.0 if direction_prefix == "counterClock" else -1.0
+                        steps = (sign * np.diff(phi_arr)) % (2.0 * np.pi)
+                        self.fieldLines[startPhideg][direction]["coverage"] = {
+                            "start": float(phi_arr[0]),
+                            "span": float(steps.sum()),
+                            "step": float(np.median(steps)) if steps.size else 0.0,
+                            "sign": sign,
+                        }
 
     def get_fieldLines_startPhis(self) -> list:
         return list(self.fieldLines.keys())
+
+    def fieldline_covers(self, startPhi, emissionName, inputPhis) -> np.ndarray:
+        """
+        Whether a revolution of the field line (emissionName, e.g.
+        'counterClock_rev1') reaches each toroidal angle of inputPhis (radians).
+
+        A whole revolution reaches every angle. The last revolution of a
+        fractional numTransists stops part of the way round: beyond its end
+        there is no field line, although find_RZ_Fline (a nearest-sample
+        lookup) still returns the nearest end's position. Half a sample
+        spacing beyond either end counts as reached, as the lookup has it.
+        """
+        key = fieldline_key(startPhi)
+        if key not in self.fieldLines:
+            raise KeyError(f"No field lines traced at {startPhi} deg (key '{key}'). Available: {self.get_fieldLines_startPhis()}")
+        phis = np.atleast_1d(np.asarray(inputPhis, dtype=float))
+        cov = self.fieldLines[key][emissionName].get("coverage")
+        two_pi = 2.0 * np.pi
+        if cov is None or cov["span"] + 1.5 * cov["step"] >= two_pi:
+            return np.ones(phis.shape, dtype=bool)
+        travelled = (cov["sign"] * (phis - cov["start"])) % two_pi
+        return (travelled <= cov["span"] + 0.5 * cov["step"]) | (travelled >= two_pi - 0.5 * cov["step"])
 
     def find_RZ_Fline(self, startPhi, emissionName, inputPhis=None):
         """
         Returns the R and z arrays for the given input inputPhi location.
 
         Phi should always be positive!
+
+        This is a nearest-sample lookup: for the fractional last revolution of
+        a field line it also answers at angles the revolution never reaches,
+        with the nearest end's position. Use fieldline_covers to tell.
 
         Method based on Divakr's answer here, this should be faster than the simple np.abs(x - x0).argmin():
         https://stackoverflow.com/questions/45349561/find-nearest-indices-for-one-array-against-all-values-in-another-array-python

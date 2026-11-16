@@ -1279,11 +1279,18 @@ class Helical(RadDist):
         angles, which = np.unique(phi, return_inverse=True)
         R0, z0 = self.tokamak.find_RZ_Fline(str(self.info["startPhi"]), emissionName, inputPhis=angles)
 
+        # A fractional last revolution stops part of the way round: no emission
+        # at the angles it does not reach
+        covered = self.tokamak.fieldline_covers(str(self.info["startPhi"]), emissionName, angles)
+
         # Each point sums over the field lines at its own angle. (Flattening all
         # angles together used to mix field lines and angles when several were given.)
         tot = np.empty(R.size)
         for k in range(angles.size):
             sel = which == k if angles.size > 1 else slice(None)
+            if not covered[k]:
+                tot[sel] = 0.0
+                continue
             tot[sel] = Util_radDist._evaluate_kernels(
                 R[sel],
                 z[sel],
@@ -1434,6 +1441,9 @@ class HelicalRing(RadDist):
                 * np.exp(-0.5 * (perpdist**2) / (self.info["sigma_z"] * self.info["sigma_R"]) ** 2)
                 * np.exp(-0.5 * (paralleldist**2) / self.info["sigma_z"] ** 2)
             )
+            # A fractional last revolution stops part of the way round: no emission
+            # at the angles it does not reach
+            emis = np.where(self.tokamak.fieldline_covers(str(self.info["startPhi"]), emissionName, phi), emis, 0.0)
 
             localEmis[emissionName] = emis.flatten()
 

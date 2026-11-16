@@ -18,7 +18,7 @@ from freeqdsk import geqdsk
 
 import emis3d.util_emis3D as U
 from emis3d.fieldline_tracer import Fieldline_Tracer
-from emis3d.radDist import Helical
+from emis3d.radDist import Helical, HelicalRing
 from emis3d.tokamak import Tokamak
 from emis3d.workspace import BUILTIN_MACHINES, Workspace
 from test_fieldline_tracer import R0, make_gfile
@@ -100,3 +100,76 @@ def test_fractional_transits_keep_the_last_partial_revolution(tokamak):
 def test_non_positive_transits_are_rejected(tokamak):
     with pytest.raises(ValueError, match="positive"):
         tokamak.set_fieldlines(startR=[START_R], startZ=[0.0], startPhi=MU, numTransists=0.0)
+
+
+# ---------------------------------------------------------------------------
+# A fractional last revolution emits only where the field line goes
+# ---------------------------------------------------------------------------
+
+HALF = np.deg2rad(90.0)  # start angle of a line traced for 1.5 transits: its second revolution is half a turn
+
+
+@pytest.fixture(scope="module")
+def half_turn(tokamak):
+    tokamak.set_fieldlines(startR=[START_R], startZ=[0.0], startPhi=HALF, numTransists=1.5)
+    return tokamak
+
+
+def covers(tok, name, degrees):
+    return tok.fieldline_covers("90", name, np.deg2rad(degrees)).tolist()
+
+
+def test_whole_revolutions_reach_every_angle(half_turn):
+    every = np.arange(0.0, 360.0, 0.25)
+    for name in ("counterClock_rev0", "clockwise_rev0"):
+        assert all(covers(half_turn, name, every)), name
+
+
+def test_partial_revolution_reaches_only_the_angles_it_travels(half_turn):
+    # counterclockwise from 90 deg for half a turn: 90 -> 270
+    assert covers(half_turn, "counterClock_rev1", [90.0, 100.0, 180.0, 269.0, 270.0]) == [True] * 5
+    assert covers(half_turn, "counterClock_rev1", [272.0, 315.0, 0.0, 45.0, 88.0]) == [False] * 5
+    # clockwise from 90 deg for half a turn: 90 -> 0 -> 270
+    assert covers(half_turn, "clockwise_rev1", [90.0, 45.0, 0.0, 315.0, 271.0, 270.0]) == [True] * 6
+    assert covers(half_turn, "clockwise_rev1", [92.0, 135.0, 180.0, 268.0]) == [False] * 4
+    # angles given beyond one turn are the same angles
+    assert covers(half_turn, "counterClock_rev1", [180.0 + 360.0, 0.0 - 360.0]) == [True, False]
+
+
+def _helical(tok, cls):
+    rd = cls.__new__(cls)
+    rd.tokamak = tok
+    rd.info = {"startPhi": 90.0, "weights": [1.0], "sigmaKernel": 0.05, "sigma_R": 0.5, "sigma_z": 0.1}
+    return rd
+
+
+@pytest.mark.parametrize("cls", [Helical, HelicalRing])
+def test_no_emission_where_a_partial_revolution_does_not_reach(half_turn, cls):
+    """
+    find_RZ_Fline answers at every angle with the nearest sample, so the half
+    revolution used to emit all the way round, as a ring at its end points.
+    """
+    rd = _helical(half_turn, cls)
+
+    def on_the_line(name, deg):
+        phi = np.array([np.deg2rad(deg)])
+        R, z = half_turn.find_RZ_Fline("90", name, inputPhis=phi)      # where the lookup puts the line at this angle
+        return float(rd._evaluate(np.array([R[0, 0] + 0.01]), np.array([z[0, 0]]), phi, emissionName=name)[name][0])
+
+    for deg in (100.0, 180.0, 260.0):                                   # reached by the counterclockwise half turn
+        assert on_the_line("counterClock_rev1", deg) > 0.0
+        assert on_the_line("clockwise_rev1", deg) == 0.0
+    for deg in (280.0, 0.0, 80.0):                                      # reached by the clockwise one
+        assert on_the_line("counterClock_rev1", deg) == 0.0
+        assert on_the_line("clockwise_rev1", deg) > 0.0
+    for deg in (0.0, 100.0, 180.0, 280.0):                              # the whole first revolutions emit everywhere
+        assert on_the_line("counterClock_rev0", deg) > 0.0 and on_the_line("clockwise_rev0", deg) > 0.0
+
+
+def test_helical_emission_at_several_angles_at_once(half_turn):
+    """Points at reached and unreached angles in one call are each treated at their own angle."""
+    rd = _helical(half_turn, Helical)
+    phis = np.deg2rad([180.0, 0.0, 100.0, 300.0])
+    R, z = half_turn.find_RZ_Fline("90", "counterClock_rev1", inputPhis=phis)
+    out = rd._evaluate(R[0], z[0], phis, emissionName="counterClock_rev1")["counterClock_rev1"]
+    assert (out > 0).tolist() == [True, False, True, False]
