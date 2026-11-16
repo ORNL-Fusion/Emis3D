@@ -90,10 +90,13 @@ def _plan_lines(lib, plans, root, workers_override) -> list[str]:
             for v in t.shape.values():
                 combos *= len(v) if isinstance(v, (list, tuple)) else 1
             dedup = f" (of {combos} combinations)" if combos != len(shapes) else ""
-            g = t.settings["grid"]
-            where = "inside the wall" if not g.get("rLimits") else f"R {g['rLimits']}, z {g['zLimits']}"
-            lines.append(f"      {len(shapes)} distinct shape(s){dedup} x {info['start_positions']} start position(s) "
-                         f"(grid {g['NumR']} x {g['NumZ']}, {where}) = {len(jobs)} radDists")
+            if not t.uses_start_positions:
+                lines.append(f"      {len(shapes)} distinct shape(s){dedup}, centred on the magnetic axis (no start positions) = {len(jobs)} radDists")
+            else:
+                g = t.settings["grid"]
+                where = "inside the wall" if not g.get("rLimits") else f"R {g['rLimits']}, z {g['zLimits']}"
+                lines.append(f"      {len(shapes)} distinct shape(s){dedup} x {info['start_positions']} start position(s) "
+                             f"(grid {g['NumR']} x {g['NumZ']}, {where}) = {len(jobs)} radDists")
         if rays["method"] == "matrix":
             lines.append(f"      geometry matrix {rays.get('matrix', 'medium')!r} (no ray tracing); "
                          f"workers: {workers_override or t.settings.get('workers') or 1}")
@@ -213,6 +216,12 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
 
         if t.is_simulation:
             jobs = [((shape["sourceFile"], shape["timestep"], cfg_for(shape)), shape, None) for shape in shapes]
+            positions = 1
+        elif not t.uses_start_positions:
+            # One radDist per shape: it is the same whatever the start position (the builder
+            # still takes one; the radDist replaces it with the magnetic axis). Looping over
+            # the grid built the identical radDist once per position, into the same file.
+            jobs = [(((0.0, 0.0), cfg_for(shape)), shape, None) for shape in shapes]
             positions = 1
         else:
             rz = start_positions(lib, t, ws)

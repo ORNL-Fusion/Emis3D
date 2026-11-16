@@ -65,6 +65,9 @@ TYPES = {
     "M3DC1": {"required": ("files", "timesteps"), "optional": {}},
 }
 SIMULATION_TYPES = ("NIMROD", "M3DC1")
+# Types whose shape does not depend on a start position (a FluxShell is centred on
+# the magnetic axis whatever it is given): one radDist per shape, and no grid needed
+NO_START_POSITION = ("FluxShell",)
 NEEDS_EQUILIBRIUM = ("Helical", "HelicalRing", "FluxShell")
 
 # Names the radDist classes use for some settings
@@ -86,6 +89,11 @@ class RadDistType:
     @property
     def is_simulation(self) -> bool:
         return self.distType in SIMULATION_TYPES
+
+    @property
+    def uses_start_positions(self) -> bool:
+        """Whether one radDist is built per start position of the grid (not for simulations or NO_START_POSITION types)."""
+        return self.distType not in SIMULATION_TYPES and self.distType not in NO_START_POSITION
 
 
 @dataclass
@@ -259,7 +267,7 @@ def _parse_type(name: str, block, shared: dict) -> tuple[RadDistType | None, lis
     errors += _check_shared({k: block[k] for k in OVERRIDABLE if k in block}, where)
     if "injectionLocation" not in settings:
         errors.append(f"{where}no injectionLocation")
-    if dist not in SIMULATION_TYPES and "grid" not in settings:
+    if dist not in SIMULATION_TYPES and dist not in NO_START_POSITION and "grid" not in settings:
         errors.append(f"{where}no grid of start positions (set 'grid' at the top or in the type)")
     if dist in NEEDS_EQUILIBRIUM and not settings.get("eqFileName"):
         errors.append(f"{where}{dist} needs an eqFileName (an equilibrium to trace field lines in)")
