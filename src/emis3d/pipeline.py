@@ -565,8 +565,12 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
             rd_channels = {c for chans in data.get(units, {}).get("channelOrder", {}).values() for c in chans}
             if data_channels and not (data_channels & rd_channels):
                 problems.append(f"{q.name}: no channels in common with the data")
-            if kind == "LocDependent" and float(info.get("injectionLocation", cfg.injectionLocation)) != float(cfg.injectionLocation):
-                problems.append(f"{q.name}: injectionLocation {info.get('injectionLocation')} differs from the run config's {cfg.injectionLocation}")
+            # The run's injection location: the named injector's angle when the config gives
+            # injector:, else injectionLocation (as Emis3D resolves it), compared as angles
+            rd_inj = info.get("injectionLocation")
+            if kind == "LocDependent" and rd_inj is not None and abs(((float(rd_inj) - float(inj_deg) + 180.0) % 360.0) - 180.0) > 1e-6:
+                whose = f"injector {cfg.injector}'s {float(inj_deg):g}" if cfg.injector else f"the run config's {cfg.injectionLocation}"
+                problems.append(f"{q.name}: injectionLocation {rd_inj} differs from {whose}")
         if problems:
             for msg in problems:
                 err(f"{folder}: {msg}")

@@ -62,12 +62,15 @@ paths:
 RUN_TEMPLATE = """\
 # Example run configuration. Copy this folder to runs/<shot> and edit.
 # File names below are relative to the workspace locations shown by `emis3d paths`.
+# `emis3d check runs/example/run.yaml` lists what is still missing (data files, radDists).
 tokamakName: MOCK                         # the built-in synthetic machine; e.g. DIII-D once it is in machines/
 shot: 1
+tstart: 10.0                              # evaluation time, in the units of the measurement files (tend, Nt for several)
 dt: 0.3                                   # averaging half-width around each evaluation time [ms]
 injectionLocation: 225                    # [deg, Emis3D convention]
 
-radDistDirectories_LocIndependent: []     # folders under <raddists>
+# radDist folders under <raddists>/<tokamak>, built with `emis3d make-raddists`; at least one is needed
+radDistDirectories_LocIndependent: ["example/elongatedRing"]
 radDistDirectories_LocDependent: []
 
 BOLOMETERS:
