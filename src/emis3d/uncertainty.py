@@ -57,10 +57,13 @@ QUANTITIES = (
     "power_fraction_window",
     "amplitude",
 )
+# Quantities that are toroidal angles [deg]: 359.9 and 0.1 are neighbours, so their
+# statistics are taken around the best fit's value (UncertaintyResult.summary)
+CIRCULAR_QUANTITIES = ("peak_phi_deg",)
 QUANTITY_UNITS = {
     "tpf": "",
     "total_power": "P_pol units x scaleSynth",
-    "peak_phi_deg": "deg",
+    "peak_phi_deg": "deg (a range runs continuously through the best value, so it may go below 0 or above 360)",
     "peak_power": "P_pol units x scaleSynth per rad",
     "power_fraction_window": "",
     "amplitude": "",
@@ -357,6 +360,12 @@ class UncertaintyResult:
         or 'model'. Every interval contains the best fit's own value: draws
         held on parameter bounds, or a wide (reduced-chi2-scaled)
         covariance, can put most of the draws on one side of it.
+
+        Angles (CIRCULAR_QUANTITIES) are unwrapped around the best fit's value
+        first, so draws on either side of 0/360 deg are neighbours: a peak
+        at 0 deg has a range like (-0.4, 0.3), not (0, 360). The interval is
+        continuous (low <= high) and so may run below 0 or above 360; the
+        median is given in [0, 360).
         """
         mask = {
             "statistical": self.source == 0,          # best radDist, parameter covariance
@@ -369,9 +378,14 @@ class UncertaintyResult:
             v = v[np.isfinite(v)]
             if v.size == 0:
                 continue
-            entry = {"median": float(np.median(v)), "n": int(v.size)}
             anchor = self.best_values.get(q)
             anchor = float(anchor) if anchor is not None and np.isfinite(anchor) else None
+            circular = q in CIRCULAR_QUANTITIES
+            if circular:
+                # around the best value, else the draws' circular mean
+                centre = anchor if anchor is not None else float(np.rad2deg(np.angle(np.mean(np.exp(1j * np.deg2rad(v))))))
+                v = centre + ((v - centre + 180.0) % 360.0 - 180.0)
+            entry = {"median": float(np.median(v) % 360.0) if circular else float(np.median(v)), "n": int(v.size)}
             for c in (self.config or UncertaintyConfig()).intervals:
                 lo, hi = np.percentile(v, [50 * (1 - c), 50 * (1 + c)])
                 if anchor is not None:
