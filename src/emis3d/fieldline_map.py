@@ -261,12 +261,49 @@ def cached_map(path) -> FieldLineMap:
     return _LOADED[key]
 
 
+def stale_reason(fmap: FieldLineMap, G, phi0: float, substeps: int, psi_max: float | None) -> str | None:
+    """
+    Why a cached mapping cannot serve a request (None: it can). The file name
+    (map_path) holds the matrix's name, the equilibrium, the source plane's
+    angle to six digits, the transits and the helicity; the settings checked
+    here are not in it: the field lines per pixel (substeps), the flux limit
+    of the source pixels (psi_max), the exact angle, and the matrix's grid,
+    which changes when a matrix is rebuilt under the same name.
+    """
+    g = G.grid
+    same_grid = (fmap.n_voxels == g.n_voxels and fmap.n_phi == g.n_phi and fmap.r_centers.size == g.n_r and fmap.z_centers.size == g.n_z
+                 and np.allclose(fmap.r_centers, g.r_centers) and np.allclose(fmap.z_centers, g.z_centers))
+    if not same_grid:
+        return "another voxel grid (the geometry matrix was rebuilt)"
+    if int(fmap.substeps) != int(substeps):
+        return f"substeps {fmap.substeps}, not {int(substeps)}"
+    built_psi = fmap.provenance.get("psi_max")
+    if (built_psi is None) != (psi_max is None) or (psi_max is not None and not np.isclose(float(built_psi), float(psi_max))):
+        return f"psi_max {built_psi}, not {psi_max}"
+    if abs((fmap.phi0 - phi0 + np.pi) % (2.0 * np.pi) - np.pi) > 1e-9:
+        return f"its source plane at {np.rad2deg(fmap.phi0):.6f} deg, not {np.rad2deg(phi0):.6f}"
+    return None
+
+
 def get_or_build(ws, G, machine: str, matrix_name: str, equilibrium: str, phi0_deg: float, transits: int = 1, substeps: int = 2,
                  psi_max: float | None = None, progress=None, mirror_helicity: bool = False) -> tuple[FieldLineMap, Path]:
-    """The cached mapping for these settings, built (and saved) if it does not exist yet."""
+    """
+    The cached mapping for these settings, built (and saved) if it does not
+    exist yet, or if the cached one was built with other settings
+    (stale_reason): it is then rebuilt and replaced, so changing substeps or
+    psi_max, or rebuilding the matrix, takes effect.
+    """
     path = map_path(ws, machine, matrix_name, equilibrium, phi0_deg, transits, mirror_helicity)
+    phi0 = float(np.deg2rad(phi0_deg)) % (2.0 * np.pi)
     if path.is_file():
-        return cached_map(path), path
+        cached = cached_map(path)
+        why = stale_reason(cached, G, phi0, substeps, psi_max)
+        if why is None:
+            return cached, path
+        text = f"cached field-line mapping {path.name} was built with {why}: rebuilding it"
+        logger.info(text)
+        if progress is not None:
+            progress(text)
     from emis3d.tokamak import Tokamak
 
     tok = Tokamak(tokamakName=machine, mode="Analysis", eqFileName=equilibrium, workspace=ws)
@@ -281,7 +318,7 @@ def get_or_build(ws, G, machine: str, matrix_name: str, equilibrium: str, phi0_d
         Zg = np.linspace(gf.zmid - gf.zdim / 2, gf.zmid + gf.zdim / 2, gf.ny)
         interp = RegularGridInterpolator((Rg, Zg), (np.asarray(gf.psi, float) - gf.simagx) / (gf.sibdry - gf.simagx), bounds_error=False, fill_value=1e6)
         psi_norm = lambda R, Z: interp(np.column_stack([R, Z]))  # noqa: E731
-    fmap = FieldLineMap.build(G, tok.gfile, float(np.deg2rad(phi0_deg)) % (2.0 * np.pi), matrix_name, equilibrium, transits, substeps,
+    fmap = FieldLineMap.build(G, tok.gfile, phi0, matrix_name, equilibrium, transits, substeps,
                               psi_norm, psi_max, progress=progress, mirror_helicity=mirror_helicity)
     fmap.provenance.update(ws.provenance())
     fmap.save(path)
