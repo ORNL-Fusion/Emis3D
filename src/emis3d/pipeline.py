@@ -347,7 +347,10 @@ def build_mapping(machine: str, matrix: str, equilibrium: str, injection_deg: fl
 def run(run_config, workspace=None, workers: int | None = None, times=None, plots: bool = True, save: bool = True):
     """
     Fit every evaluation time (the run config's tstart/tend/Nt, or `times`),
-    save one figure per time and the best fits. Returns the Emis3D object.
+    save the best fits and one figure per time. Returns the Emis3D object.
+
+    The best fits are saved before the figures are drawn, so a figure that
+    fails does not lose the fits.
     """
     from emis3d.emis3D import Emis3D
 
@@ -362,10 +365,10 @@ def run(run_config, workspace=None, workers: int | None = None, times=None, plot
                 e._perform_fits(evalTime=float(t), cleanup=True)
     finally:
         e.close()
-    if plots:
-        e._plot_bestFit(save=True)
     if save:
         e._save_bestFits()
+    if plots:
+        e._plot_bestFit(save=True)
     return e
 
 

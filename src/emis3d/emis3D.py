@@ -1625,7 +1625,7 @@ class Emis3D:
             loadBolometers=True,
         )
 
-        bolometerGroups = list(self.info["BOLOMETERS"])
+        bolometerGroups = self._plotted_cameras(evalTime)
         units_label = UNIT_LABELS.get(best["radDist"].info["units"], "[arb]")
         ncol = len(bolometerGroups) + 1
 
@@ -1690,6 +1690,22 @@ class Emis3D:
             plt.close(f)
         else:
             plt.show()
+
+    def _plotted_cameras(self, evalTime: float) -> list:
+        """
+        The run config's cameras that are in the fit at evalTime, in the
+        config's order: the figure has a column for each. A camera none of
+        whose channels the radDists (or the geometry matrices) have is dropped
+        from the fit when they are loaded (_prune_channel_order), so it has
+        neither data nor a model to draw; asking for its panel used to stop
+        the figure with a KeyError.
+        """
+        fitted = self.fitData[evalTime]["boloData"]
+        cameras = [name for name in self.info["BOLOMETERS"] if name in fitted]
+        left_out = [name for name in self.info["BOLOMETERS"] if name not in fitted]
+        if left_out:
+            logger.warning("Not in the figure at t=%s: %s (no channels in the fit)", evalTime, ", ".join(left_out))
+        return cameras
 
     def _figure_title(self, evalTime: float) -> str:
         """Shot, time, chosen radDist and how it was fitted, so a saved PNG describes itself."""
