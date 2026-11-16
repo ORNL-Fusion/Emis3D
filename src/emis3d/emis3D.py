@@ -102,7 +102,6 @@ from emis3d.util import (
     config_loader,
     convert_arrays_to_list,
     extract_end_numbers,
-    find_max_nested_lists,
     get_filenames_in_directory,
     read_h5,
 )
@@ -957,6 +956,26 @@ class Emis3D:
         if self.verbose:
             logger.debug("→ Observed data prepared for fitting")
 
+    def _fitted_data_peak(self, evalTime: float) -> float:
+        """
+        The largest signal among the channels in the fit at evalTime: finite
+        data with a finite error. Bad channels (listed under badChannels, zero
+        or NaN for the whole shot; they carry an infinite error) are left out,
+        as they are from the residual and from the error floor's peak. The
+        synthetic signals are normalized to this value, and the amplitude's
+        bounds are relative to it, so a bad channel's reading must not set it.
+        """
+        peak = -np.inf
+        data = self.fitData[evalTime]
+        for vals, errs in zip(data["observed"], data["observed_error"], strict=True):
+            v, e = np.asarray(vals, dtype=float), np.asarray(errs, dtype=float)
+            use = np.isfinite(v) & np.isfinite(e) & (e > 0)
+            if use.any():
+                peak = max(peak, float(v[use].max()))
+        if not np.isfinite(peak) or peak <= 0.0:
+            raise ValueError(f"No channel in the fit has a positive signal at t={evalTime}: nothing to fit (check the data, badChannels and the time)")
+        return peak
+
     def _prepare_synthetic_for_fits(self, evalTime: float) -> None:
         """Prepare and parameterise every radDist for the minimization."""
 
@@ -971,8 +990,9 @@ class Emis3D:
 
         logger.debug("→ Preparing synthetic data for fitting")
 
-        # --- Scale the synthetic data to observed for better fitting
-        max_data_val = find_max_nested_lists(self.fitData[evalTime]["observed"])
+        # --- Scale the synthetic data to observed for better fitting: to the peak of
+        # the channels in the fit (bad and missing channels are not part of it)
+        max_data_val = self._fitted_data_peak(evalTime)
 
         # --- The step scale has one amplitude per camera location
         step_locations = self._step_locations()
