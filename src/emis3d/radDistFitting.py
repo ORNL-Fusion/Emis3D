@@ -111,6 +111,9 @@ class RadDistFitting:
         """
 
         self.fitSynthetic = {}
+        # Channels with a signal but no observation angle (create_parameters refuses
+        # them for any scale that depends on the angle)
+        self._channels_without_phi = []
 
         for emissionName in self.info["emissionNames"]:
             # --- Create the blank lists
@@ -130,6 +133,8 @@ class RadDistFitting:
                             self.info["ERROR CHANNELS"] = ""
                         if chan not in self.info["ERROR CHANNELS"]:
                             self.info["ERROR CHANNELS"] += f"{chan}, "
+                    elif chan not in self.data_maps[emissionName]["observed_phi_loc"] and chan not in self._channels_without_phi:
+                        self._channels_without_phi.append(chan)
 
                     # --- Each channel holds a list with one entry per toroidal
                     # observation segment; missing channels get a single zero
@@ -195,6 +200,17 @@ class RadDistFitting:
         matrix has one angle per sector: give the cameras' angles for it).
         """
         from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
+
+        # --- A toroidal scale needs the angle every channel was observed at. Without
+        # one the channel would be placed at phi = 0, whatever its camera's angle
+        missing = getattr(self, "_channels_without_phi", [])
+        if missing and scale_def.lower() != "constant":
+            shown = ", ".join(str(ch) for ch in missing[:5]) + (f", ... ({len(missing)} channels)" if len(missing) > 5 else "")
+            raise ValueError(
+                f"radDist {self.info.get('radDistPath') or self.info.get('distType', '')} has no observation angle "
+                f"(observed_phi_loc) for {shown}, so the {scale_def or 'toroidal'} scale cannot be applied to it. "
+                "Regenerate it (NIMROD and M3DC1 radDists used to be saved without angles), or use scale_def: constant"
+            )
 
         a_lo, a_hi = a_bounds if a_bounds is not None else AMPLITUDE_BOUNDS
         b_default = DECAY_BOUNDS.get(scale_def.lower(), DECAY_BOUNDS["exponential"])

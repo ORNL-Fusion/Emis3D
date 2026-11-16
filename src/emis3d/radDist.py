@@ -2171,12 +2171,21 @@ class SimulationRadDist(RadDist):
 
     def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
-        Not yet implimented! (review issue 18)
+        Return, per channel, the list of toroidal angles (radians) the
+        observation is attributed to: the camera's own angle, one segment per
+        channel, as for the other radDist types.
+
+        A chord that sweeps toroidally is still given its camera's angle
+        (review issue 18); building through a geometry matrix
+        (rays: {method: matrix}) stores every sector's own angle instead.
+        Returning no angles, as this used to, made the fit place every
+        camera at phi = 0.
         """
 
-        if bolo_info is None:
-            bolo_info = {}
-        return []
+        if not bolo_info:
+            return []
+        phi = float(np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))) % (2.0 * np.pi)
+        return [[phi] for _ in bolo_info["CHANNEL_TAGS"]]
 
     def _save_names(self) -> tuple[str, str]:
         """(folder, file): one folder per simulation file, one file per timestep."""

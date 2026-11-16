@@ -143,3 +143,19 @@ def test_single_point_from_cherab(sims):
         v = sim._evaluate_cherab(R0, 0.0, Z0)  # x = R0, y = 0 -> phi = 0, the blob centre
         assert isinstance(v, float)
         assert v == pytest.approx(blob(R0, Z0, 0.0), rel=0.01)
+
+
+def test_observation_angles_are_the_cameras(sims):
+    """
+    One angle per channel, the camera's, as for the other radDist types.
+    Simulation radDists used to be saved with no angles at all, and the fit
+    then placed every camera at phi = 0.
+    """
+    sim = sims["open"]
+    sim._get_observed_phi_loc()
+    angles = sim.data["observed_phi_loc"]["NIMROD"]
+    for bolo in sim.tokamak.bolometers:
+        expected = np.deg2rad(bolo.info["CAMERA_POSITION_R_Z_PHI"][2]) % (2 * np.pi)
+        assert len(angles[bolo.name]) == len(bolo.info["CHANNEL_TAGS"]), bolo.name
+        assert all(len(seg) == 1 and seg[0] == pytest.approx(expected) for seg in angles[bolo.name]), bolo.name
+    assert len({seg[0] for cam in angles.values() for seg in cam}) > 1  # the cameras are at different angles
