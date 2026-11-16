@@ -406,12 +406,12 @@ class Bolometer(object):
                 c_.material = mat
 
 
-def camera_angles(ws, machine: str) -> dict:
+def camera_channels(ws, machine: str) -> dict:
     """
-    {camera: toroidal angle [deg]} for a machine's cameras, by the names in its
-    settings' BOLOMETERS block (the names run configs use), from each
-    camera's config (CAMERA_POSITION_R_Z_PHI). Cameras whose config cannot be
-    read are left out.
+    {camera: (toroidal angle [deg], channel tags)} for a machine's cameras, by
+    the names in its settings' BOLOMETERS block, from each camera's config
+    (CAMERA_POSITION_R_Z_PHI, CHANNEL_TAGS). Reads the files only: no camera
+    is built. Cameras whose config cannot be read are left out.
     """
     settings_path = ws.machine_file(machine, f"{machine}_settings.yaml", required=False)
     if settings_path is None:
@@ -424,7 +424,17 @@ def camera_angles(ws, machine: str) -> dict:
             info = config_loader(path) if path is not None else None
             if info is None:
                 continue
-            out[name] = float(info["CAMERA_POSITION_R_Z_PHI"][2])
+            out[name] = (float(info["CAMERA_POSITION_R_Z_PHI"][2]), [str(t) for t in (info.get("CHANNEL_TAGS") or [])])
         except (KeyError, TypeError, ValueError, OSError):
             continue
     return out
+
+
+def camera_angles(ws, machine: str) -> dict:
+    """
+    {camera: toroidal angle [deg]} for a machine's cameras, by the names in its
+    settings' BOLOMETERS block (the names run configs use), from each
+    camera's config (CAMERA_POSITION_R_Z_PHI). Cameras whose config cannot be
+    read are left out.
+    """
+    return {name: phi for name, (phi, _) in camera_channels(ws, machine).items()}

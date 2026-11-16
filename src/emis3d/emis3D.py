@@ -974,6 +974,9 @@ class Emis3D:
         # --- Scale the synthetic data to observed for better fitting
         max_data_val = find_max_nested_lists(self.fitData[evalTime]["observed"])
 
+        # --- The step scale has one amplitude per camera location
+        step_locations = self._step_locations()
+
         if self.info is not None:
 
             # --- Arrange and create parameters for the location dependent data
@@ -993,6 +996,7 @@ class Emis3D:
                         a_bounds=self.config.amplitude_bounds() if self.config else None,
                         b_bounds=self.config.decay_bounds() if self.config else None,
                         toroidal_floor=bool(self.info.get("toroidal_floor", False)),
+                        step_locations=step_locations,
                     )
                     if "ERROR CHANNELS" in radD.info and print_minor_error:
                         print_error(radD)
@@ -1010,6 +1014,7 @@ class Emis3D:
                     a_bounds=self.config.amplitude_bounds() if self.config else None,
                     b_bounds=self.config.decay_bounds() if self.config else None,
                     toroidal_floor=bool(self.info.get("toroidal_floor", False)),
+                    step_locations=step_locations,
                 )
 
                 if "ERROR CHANNELS" in radD.info and print_minor_error:
@@ -1018,6 +1023,25 @@ class Emis3D:
 
         if self.verbose:
             logger.debug("→ Done preparing synthetic data for fit")
+
+    def _step_locations(self) -> list | None:
+        """
+        For scale_def "step": the toroidal angles [rad, sorted, in [0, 2 pi)] of
+        the cameras with a channel in the fit, from the machine's camera
+        configs. The step scale has one amplitude per location. (The angles a
+        radDist was observed at will not do: a radDist built through a
+        geometry matrix has one per toroidal sector.) None for other scales.
+        """
+        if not self.info or str(self.info.get("scale_def", "")).lower() != "step":
+            return None
+        from emis3d.diagnostic import camera_channels
+
+        used = {ch for group in self.channel_order["channel_list"] for ch in group}
+        cameras = camera_channels(self._workspace(), self.info["tokamakName"])
+        locations = Util_emis3D.unique_locations(np.deg2rad(phi) for phi, tags in cameras.values() if used & set(tags))
+        if not locations:
+            raise ValueError(f"scale_def step: none of {self.info['tokamakName']}'s camera configs lists a channel of the fit, so the cameras' toroidal locations are unknown")
+        return locations
 
     def _build_synthetic_dict(self, radDist_, locDependence: str, number, location=None) -> dict:
         """
@@ -1042,6 +1066,8 @@ class Emis3D:
             "injectionLocation_rad": np.deg2rad(source.info["injectionLocation"]),
             "emissionNames": radDist_.info["emissionNames"],
         }
+        if "step_locations" in radDist_.fitSynthetic:  # the step scale's camera locations (create_parameters)
+            synthetic_dict["step_locations"] = radDist_.fitSynthetic["step_locations"]
 
         for emissionName in radDist_.info["emissionNames"]:
             synthetic_dict[emissionName] = {

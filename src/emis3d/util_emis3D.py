@@ -73,26 +73,38 @@ def scale_constant(A: float, dphi: np.ndarray) -> np.ndarray:
 def scale_step(A: np.ndarray, phi: np.ndarray, bolo_phi_locs: np.ndarray) -> np.ndarray:
     """
     Inputs:
-    A: ndarray, use as the amplitudes in the step function
+    A: ndarray, the amplitudes of the step function, one per bolometer location
     phi: Input phi locations (in radians) for every channel for every bolometer (more for toroidal bolometers)
-    bolo_phi_locs: list of just the bolometer phi locations (in radians) (ex, [np.pi, np.deg2rad(225)] for JET)
+    bolo_phi_locs: the bolometer phi locations (in radians), in the order of A (ex, [np.pi, np.deg2rad(225)] for JET)
 
     Amplitude at toroidal location phi is set to be equal to the amplitude A[i] at the
-    nearest bolo location bolo_phi_locs[i]. Width of the steps is fully determined by
-    the bolometer locations.
+    nearest bolo location bolo_phi_locs[i], the shorter way round the torus. Width of
+    the steps is fully determined by the bolometer locations. A phi exactly half way
+    between two locations takes the first of them.
     """
-    A_arr = np.concatenate((A, A, A))
-    bolo_phis = np.concatenate((bolo_phi_locs, bolo_phi_locs + (2 * np.pi), bolo_phi_locs - (2 * np.pi)))
+    A = np.atleast_1d(np.asarray(A, dtype=float))
+    locs = np.atleast_1d(np.asarray(bolo_phi_locs, dtype=float))
+    if A.size != locs.size:
+        raise ValueError(f"the step scale needs one amplitude per bolometer location: got {A.size} amplitude(s) for {locs.size} location(s)")
+    phi = np.atleast_1d(np.asarray(phi, dtype=float))
+    gap = np.abs((phi[:, None] - locs[None, :] + np.pi) % (2.0 * np.pi) - np.pi)
+    return A[np.argmin(gap, axis=1)]
 
-    amplitudes = np.zeros(shape=phi.shape)
-    bolo_phis_arr = np.tile(bolo_phis, (len(phi), 1))
-    phi_arr = np.tile(phi, (len(bolo_phis), 1)).transpose()
-    dists = np.abs(bolo_phis_arr - phi_arr)
-    dists_diffs = dists - np.min(dists, 1)[:, np.newaxis]
-    nearest_bolo_phi_indxs = np.argwhere(dists_diffs < 1e-9)[:, 1]
-    amplitudes = A_arr[nearest_bolo_phi_indxs]
 
-    return amplitudes
+def step_param_name(tag: str, k: int) -> str:
+    """LMFIT name of the step scale's amplitude at location k: a_<tag> at the first, a_<tag>_step<k> at the others."""
+    return f"a_{tag}" if k == 0 else f"a_{tag}_step{k}"
+
+
+def step_amplitudes(params: dict, tag: str, n_locations: int) -> np.ndarray:
+    """The step scale's amplitudes from a parameter set, in the order of the locations."""
+    return np.array([float(params[step_param_name(tag, k)]) for k in range(n_locations)])
+
+
+def unique_locations(phis, decimals: int = 9) -> list:
+    """Distinct toroidal angles [rad] in [0, 2 pi), sorted: the locations of a step scale."""
+    wrapped = np.round(np.asarray(list(phis), dtype=float) % (2.0 * np.pi), decimals)
+    return sorted({float(v) for v in wrapped})
 
 
 def scale_wrapper(
@@ -105,6 +117,7 @@ def scale_wrapper(
     dphi: np.ndarray | None = None,
     bolo_phi_locs: np.ndarray | None = None,
     c: float = 0.0,
+    step_amps: np.ndarray | None = None,
 ):
     """
     Wrapper for the scale function; returns a scaling factor array based on
@@ -116,12 +129,14 @@ def scale_wrapper(
     b             : Shape parameter used by most scaling functions
     phi           : Toroidal location(s) of each channel (radians)
     mu            : Injection location (radians)
-    scale_def     : One of 'exponential', 'linear', 'constant'
+    scale_def     : One of 'exponential', 'linear', 'constant', 'step'
     emissionName  : Name of the emission distribution (e.g. 'clockwise')
     dphi          : Pre-computed dphi; calculated from phi/mu if None
     c             : Toroidally uniform floor added to the exponential and linear profiles (0: none)
     numRevolutions: Number of toroidal revolutions for helical distributions
-    bolo_phi_locs : Toroidal locations of the bolometers (radians)
+    bolo_phi_locs : Toroidal locations of the bolometers (radians), for the step scale
+    step_amps     : The step scale's amplitudes, one per location in bolo_phi_locs
+                    (default [a, b], for two locations)
     """
 
     if phi is None and dphi is None:
@@ -146,7 +161,8 @@ def scale_wrapper(
         return scale_constant(a, dphi)
     elif scale_def == "step":
         if bolo_phi_locs is not None:
-            return scale_step(A=np.array([a, b]), phi=phi, bolo_phi_locs=bolo_phi_locs)
+            A = np.array([a, b]) if step_amps is None else step_amps
+            return scale_step(A=A, phi=phi, bolo_phi_locs=bolo_phi_locs)
         else:
             print("Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def")
             return np.zeros(len(dphi))
@@ -336,6 +352,7 @@ def helical_endpoint_penalty(
             i_end = int(np.argmax(dphi))
             i_start = int(np.argmin(dphi))
 
+            step_locs = synthetic_dict.get("step_locations") if scale_def == "step" else None
             scale = scale_wrapper(
                 a=a,
                 b=b,
@@ -345,6 +362,8 @@ def helical_endpoint_penalty(
                 scale_def=scale_def,
                 emissionName=name,
                 c=c,
+                bolo_phi_locs=step_locs,
+                step_amps=step_amplitudes(params, tag, len(step_locs)) if step_locs is not None else None,
             )
 
             if scale is None:
@@ -406,16 +425,14 @@ def residual(
     temp_ = {}  # accumulated model signal per bolometer group
     data = {}  # per-emission scaled synthetic (returned when residual=False)
 
-    # --- Find the bolometer phi locations, combine to one large list
-    bolo_phis = []
-    for emissionName in synthetic_dict["emissionNames"]:
-        phi_loc = synthetic_dict[emissionName]["observed_phi_loc"]
-        for group in phi_loc:
-            for chan in group:
-                bolo_phis.extend(np.atleast_1d(chan).tolist())
-
-    # Remove duplicates
-    bolo_phis = np.asarray(list(set(bolo_phis)))
+    # --- The step scale has one amplitude per camera location (create_parameters
+    # stores the locations; Emis3D._build_synthetic_dict copies them here)
+    step_locs, step_amps = None, None
+    if scale_def == "step":
+        step_locs = synthetic_dict.get("step_locations")
+        if step_locs is None:
+            raise RuntimeError("The step scale needs the cameras' toroidal locations in synthetic_dict['step_locations'] (RadDistFitting.create_parameters stores them)")
+        step_amps = step_amplitudes(params, loc_tag(synthetic_dict["injectionLocation"]), len(step_locs))
 
     for emissionName in synthetic_dict["emissionNames"]:
 
@@ -454,8 +471,9 @@ def residual(
                 mu=mu,
                 scale_def=scale_def,
                 emissionName=emissionName,
-                bolo_phi_locs=bolo_phis,
+                bolo_phi_locs=step_locs,
                 c=c,
+                step_amps=step_amps,
             )
 
             if scale_ is None:

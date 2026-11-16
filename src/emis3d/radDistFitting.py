@@ -9,7 +9,7 @@ Written by JLH Aug. 2025
 import numpy as np
 from lmfit import Parameters
 from emis3d.util import load_json, convert_arrays_to_list
-from emis3d.util_emis3D import loc_tag
+from emis3d.util_emis3D import loc_tag, step_param_name, unique_locations
 from emis3d.globals import RADDIST_FORMAT
 
 
@@ -180,12 +180,19 @@ class RadDistFitting:
         a_bounds: tuple | None = None,
         b_bounds: tuple | None = None,
         toroidal_floor: bool = False,
+        step_locations: list | None = None,
     ) -> None:
         """
         Creates the LMFIT parameters for the radDist. peak_shift_max_degrees
         limits how far a fitted peak may move from the injector (run config).
         a_bounds, b_bounds: bounds of the amplitude and the toroidal decay
         (the run config's `bounds`; defaults in emis3d.globals).
+        step_locations: for scale_def "step", the cameras' toroidal angles
+        [rad]: the scale has one amplitude per location (a_<tag> at the
+        first, a_<tag>_step<k> at the others, in sorted order). Default: the
+        distinct angles the radDist was observed at, which are the cameras'
+        for ray-traced radDists (a radDist observed through a geometry
+        matrix has one angle per sector: give the cameras' angles for it).
         """
         from emis3d.globals import AMPLITUDE_BOUNDS, DECAY_BOUNDS
 
@@ -202,6 +209,22 @@ class RadDistFitting:
         # Start at 1 (model peak = data peak); allow scaling down for
         # multi-component radDists and up for strong toroidal decay
         params.add(paramName, value=float(np.clip(1.0, a_lo, a_hi)), min=a_lo, max=a_hi)
+
+        # --- The step scale: one amplitude per camera location. a_<tag> above is the
+        # first location's; the others get their own (Util_emis3D.step_param_name)
+        self.fitSynthetic.pop("step_locations", None)
+        if scale_def.lower() == "step":
+            if step_locations is None:
+                step_locations = [p for name in self.info["emissionNames"] for group in self.fitSynthetic[name]["observed_phi_loc"]
+                                  for chan in group for p in np.atleast_1d(chan)]
+            locs = unique_locations(step_locations)
+            if not locs:
+                raise ValueError("the step scale needs at least one camera location")
+            self.fitSynthetic["step_locations"] = locs
+            for k in range(1, len(locs)):
+                paramName = step_param_name(loc_tag(self.info["injectionLocation"]), k)
+                self.fitSynthetic["params"]["paramName"].append(paramName)
+                params.add(paramName, value=float(np.clip(1.0, a_lo, a_hi)), min=a_lo, max=a_hi)
 
         # --- Create a peak radiation variable if vary_peak_rad_location is True:
         if vary_peak_rad_location:

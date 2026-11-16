@@ -129,6 +129,12 @@ def toroidal_profile(
     mu = _peak_location(synth, params)
     a = float(params[f"a_{tag}"])
 
+    # The step scale: one amplitude per camera location, the locations the fit used
+    step_amps = None
+    if scale_def == "step" and synth.get("step_locations") is not None:
+        bolo_phi_locs = np.asarray(synth["step_locations"], dtype=float)
+        step_amps = Util_emis3D.step_amplitudes(params, tag, bolo_phi_locs.size)
+
     phi = None
     total = None
     per_emission = {}
@@ -153,6 +159,7 @@ def toroidal_profile(
             emissionName=name,
             bolo_phi_locs=bolo_phi_locs,
             c=float(params.get(f"c_{tag}", 0.0)),  # the toroidal floor, when fitted
+            step_amps=step_amps,
         )
         P_e = P_pol * np.asarray(scale, dtype=float) * float(sub["scaleSynth"])
         per_emission[name] = {"multiplication_factor": np.asarray(scale), "power": P_e}
