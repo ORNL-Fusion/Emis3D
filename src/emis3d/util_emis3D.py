@@ -164,7 +164,7 @@ def scale_wrapper(
             A = np.array([a, b]) if step_amps is None else step_amps
             return scale_step(A=A, phi=phi, bolo_phi_locs=bolo_phi_locs)
         else:
-            print("Warning! bolo_phi_locs is None in the scale_wrapper definition and is required for the scale_step def")
+            logger.warning("bolo_phi_locs is None in scale_wrapper, but the step scale needs the bolometers' locations: the scale is zero")
             return np.zeros(len(dphi))
     else:
         return np.ones(dphi.shape[0])

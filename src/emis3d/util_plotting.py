@@ -80,7 +80,6 @@ def draw_Cherab_box(
 
         l_ = True
         label = val["name"]
-        print(label)
         color = "Black"
         if ii < len(colors):
             color = colors[ii]

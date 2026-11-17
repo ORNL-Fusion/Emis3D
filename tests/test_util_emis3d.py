@@ -233,3 +233,16 @@ class TestErrorModels:
         for fn in (error_exponential, error_poisson):
             result = fn(s, max_signal=1.0)
             assert isinstance(result, np.ndarray), f"{fn.__name__} should return ndarray"
+
+
+def test_step_scale_without_locations_warns_through_logging(caplog, capsys):
+    """It used to print, which a run's log does not record and a library user cannot silence."""
+    import logging
+
+    from emis3d import util_emis3D as U
+
+    with caplog.at_level(logging.WARNING, logger="emis3d.util_emis3D"):
+        out = U.scale_wrapper(a=1.0, b=1.0, phi=np.array([0.1, 0.2]), scale_def="step", emissionName="ring")
+    assert out.tolist() == [0.0, 0.0]
+    assert any("step scale needs the bolometers' locations" in r.getMessage() for r in caplog.records)
+    assert capsys.readouterr().out == ""
