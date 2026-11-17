@@ -275,6 +275,9 @@ class RadDist(ABC):
         Evaluates the poloidal integral P_pol(φ) at each toroidal location:
             P_pol(φ) = ∫∫_wall ε(R, z, φ) · R dR dz
 
+        The quadrature grid covers the emission's own extent at each angle
+        (_emission_box), within the wall's.
+
         Parameters
         ----------
         n_phi      : int — number of toroidal quadrature points.
@@ -294,13 +297,6 @@ class RadDist(ABC):
         if wall is None:
             raise RuntimeError("Initilize the tokamak prior to calling _total_radiated_power")
 
-        # -- Full grid creation
-        R_vals = np.linspace(wall["minr"], wall["maxr"], n_poloidal)
-        z_vals = np.linspace(wall["minz"], wall["maxz"], n_poloidal)
-        RR, ZZ = np.meshgrid(R_vals, z_vals, indexing="ij")
-        R_flat = RR.ravel()
-        z_flat = ZZ.ravel()
-
         phi_array = np.linspace(0, 2.0 * np.pi, n_phi, endpoint=False)
 
         # --- Poloidal integral P_pol(φ) at each toroidal location (once, if the
@@ -308,6 +304,24 @@ class RadDist(ABC):
         P_pol = np.zeros(n_phi)
 
         for i, phi in enumerate(phi_array[:1] if self.TOROIDALLY_UNIFORM else phi_array):
+
+            # --- The grid: n_poloidal points each way over the part of the wall's
+            # extent where this emission is at this angle (_emission_box; the whole
+            # extent for types without one). A grid over the whole extent is too
+            # coarse for a narrow structure: 200 points across a 2 m vessel are
+            # 1 cm apart, and a 5 mm wide ring was integrated 18% low.
+            rmin, rmax, zmin, zmax = wall["minr"], wall["maxr"], wall["minz"], wall["maxz"]
+            box = self._emission_box(str(emissionName), float(phi))
+            if box is not None:
+                rmin, rmax = max(rmin, box[0]), min(rmax, box[1])
+                zmin, zmax = max(zmin, box[2]), min(zmax, box[3])
+            if rmax <= rmin or zmax <= zmin:  # the emission does not reach this plane
+                continue
+            R_vals = np.linspace(rmin, rmax, n_poloidal)
+            z_vals = np.linspace(zmin, zmax, n_poloidal)
+            RR, ZZ = np.meshgrid(R_vals, z_vals, indexing="ij")
+            R_flat = RR.ravel()
+            z_flat = ZZ.ravel()
 
             phi_arr = np.full(len(R_flat), phi)
 
