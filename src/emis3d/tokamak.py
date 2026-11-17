@@ -31,7 +31,7 @@ from raysect.optical import AbsorbingSurface, NullMaterial  # type: ignore
 from raysect.primitive import Cylinder, import_stl, Subtract
 
 from emis3d.diagnostic import Bolometer
-from emis3d.fieldline_tracer import Fieldline_Tracer
+from emis3d.fieldline_tracer import trace_many
 from emis3d.workspace import Workspace, WorkspaceError, get_workspace
 
 logger = logging.getLogger(__name__)
@@ -1101,23 +1101,19 @@ class Tokamak(object):
         direction_prefix_ = ["counterClock", "clockwise"]
         numTrans = [numTransists, (-1.0) * numTransists]
         for ii, direction_prefix in enumerate(direction_prefix_):
+            # --- Trace every start point in this direction at once (trace_many)
+            if self.verbose:
+                logger.debug(f"Calculating {len(startR)} field line(s) in the {direction_prefix} direction")
+            traced = trace_many(self.gfile, startR, startZ, startPhi, NumTor=numTor, NumTransits=numTrans[ii]) if len(startR) else None
+
             # --- Loop over the R, z coordinates, store the result
             for jj in range(len(startR)):
-                if self.verbose:
-                    logger.debug(f"Calculating fields in the {direction_prefix} direction from\tR={startR[jj]:.2f}m, z={startZ[jj]:.2f}m")
-                tracer = Fieldline_Tracer(
-                    StartR=startR[jj],
-                    StartZ=startZ[jj],
-                    StartPhi=startPhi,
-                    gfile=self.gfile,
-                    NumTor=numTor,
-                )
-                # --- Trace the field line in the given direction
-                tracer.trace(NumTransits=numTrans[ii])
-
                 # --- Find the components for each revolution
-                d_ = tracer.data
-                rev = split_revolutions(d_["x"], d_["y"], d_["z"], d_["phi"], d_["R"], d_["L"])
+                phi_line = traced["phi"]
+                R_line, z_line = traced["R"][jj], traced["z"][jj]
+                x_line, y_line = R_line * np.cos(phi_line), R_line * np.sin(phi_line)
+                L_line = np.concatenate([[0.0], np.cumsum(np.sqrt(np.diff(x_line) ** 2 + np.diff(y_line) ** 2 + np.diff(z_line) ** 2))])
+                rev = split_revolutions(x_line, y_line, z_line, phi_line, R_line, L_line)
 
                 # --- One entry per revolution (a fractional last transit is kept)
                 for kk in range(len(rev)):

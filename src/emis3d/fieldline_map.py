@@ -158,7 +158,7 @@ class FieldLineMap:
         pixel, both directions, `transits` turns) and record, per pass, the
         voxels each line lands in at every sector.
         """
-        from emis3d.fieldline_tracer import Fieldline_Tracer
+        from emis3d.fieldline_tracer import trace_many
 
         say = progress or (lambda text: None)
         g = G.grid
@@ -170,35 +170,41 @@ class FieldLineMap:
         inside_rz = G.inside_wall.reshape(g.n_r, g.n_phi, g.n_z)[:, 0, :]
         sector = G.sector_of_voxel()
 
+        # --- Every line's start point and the source pixel it belongs to: substeps x substeps per pixel
+        A, B = np.meshgrid(offs, offs, indexing="ij")
+        start_R = (g.r_centers[ir][:, None] + A.ravel()[None, :] * dR).ravel()
+        start_Z = (g.z_centers[iz][:, None] + B.ravel()[None, :] * dz).ravel()
+        pixel_of_line = np.repeat(np.arange(ir.size), offs.size * offs.size)
+
         hits: dict = {}
         t0 = time.perf_counter()
         say(f"tracing field lines from {ir.size} pixels on the plane {np.rad2deg(phi0):.1f} deg "
             f"({substeps * substeps} per pixel, both directions, {transits} transit(s)"
             + (", HELICITY MIRRORED" if mirror_helicity else "") + ")")
-        for p, (r, z) in enumerate(zip(ir, iz, strict=True)):
-            for a in offs:
-                for b in offs:
-                    R0, Z0 = g.r_centers[r] + a * dR, g.z_centers[z] + b * dz
-                    for direction in (1, -1):
-                        tr = Fieldline_Tracer(StartR=R0, StartZ=Z0, StartPhi=phi0, gfile=gfile, NumTor=n_tor, mirror_helicity=mirror_helicity)
-                        tr.trace(NumTransits=float(direction * transits))
-                        phi_line = np.asarray(tr.data["phi"], dtype=float)
-                        travelled = direction * (phi_line - phi0)
-                        Rl, Zl = np.asarray(tr.data["R"], dtype=float), np.asarray(tr.data["z"], dtype=float)
-                        for m in range(transits):
-                            delta = (direction * (g.phi_centers - phi0)) % two_pi + m * two_pi
-                            Rk = np.interp(delta, travelled, Rl, left=np.nan, right=np.nan)
-                            Zk = np.interp(delta, travelled, Zl, left=np.nan, right=np.nan)
-                            i_r = np.searchsorted(g.r_edges, Rk) - 1
-                            i_z = np.searchsorted(g.z_edges, Zk) - 1
-                            ok = np.isfinite(Rk) & (i_r >= 0) & (i_r < g.n_r) & (i_z >= 0) & (i_z < g.n_z)
-                            ok[ok] &= inside_rz[i_r[ok], i_z[ok]]
-                            k = np.flatnonzero(ok)
-                            lst = hits.setdefault((direction, m), ([], []))
-                            lst[0].append(G.eps_index(i_r[k], k, i_z[k]))
-                            lst[1].append(np.full(k.size, p))
-            if p and p % 250 == 0:
-                say(f"  traced {p}/{ir.size} pixels ({time.perf_counter() - t0:.0f} s)")
+        batch = 256  # lines traced together (fieldline_tracer.trace_many)
+        for first in range(0, start_R.size, batch):
+            lines = slice(first, min(first + batch, start_R.size))
+            for direction in (1, -1):
+                traced = trace_many(gfile, start_R[lines], start_Z[lines], phi0, NumTor=n_tor, NumTransits=float(direction * transits),
+                                    mirror_helicity=mirror_helicity, chunk=batch)
+                travelled = direction * (traced["phi"] - phi0)
+                for i, p in enumerate(pixel_of_line[lines]):
+                    Rl, Zl = traced["R"][i], traced["z"][i]
+                    for m in range(transits):
+                        delta = (direction * (g.phi_centers - phi0)) % two_pi + m * two_pi
+                        Rk = np.interp(delta, travelled, Rl, left=np.nan, right=np.nan)
+                        Zk = np.interp(delta, travelled, Zl, left=np.nan, right=np.nan)
+                        i_r = np.searchsorted(g.r_edges, Rk) - 1
+                        i_z = np.searchsorted(g.z_edges, Zk) - 1
+                        ok = np.isfinite(Rk) & (i_r >= 0) & (i_r < g.n_r) & (i_z >= 0) & (i_z < g.n_z)
+                        ok[ok] &= inside_rz[i_r[ok], i_z[ok]]
+                        k = np.flatnonzero(ok)
+                        lst = hits.setdefault((direction, m), ([], []))
+                        lst[0].append(G.eps_index(i_r[k], k, i_z[k]))
+                        lst[1].append(np.full(k.size, p))
+            done = int(pixel_of_line[lines.stop - 1]) + 1
+            if lines.stop < start_R.size and (first // batch) % 8 == 7:
+                say(f"  traced {done}/{ir.size} pixels ({time.perf_counter() - t0:.0f} s)")
 
         passes = []
         for (direction, m), (vox_l, pix_l) in sorted(hits.items()):

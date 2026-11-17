@@ -52,24 +52,14 @@ class TestTokamakRoundTrip:
     def fake_tracing(self, monkeypatch):
         from emis3d.tokamak import Tokamak
 
-        class FakeTracer:
-            def __init__(self, StartR, StartZ, StartPhi, gfile, NumTor):
-                self.R0, self.Z0 = StartR, StartZ
-
-            def trace(self, NumTransits):
-                n = 64
-                phi = np.linspace(0, 2 * np.pi * np.sign(NumTransits), n)
-                self.data = {
-                    "x": np.full(n, self.R0),
-                    "y": np.zeros(n),
-                    "z": np.full(n, self.Z0),
-                    "phi": phi,
-                    "R": np.full(n, self.R0),
-                    "L": np.linspace(0, 1, n),
-                }
+        def fake_trace_many(gfile, startR, startZ, startPhi, NumTor, NumTransits=1.0, **kwargs):
+            n = 64
+            phi = np.linspace(0, 2 * np.pi * np.sign(NumTransits), n)
+            ones = np.ones((len(startR), n))
+            return {"phi": phi, "R": ones * np.asarray(startR, dtype=float)[:, None], "z": ones * np.asarray(startZ, dtype=float)[:, None]}
 
         g = Tokamak.set_fieldlines.__globals__
-        monkeypatch.setitem(g, "Fieldline_Tracer", FakeTracer)
+        monkeypatch.setitem(g, "trace_many", fake_trace_many)
         monkeypatch.setitem(
             g,
             "split_revolutions",
