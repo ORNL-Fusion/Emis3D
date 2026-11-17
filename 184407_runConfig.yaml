@@ -1,0 +1,167 @@
+# Emis3D run config: DIII-D shot 184407
+#
+# A whole injection, comparing an axisymmetric ring, a single band and a band + spray spot at every time.
+#
+# Before running:      emis3d check runs/DIII-D/184407/184407_runConfig.yaml
+# Trial (a few times):  emis3d run runs/DIII-D/184407/184407_runConfig.yaml --times 2121.0 2121.5 --no-plots
+# Full run:            emis3d run runs/DIII-D/184407/184407_runConfig.yaml
+
+# --- What is being analysed
+shot: 184407  # Shot number
+tokamakName: DIII-D  # Machine folder under machines/
+injector: SPI135  # SPI injector from the INJECTORS block of DIII-D_settings.yaml: sets the injection angle,
+#   draws the spray on the figures, and bounds the spray_spot model. (injectionLocation: 225.0 may be given
+#   as well, in Emis3D coordinates, 360 - DIII-D angle; it must then agree with the injector's phi_deg.)
+
+# --- Times (in the units of the measurement files)
+tstart: 2119.0  # First evaluation time (set the window to your injection)
+tend: 2124.8  # Last evaluation time; equal to tstart fits one time
+Nt: 20  # Number of evenly spaced times from tstart to tend, both included: here every 0.1 ms
+dt: 0.05  # Averaging half-width: each channel is averaged over [t - dt, t + dt]. Keep it at most half the spacing
+#   between times, (tend - tstart) / (Nt - 1), so neighbouring times do not share data
+
+
+# --- Cameras: dataFileName is relative to the workspace's measurements location (measurements/DIII-D)
+BOLOMETERS:
+  DISRADU:
+    dataFileName: '184407/184407_DISRADU_PROCESSED.h5'  # Processed data file for DISRADU
+    scalingFactor: 1.0  # Multiplies the data (cross-calibration correction)
+    badChannels: ['DISRADU16']  # Channels to leave out of the fit, by channel name (as in the data file)
+    error_floor: 0.05  # This camera's error floor (overrides the run-wide value below)
+    error_relative: 0.10  # This camera's relative error (overrides the run-wide value below)
+  SX90MF:
+    dataFileName: '184407/184407_SX90MF_PROCESSED.h5'  # Processed data file for SX90MF
+    scalingFactor: 4.96  # Multiplies the data (cross-calibration correction)
+    # badChannels: []  # Channels to leave out of the fit, by channel name
+  SX90PF:
+    dataFileName: '184407/184407_SX90PF_PROCESSED.h5'  # Processed data file for SX90PF
+    scalingFactor: 5.00  # Multiplies the data (cross-calibration correction)
+    # badChannels: []  # Channels to leave out of the fit, by channel name
+
+# ----- FITTER SETTINGS BELOW ------ #
+
+# --- How the fit is solved
+solver: parametric  # library: fit every radDist in the folders below | parametric: fit each model's parameters through geometry matrices
+
+# --- Bounds of the amplitude and the toroidal decay (both solvers)
+bounds:
+  a: [0.05, 20.0]  # Amplitude, relative to the data's peak (1: the model's peak equals the data's)
+  b: [0.0, 10.0]  # Toroidal decay: exponential per rad^2 (default [0, 10]); linear per rad (default [0.01, 0.4]).
+  #   Also bounds every field-aligned structure's decay along the field
+
+# --- solver: library -- candidate radiation distributions (folders relative to <raddists>/<machine>)
+radDistDirectories_LocIndependent: []  # Axisymmetric shapes (rings, tubes, shells, simulations)
+radDistDirectories_LocDependent: []  # Helical radDists tied to an injector
+
+# --- solver: parametric -- models fitted directly through geometry matrices (no radDist library)
+parametric:
+  # Models and composites to fit and compare by AIC (the best is used for the figure, profile and TPF).
+  #   Axisymmetric models (toroidal shape from scale_def below): ring, tube, shell, asymshell
+  #   Field-aligned models (toroidal shape from their own decay along the field): helical, helical_psi, spray_spot
+  #   Composites: the names defined under composites below
+  models: [ring, helical_psi, band_spray, two_bands]  # Fitted and compared by AIC at every time; the winner gives that time's profile and TPF.
+  #   Single models are fitted first, and a composite starts from its components' single fits (band_spray's band
+  #   from helical_psi). Other choices: band_spot, two_bands, shell, asymshell, helical, ...
+  matrices: [low, medium]  # Geometry matrices, coarsest first (global search on the first, polish on the last); emis3d build-matrix <machine> --resolution <n>
+  equilibrium: g184407.02100  # g-file in equilibria/<machine>; the field-line mappings are built for it
+  transits: 2  # Field-aligned models: toroidal turns followed in each direction from the source plane
+  substeps: 2  # Field-aligned models: field lines traced per source-pixel edge (2: four per pixel); built once and cached
+  maxiter: 60  # Generations of the global search (more: slower, more thorough; composites have more parameters, so more helps).
+  #   Three models per time over 26 times takes a while: try a few times first (--times) to see how long one takes
+  popsize: 12  # Population of the global search, per free parameter
+  seed: 0  # Random seed of the global search, so a run can be repeated exactly
+  bounds:  # Search range of every model parameter; a fit landing on a bound is flagged ("AT BOUNDS")
+    ring:  # An elongated Gaussian ring (axisymmetric)
+      startR: [0.8, 2.1]  # Centre R [m]
+      startZ: [-1.1, 1.0]  # Centre z [m]
+      sigma_R: [0.01, 1.5]  # Width along its first axis [m]
+      sigma_z: [0.01, 1.5]  # Width along its second axis [m]
+      rotationAngle: [0.0, 90.0]  # Tilt [deg]; 0-90 covers every orientation, with both widths free
+      # phi_peak: [180.0, 270.0]  # Toroidal location of its peak [deg] (fitted with vary_peak_rad_location; default:
+      #   the injector +- peak_shift_max_degrees). Narrow it, or fix it under fixed:, to help a single time determine b
+    tube:  # A uniform rectangular tube (axisymmetric)
+      startR: [0.8, 2.1]  # Centre R [m]
+      startZ: [-1.1, 1.0]  # Centre z [m]
+      dR: [0.02, 1.0]  # Radial half-width [m]: the tube spans startR +- dR
+      dz: [0.02, 1.5]  # Vertical half-height [m]: the tube spans startZ +- dz
+    shell:  # A shell of flux surfaces: an edge mantle, or a hollow profile (axisymmetric)
+      psi_center: [0.1, 1.15]  # Centre in normalized flux psi_N (1 is the last closed flux surface)
+      psi_width: [0.02, 0.5]  # Gaussian width in psi_N
+    asymshell:  # A shell brighter on one poloidal side, a crescent (axisymmetric)
+      psi_center: [0.1, 1.15]  # Centre in psi_N
+      psi_width: [0.02, 0.5]  # Gaussian width in psi_N
+      asym_amp: [0.0, 1.0]  # Asymmetry: 0 symmetric, 1 fully one-sided (zero on the far side)
+      asym_angle: [-180.0, 180.0]  # Poloidal angle of the bright side about the magnetic axis [deg]: 0 outboard, 90 top, 180 inboard
+    helical:  # A Gaussian (R, z) source on its source plane, carried along the field lines (field-aligned)
+      startR: [0.8, 2.35]  # Source centre R [m]; up to the outboard edge (the separatrix is near 2.3 m)
+      startZ: [-1.1, 1.0]  # Source centre z [m]
+      sigma_R: [0.02, 1.2]  # Source width in R [m]
+      sigma_z: [0.02, 1.2]  # Source width in z [m]
+    helical_psi:  # A band on the flux surfaces: thin across them, extended along one (field-aligned)
+      psi_center: [0.1, 1.1]  # Which surface (psi_N; 1 is the separatrix)
+      psi_width: [0.01, 0.4]  # Thickness across the surfaces, in psi_N
+      theta_center: [-180.0, 180.0]  # Where along the surface: poloidal angle about the axis [deg], 0 outboard, 90 top, 180 inboard
+      theta_width: [3.0, 180.0]  # Extent along the surface [deg]: a spot, a band, or (180) a full ring
+    # spray_spot:  # A spot on the SPI spray, in the injector's plane (field-aligned); its bounds come from the injector:
+    #   spray_s: [0.0, 1.0]  # Distance along the spray from the shatter point [m] (default: to where the spray leaves the vessel)
+    #   spray_offset_deg: [-7.5, 7.5]  # Angle from the spray's centre line [deg] (default: +- half the cone, divergence_deg / 2)
+
+  composites:  # Several structures fitted together, each with its own shape, amplitude, decay and source plane;
+    #   list a composite's name in models to fit it
+    band_spot:  # A band on the flux surfaces plus a free (R, z) spot
+      components:
+        - {model: helical_psi, name: band}
+        - {model: helical, name: spot, bounds: {sigma_R: [0.02, 0.3], sigma_z: [0.02, 0.3]}}
+      shared_toroidal: false  # true: one toroidal peak location and decay for both; false: each its own
+    band_spray:  # A band plus a spot held on the SPI spray (in the injector's plane)
+      components:
+        - {model: helical_psi, name: band}
+        - {model: spray_spot, name: spot, bounds: {sigma_R: [0.02, 0.3], sigma_z: [0.02, 0.3]}}
+      shared_toroidal: false  # true: one peak location and decay for both (the spray spot stays at the injector either way)
+    two_bands:  # An extended band and a compact one; their theta_width ranges keep the two from swapping roles
+      components:
+        - {model: helical_psi, name: band1, bounds: {theta_width: [20, 180]}}
+        - {model: helical_psi, name: band2, bounds: {theta_width: [3, 30]}}
+      shared_toroidal: false  # true: one toroidal peak location and decay for both; false: each its own
+
+  # fixed:  # Hold any model parameter at a value instead of fitting it
+  #   ring: {rotationAngle: 0.0}
+  # supersample: 2  # Sub-samples per voxel edge for narrow structures (default: automatic)
+
+# --- Toroidal shape of the radiation
+#   Axisymmetric models (here the ring) take their toroidal profile from scale_def (and toroidal_floor): peak at
+#   phi_peak, decay b. Field-aligned models (here helical_psi and band_spray's components) make their own: a decay
+#   along the field, bounded by bounds.b, from their source plane. Every winner carries its own profile into the
+#   results, so the pipeline fits no second decay over it.
+#   DIII-D's cameras sample a ring's profile at only two toroidal locations (135 and 270 deg): its amplitude, b and
+#   peak location cannot all be determined at one time, and the run warns about it. The ring's fit is still
+#   compared fairly with the others; its b and peak location are just weakly determined (wide ranges).
+scale_def: "exponential"  # Axisymmetric models: exponential (a peak, or broad as b -> 0), linear, constant (uniform; for
+#   cross-calibration) or step (one amplitude per camera location; for machines with two cameras, e.g. JET)
+toroidal_floor: false  # Axisymmetric models: a uniform floor under the peak, a * exp(-b dphi^2) + c with c >= 0 (exponential
+#   and linear). Off here: with two toroidal locations it would add a fourth unknown to the ring's profile
+enable_dphi_scaling: true  # Library solver only: fit the decay b (false fixes it and fits only the amplitude)
+vary_peak_rad_location: true  # false: radiation peaks at the injector. true: its toroidal location is fitted (the ring's
+#   peak, phi_peak; a field-aligned model's source plane; spray_spot stays in the injector's plane either way)
+peak_shift_max_degrees: 90.0  # How far a fitted peak or source plane may move from the injector [deg]; with two
+#   components each moving freely, a narrower range keeps one from parking where no camera can see it
+helical_endpoint_weight: 0  # Library solver only
+
+# --- Channel errors: sigma^2 = (error_floor * peak)^2 + (error_relative * signal)^2, per camera
+error_definition: "floor_relative"  # Error model: floor_relative (recommended), constant, poisson or exponential
+error_floor: 0.05  # Additive error, as a fraction of each camera's own peak signal (keeps near-zero channels from dominating)
+error_relative: 0.05  # Relative error, as a fraction of each channel's signal (calibration uncertainty)
+# noise_window: [2120.0, 2120.5]  # Optional [t_start, t_end] quiet period before the injection; raises each channel's floor to its measured noise
+
+# --- Fitting
+fit_method: "differential_evolution"  # Library solver only (the parametric solver always searches globally, then polishes)
+numProcessorsFitting: 7  # Library solver only
+
+# --- Ranges for TPF and other derived quantities (on by default; all keys optional)
+uncertainty:
+  n_samples: 2000  # Parameter samples used for the ranges
+  max_candidates: 25  # Library solver only (parametric ranges come from the fit's own covariance)
+  # calibration:  # Relative 1-sigma calibration uncertainty per camera (`emis3d calibrate` prints this block)
+  #   DISRADU: 0.10
+  #   SX90MF: 0.05
+  #   SX90PF: 0.05
