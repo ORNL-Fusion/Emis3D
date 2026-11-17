@@ -362,16 +362,22 @@ def load_json(pathFileName: Union[str, Path]) -> dict:
 
 def get_filenames_in_directory(directory_path: Union[str, Path]) -> list[str]:
     """
-    Returns a list of all files within the specified directory and its subdirectories.
+    Returns a list of all files within the specified directory and its subdirectories,
+    sorted by path.
 
     Excludes yaml and .* files.
+
+    The order is that of the sorted paths, not the order the file system
+    happens to list them in (os.walk), which differs between machines and
+    file systems: radDists are numbered in this order, and of two radDists
+    that fit equally well the first is the best fit.
     """
     files = []
     for root, _, filenames in os.walk(directory_path):
         for filename in filenames:
             if filename[0] != "." and filename.split(".")[-1] != "yaml":
                 files.append(os.path.join(root, filename))
-    return files
+    return sorted(files)
 
 
 def read_h5(path: Union[str, Path]) -> dict:
