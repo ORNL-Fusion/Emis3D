@@ -1582,6 +1582,10 @@ class Emis3D:
         Serialise bestFits and fitData to a dill file (written under a
         temporary name and renamed). Removes the per-time checkpoints of
         _save_checkpoint, which this file replaces. Returns the file's path.
+
+        Beside it, with the same name and the extension .json, the results
+        are written as plain numbers (emis3d.results): parameters, chi-square,
+        each camera's data and model, the toroidal profile, TPF and ranges.
         """
 
         if not self.info or "shot" not in self.info or "tokamakName" not in self.info:
@@ -1600,6 +1604,11 @@ class Emis3D:
         self._dump_atomic(pathFileName, {"fit_data": self.fitData, "bestFits": self.bestFits})
         logger.debug(f"→ Best fits and fitData saved to: {pathFileName}")
         shutil.rmtree(self._checkpoint_dir(), ignore_errors=True)  # every time is in the file just written
+
+        # --- The same results as plain numbers, readable without Emis3D (emis3d.results)
+        from emis3d.results import write_summary
+
+        write_summary(self, pathFileName.with_suffix(".json"))
         return pathFileName
 
     def _load_bestFits(self, path: str | os.PathLike = "") -> None:
