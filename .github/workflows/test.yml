@@ -1,9 +1,12 @@
 name: Test
 
+# Pushes to main and to the development branch, every pull request, and on request
+# (Actions > Test > Run workflow, for any branch)
 on:
   push:
-    branches: [main]
+    branches: [main, voxelization]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
