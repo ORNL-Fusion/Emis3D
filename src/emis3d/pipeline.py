@@ -11,6 +11,7 @@ scripts/make_radDists.py and scripts/run_emis3D.py):
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -128,6 +129,17 @@ def _build_one(task):
         return time.perf_counter() - t0, None
     except Exception as e:  # noqa: BLE001  boundary: any failure of one radDist is reported, the rest continue
         return time.perf_counter() - t0, f"{type(e).__name__}: {e}"
+
+
+def _init_worker(ws) -> None:
+    """
+    Start of a radDist-building worker process: give it the workspace of the
+    run that started it. The workers are started fresh ("spawn"), so nothing
+    set in the parent process reaches them unless it is passed here.
+    """
+    from emis3d.workspace import set_workspace
+
+    set_workspace(ws)
 
 
 def _clock(seconds: float) -> str:
@@ -265,7 +277,14 @@ def make_raddists(config, tokamak: str | None = None, workspace=None, only=None,
             for k, task in enumerate(tasks):
                 report(t, jobs, k, *_build_one(task))
         else:
-            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            # Workers are started fresh ("spawn") on every platform, as macOS and Windows do
+            # and as Util_emis3D.FitPool does: forking a process that already runs threads
+            # (numba's, an interpreter's in a notebook) can deadlock the child, and Python
+            # 3.14 stops forking by default. Each worker is handed the workspace itself, so
+            # it uses the same locations however the workspace was given (an argument, a
+            # run config's paths, overrides), not only what the environment says.
+            with ProcessPoolExecutor(max_workers=n_workers, mp_context=multiprocessing.get_context("spawn"),
+                                     initializer=_init_worker, initargs=(ws,)) as executor:
                 futures = {executor.submit(_build_one, task): k for k, task in enumerate(tasks)}
                 for fut in as_completed(futures):
                     report(t, jobs, futures[fut], *fut.result())
