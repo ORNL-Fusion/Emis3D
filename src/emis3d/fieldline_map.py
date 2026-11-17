@@ -306,8 +306,11 @@ def get_or_build(ws, G, machine: str, matrix_name: str, equilibrium: str, phi0_d
         why = stale_reason(cached, G, phi0, substeps, psi_max)
         if why is None:
             return cached, path
-        text = f"cached field-line mapping {path.name} was built with {why}: rebuilding it"
-        logger.info(text)
+        # A warning, so it shows without any logging set up: rebuilding traces every source
+        # pixel's field lines again, which takes minutes on a fine grid, and until now the
+        # run just went quiet
+        text = f"cached field-line mapping {path.name} was built with {why}: rebuilding it (this can take minutes)"
+        logger.warning(text)
         if progress is not None:
             progress(text)
     from emis3d.tokamak import Tokamak

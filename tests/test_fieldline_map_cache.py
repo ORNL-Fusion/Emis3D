@@ -100,6 +100,18 @@ def test_the_rebuild_is_reported(cache):
     assert any("built with substeps 1, not 2" in line and "rebuilding" in line for line in lines)
 
 
+def test_the_rebuild_is_a_warning_and_a_reused_mapping_is_silent(cache, caplog):
+    """Without logging set up only warnings are shown, and a rebuild is minutes of silence otherwise."""
+    ws, _ = cache
+    with caplog.at_level("WARNING", logger="emis3d.fieldline_map"):
+        get(ws, substeps=1)                                                   # built for the first time: not a warning
+        get(ws, substeps=1)                                                   # reused
+        assert not caplog.records
+        get(ws, substeps=2)
+    (record,) = caplog.records
+    assert record.levelname == "WARNING" and "built with substeps 1, not 2" in record.getMessage() and "minutes" in record.getMessage()
+
+
 def test_stale_reason_for_a_matching_mapping_is_none(cache):
     ws, _ = cache
     fmap, _ = get(ws, psi_max=1.05)
