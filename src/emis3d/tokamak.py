@@ -11,8 +11,6 @@ TODO:
 1) Currently the field lines are stored based on toroidal start location, this may be problematic for the
 helical radDist when initilizing many field lines at the same location. Solution: Store the field lines
 under {startPhi}_R_{startR:.2f}_z_{startz:.2f}, instead of just {startPhi}. OR... is this really an issue?
-2) update self.synth_camera_test so the figure will output to a better location
-3) Update create_cameras, I don't know what tok_r and tok_z are doing and they are re-assigned half-way through the definition
 """
 
 import logging
@@ -22,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from freeqdsk import geqdsk
 from matplotlib import path
-from raysect.core import Point3D
 from raysect.core.math import rotate_z, translate
 from raysect.optical import World
 from raysect.optical.library import RoughTungsten
@@ -51,9 +48,6 @@ from emis3d.util import (
     point3d_to_phi,
     point3d_to_rz,
     wrapped_phi_difference,
-    draw_radial_lines,
-    find_intersection,
-    rz_to_xyz,
     split_revolutions,
     compute_etendue_metric,
     get_rectangle_corners,
@@ -1212,95 +1206,6 @@ class Tokamak(object):
         z = fline["z"][:, flInd]
         return R, z
 
-    def create_cameras(self, dtheta=10, dtheta_camera=4.9, phi=0):
-        """
-        Creates cherab cameras around the vacuum vessel.
-        Currently works for DIII-D, need to test other tokamaks
-        TODO:
-        1. Remove R = 1.5, this is the length of the "spoke" since we use a spoke
-        pattern from the center of the vessel to equally space the cameras around the vessel.
-        This should just be the minor radius + some
-        """
-
-        # Plot first wall curve
-        tok_r, tok_z = [0], [0]
-        if self.wall is not None:
-            r = self.wall["wallcurve"].vertices[:, 0]
-            z = self.wall["wallcurve"].vertices[:, 1]
-        r0 = (np.max(tok_r) - np.min(tok_r)) / 2.0 + np.min(tok_r)
-        z0 = (np.max(tok_z) - np.min(tok_z)) / 2.0
-
-        MACHINE_AXIS_3D = Point3D(r0, 0.0, z0)
-
-        # --- Create the spoke pattern for the cameras, the upper and lower are the camera's width
-        lines = {}
-        lines_upper = {}
-        lines_lower = {}
-
-        for angle in np.arange(0, 360, dtheta):
-            lines[angle] = draw_radial_lines(r0, z0, R=1.5, angle_deg=float(angle))
-
-            lines_upper[angle] = draw_radial_lines(r0, z0, R=1.5, angle_deg=float(angle), initial_offset=dtheta_camera)
-            lines_upper[angle]["offset"] = dtheta_camera
-            lines_lower[angle] = draw_radial_lines(r0, z0, R=1.5, angle_deg=float(angle), initial_offset=-dtheta_camera)
-            lines_lower[angle]["offset"] = -dtheta_camera
-
-        # --- Fit each segement to a higher resolution, depending on the distance between the two segements
-        r_ = []
-        z_ = []
-        for ii in range(len(tok_r)):
-            if ii == len(tok_r) - 1:
-                loc_ = 0
-            else:
-                loc_ = ii + 1
-            r_.append(tok_r[ii])
-            z_.append(tok_z[ii])
-
-            # --- Length of this segment
-            ds = np.sqrt((tok_r[loc_] - tok_r[ii]) ** 2 + (tok_z[loc_] - tok_z[ii]) ** 2)
-
-            if ds > 1.0:
-                npts = 40
-            else:
-                npts = 20
-            if ds > 0.04:
-                # --- Fit the points
-                if tok_r[loc_] == tok_r[ii]:
-                    nx = [tok_r[loc_]] * npts
-                else:
-                    nx = np.linspace(tok_r[loc_], tok_r[ii], npts)
-                ny = np.poly1d(np.polyfit([tok_r[loc_], tok_r[ii]], [tok_z[loc_], tok_z[ii]], 1))(nx)
-
-                for x_ in nx:
-                    r_.append(x_)
-                for y_ in ny:
-                    z_.append(y_)
-        tok_r = r_.copy()
-        tok_z = z_.copy()
-
-        # --- Find where the center of camera intersects the vessel
-        self.cameras = {}
-        for ii, line in enumerate(lines):
-            self.cameras[ii] = {}
-            self.cameras[ii]["theta"] = line
-            # r, z = Util_D3D.find_intersection(lines[line], tok_r, tok_z)
-            # cameras[ii]["detector_center"] = Point3D(r, 0.0, z)
-            r, z = find_intersection(lines_upper[line], tok_r, tok_z)  # type: ignore
-            x, y, z = rz_to_xyz(r, z, phi)  # type: ignore
-            self.cameras[ii]["p1"] = Point3D(x, y, z)
-
-            r, z = find_intersection(lines_lower[line], tok_r, tok_z)  # type: ignore
-            x, y, z = rz_to_xyz(r, z, phi)  # type: ignore
-            self.cameras[ii]["p2"] = Point3D(x, y, z)
-
-            self.cameras[ii]["y_vector_full"] = self.cameras[ii]["p1"].vector_to(self.cameras[ii]["p2"])
-            self.cameras[ii]["y_vector"] = self.cameras[ii]["y_vector_full"].normalise()
-            self.cameras[ii]["y_width"] = self.cameras[ii]["y_vector_full"].length
-            self.cameras[ii]["detector_center"] = self.cameras[ii]["p1"] + self.cameras[ii]["y_vector_full"] * 0.5
-
-            x, y, z = rz_to_xyz(MACHINE_AXIS_3D[0], MACHINE_AXIS_3D[1], phi)
-            self.cameras[ii]["normal_vector"] = (self.cameras[ii]["detector_center"].vector_to(Point3D(x, y, z))).normalise()  # inward pointing
-
     def _change_object_parent(self, parent=None):
         """
         When calculating the Etendue's for each bolometer,
@@ -1333,152 +1238,3 @@ class Tokamak(object):
 
         # --- Unbuild the tokamak
         self._change_object_parent(parent=self.world)
-
-    def synth_camera_test(
-        self,
-        CameraType=0,
-        TorAngleDeg=0.0,
-        Title="render",
-        SpecBins=25,
-        PixelSamples=250,
-        WithWallCAD=True,
-        IndLightSize=0.001,
-        BoundingCylMult=1.0,
-        ZoomMult=1.0,
-        Zadjust=0.0,
-        Radjust=0.0,
-        major_radius=1.67,
-        minor_radius=1.25,
-    ):
-
-        # OutputFile = os.path.join("outputs", (str(Title) + ".png"))
-        OutputFile = str(Title) + ".png"
-
-        from raysect.core.math import translate
-        from raysect.optical.observer import PinholeCamera, RGBPipeline2D, RGBAdaptiveSampler2D  # type: ignore
-        from raysect.optical import rotate, d65_white  # type: ignore
-        from raysect.optical.material import UniformSurfaceEmitter  # type: ignore
-        from raysect.optical.library.spectra.colours import red
-        from raysect.primitive import Sphere
-
-        # add general toroidal light source
-        height = 0.2
-        for vertdisp in [-1.0, -0.5, 0.5, 1.0]:
-            outer_cyl = Cylinder(
-                major_radius * 1.02,
-                height,
-                transform=translate(0, 0, (-0.5 * height) + vertdisp),
-            )
-            inner_cyl = Cylinder(
-                major_radius * 0.98,
-                height * 1.2,
-                transform=translate(0, 0, (-0.6 * height) + vertdisp),
-            )
-            illumination = Subtract(outer_cyl, inner_cyl)
-            illumination.material = UniformSurfaceEmitter(d65_white, 3.0)
-            illumination.parent = self.world
-
-        if WithWallCAD:
-            if self.info is None:
-                raise RuntimeError("Load tokamak settings before adding the wall CAD")
-            # load the machine's CAD file named in its settings
-            pfcs = import_stl(
-                self.ws.machine_file(
-                    self.info["tokamakName"],
-                    "inputs",
-                    "CAD_stl_files",
-                    self.info["MACHINE"]["PFC_STL_PATH"],
-                )
-            )
-
-            pfcs.material = RoughTungsten(0.6)
-            pfcs.name = "PFCs"
-            pfcs.parent = self.world
-        else:
-            # Add general bounding cylinder if not CAD
-            bounding_height = minor_radius * 2.0 * 2.1
-            bounding_cyl = Cylinder(
-                (major_radius + (BoundingCylMult * minor_radius)) * 1.1,
-                bounding_height,
-                transform=translate(0, 0, -0.5 * bounding_height),
-            )
-            bounding_cyl.material = RoughTungsten(0.6)
-            bounding_cyl.parent = self.world
-
-            # near wall light strips:
-            for vertdisp in [-1.0, -0.5, 00, 0.5, 1.0]:
-                outer_cyl = Cylinder(
-                    (major_radius + (BoundingCylMult * minor_radius)) * 1.08,
-                    height,
-                    transform=translate(0, 0, (-0.5 * height) + vertdisp),
-                )
-                inner_cyl = Cylinder(
-                    (major_radius + (BoundingCylMult * minor_radius)) * 1.06,
-                    height * 1.2,
-                    transform=translate(0, 0, (-0.6 * height) + vertdisp),
-                )
-                illumination = Subtract(outer_cyl, inner_cyl)
-                illumination.material = UniformSurfaceEmitter(d65_white, 3.0)
-                illumination.parent = self.world
-
-        rgb = RGBPipeline2D(name="sRGB", display_progress=False)
-        sampler = RGBAdaptiveSampler2D(rgb, ratio=100, fraction=0.2, min_samples=500, cutoff=0.05)
-        fov = 140
-
-        # Add indicator lights and set casing material
-        for bolo in self.bolometers:
-            # if bolo.name == "KB5H_12":
-            if True:
-                bolo.bolometer_camera.camera_geometry.material = RoughTungsten(0.6)
-
-                foils = bolo.bolometer_camera.foil_detectors
-                for foil in foils:
-                    center_point = foil.centre_point
-                    CenterPoint = Sphere(
-                        IndLightSize,
-                        parent=self.world,
-                        transform=translate(center_point.x, center_point.y, center_point.z),
-                    )
-                    CenterPoint.material = UniformSurfaceEmitter(red, 100.0)
-            else:
-                bolo.bolometer_camera.parent = None
-
-        if CameraType == 0:
-            # Camera that looks in the counterclockwise toroidal direction
-            transform = rotate(0.0, 0.0, TorAngleDeg - 90.0 - (1.0 * ZoomMult)) * translate(0.0, major_radius + Radjust, Zadjust) * rotate(0.0, -90.0, 0.0) * rotate(90.0, 0.0, 0.0)
-        elif CameraType == 1:
-            # Camera for viewing outboard side
-            transform = rotate(0.0, 0.0, TorAngleDeg - 180.0) * translate(-1.0 * ZoomMult * major_radius, 0.0, Zadjust) * rotate(0.0, -90.0, 0.0) * rotate(90.0, 0.0, 0.0)
-        else:
-            raise Exception("Camera type does not match an option")
-
-        camera = PinholeCamera(
-            (350, 250),
-            fov=fov,
-            parent=self.world,
-            transform=transform,
-            pipelines=[rgb],
-            frame_sampler=sampler,
-        )
-
-        camera.spectral_bins = SpecBins
-        camera.pixel_samples = PixelSamples
-
-        plt.ion()
-        p = 1
-        while not camera.render_complete:
-            logger.debug("Rendering pass {}...".format(p))
-            camera.observe()
-            logger.debug("")
-            p += 1
-            stopRender = input("Stop? (y to stop)")
-            if stopRender == "y":
-                break
-
-        plt.ioff()
-        # rgb.display()
-        rgb.save(OutputFile)
-
-        # --- Add each bolometer back to the world
-        for bolo in self.bolometers:
-            bolo._change_parent(value=self.world)

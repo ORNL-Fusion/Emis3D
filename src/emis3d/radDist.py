@@ -8,8 +8,6 @@ Re-organized pretty much everything, added parallelization, and a lot more durin
 
 Added new Helical class that expands with the field lines, moved old helical class to helicalRing -JLH Mar. 2026
 
-TODO: Update powerPerBin and uncomment it from the self.build()
-
 """
 
 import logging
@@ -359,117 +357,6 @@ class RadDist(ABC):
         self.data["toroidalRadiatedPower"] = {}
         for emissionName in self.info["emissionNames"]:
             self.data["toroidalRadiatedPower"][emissionName] = self._total_radiated_power(emissionName=emissionName, n_phi=int(self.info.get("numBins", 100)))
-
-    def power_per_bin_calc(self, Errfrac: float = 0.01, Pointsupdate: int = int(1e5)) -> None:
-        """
-        Replaces the power_per_bin_calc with a vectorized version.
-        """
-
-        # --- Initialize items
-        self.data = {}
-        self.data["emisSumArray"] = {}
-        self.data["emisSqArray"] = {}
-        self.data["powerPerBin"] = {}
-        self.data["phi"] = []
-
-        numBins = self.info["numBins"]
-        angleperbin = 2.0 * np.pi / numBins
-
-        # Ensure tokamak and its info are initialized
-        if not hasattr(self, "tokamak") or self.tokamak is None:
-            raise RuntimeError("Tokamak object is not initialized. Call _build_tokamak() before power_per_bin_calc().")
-        if not hasattr(self.tokamak, "info") or self.tokamak.info is None:
-            raise RuntimeError("Tokamak.info is not initialized. Ensure _build_tokamak() sets up info correctly.")
-
-        volumeperbin = self.tokamak.info["MACHINE"]["volume"] / float(numBins)
-        pointsperbin = 0
-        reachedprecision = 0
-
-        while reachedprecision == 0:
-            pointsperbin += Pointsupdate
-            # --- Create all of the random points first
-            x_, y_, z_, R_, phifirstbin_ = [], [], [], [], []
-            while len(x_) < Pointsupdate:
-                if self.tokamak.wall is None:
-                    raise RuntimeError("Tokamak wall is not initialized. Ensure that the wall attribute is set before calling power_per_bin_calc().")
-                # Find random point within the wallcurve
-                x, y, z, R, phi = Util_radDist.random_uniform_point_noVolume(
-                    self.tokamak.wall["wallcurve"],
-                    self.tokamak.wall["minr"],
-                    self.tokamak.wall["maxr"],
-                    self.tokamak.wall["minz"],
-                    self.tokamak.wall["maxz"],
-                )
-                x_.append(x)
-                y_.append(y)
-                z_.append(z)
-                R_.append(R)
-
-                # --- Program rotates all points to be within the first bin,
-                # finds the emissivity, then rotates the same points to each
-                # subsequent bin
-                if phi is not None and phi < 0:
-                    phi += 2.0 * np.pi
-                phibin = np.floor(phi / angleperbin)
-                phifirstbin_.append(phi - (angleperbin * phibin))
-
-            # --- Evalulate all of the points at once
-            R_ = np.array(R_)
-            z_ = np.array(z_)
-
-            for numbin in range(0, numBins):
-                # print(f"Calculating powerPerBin {numbin + 1} of {numBins}")
-
-                # --- use the initial point for each toroidal bin
-                phi = np.array(phifirstbin_) + (angleperbin * numbin)
-                self.data["phi"].append(phi)
-
-                # Add the emission to the existing arrays
-                for emissionName in self.info["emissionNames"]:
-
-                    emission = self.calc_emissivity(R_, z_, phi, emissionName=emissionName)
-
-                    if emissionName not in self.data["emisSqArray"]:
-                        self.data["emisSqArray"][emissionName] = np.zeros(numBins)
-                        self.data["emisSumArray"][emissionName] = np.zeros(numBins)
-                        self.data["powerPerBin"][emissionName] = np.zeros(numBins)
-
-                    self.data["emisSumArray"][emissionName][numbin] += emission[emissionName].sum()
-                    self.data["emisSqArray"][emissionName][numbin] += (emission[emissionName] ** 2).sum()
-
-            # --- Check to see if the desired precision is reached
-            # I believe they are checking to see if the variance between bins is small? -JLH
-            emismeanarray = {}
-            emisvararray = {}
-            integemisarray = {}
-            totintegemis = 0
-            integemisvararray = {}
-            integemiserrarray = {}
-            totintegemiserr = 0
-
-            for key_ in self.data["emisSumArray"]:
-                emismeanarray[key_] = self.data["emisSumArray"][key_] / pointsperbin
-                emisvararray[key_] = (self.data["emisSqArray"][key_] / pointsperbin) - (emismeanarray[key_] ** 2)
-                integemisarray[key_] = volumeperbin * emismeanarray[key_]
-
-                totintegemis += np.sum(integemisarray[key_])
-
-                integemisvararray[key_] = volumeperbin**2 * emisvararray[key_] / pointsperbin
-                integemiserrarray[key_] = np.sqrt(integemisvararray[key_])
-                totintegemiserr += np.sum(integemiserrarray[key_])
-            toterrfrac = totintegemiserr / totintegemis
-
-            if toterrfrac < Errfrac:
-                reachedprecision = 1
-                for key_ in integemisarray:
-                    self.data["powerPerBin"][key_] = integemisarray[key_]
-            else:
-                if pointsperbin % (Pointsupdate * 100) == 0:
-                    logger.debug(
-                        "Number of points %d, total std. err fraction so far = %.2e",
-                        pointsperbin,
-                        toterrfrac,
-                    )
 
     # ------------------------------------------------------------------
     # Compiled emission (rays: {method: compiled})
@@ -1753,9 +1640,6 @@ class FluxShell(RadDist):
             emis = emis * np.maximum(1.0 + A * np.cos(theta - np.deg2rad(float(self.info["asym_angle"]))), 0.0)
         return {emissionName: emis}
 
-    def _scaling_factor(self, bolo_info=None, emissionName=None):
-        return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
-
     def _observed_phi_loc(self, bolo_info=None, emissionName=None):
         if not bolo_info:
             return []
@@ -1922,9 +1806,6 @@ class FieldAlignedSource(RadDist):
         phi_w = (np.ravel(np.broadcast_to(phi, R.shape)) - f.phi_centers[0]) % (2.0 * np.pi) + f.phi_centers[0]
         return {emissionName: np.asarray(self._interpolator()(np.column_stack([R, phi_w, z])), dtype=float)}
 
-    def _scaling_factor(self, bolo_info=None, emissionName=None):
-        return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
-
     def _observed_phi_loc(self, bolo_info=None, emissionName=None):
         if not bolo_info:
             return []
@@ -1993,9 +1874,6 @@ class Composite(RadDist):
             sel = sector == k
             out[sel] = planes[k](np.column_stack([R[sel], z[sel]]))
         return {emissionName: out}
-
-    def _scaling_factor(self, bolo_info=None, emissionName=None):
-        return [1.0] * len(bolo_info["CHANNEL_TAGS"]) if bolo_info else []
 
     def _observed_phi_loc(self, bolo_info=None, emissionName=None):
         if not bolo_info:
@@ -2175,23 +2053,6 @@ class SimulationRadDist(RadDist):
             emis[i] = self.interp_operator(float(first[i]), float(second[i]), float(third[i]))
 
         return {emissionName: emis}
-
-    def _scaling_factor(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
-        """
-        Compute the toroidal scaling factor (phi offset) for a bolometer channel.
-
-        Parameters
-        ----------
-        bolo_info    : dict — bolometer configuration.
-        emissionName : str  — used to extract the revolution number from the name.
-        """
-
-        if bolo_info is None:
-            bolo_info = {}
-        numChan = bolo_info["NUM_CHANNELS"]
-        phi = np.deg2rad(float(bolo_info["CAMERA_POSITION_R_Z_PHI"][2]))
-
-        return [float(phi)] * numChan
 
     def _observed_phi_loc(self, bolo_info: dict | None = None, emissionName: str | None = None) -> list:
         """
