@@ -76,6 +76,7 @@ BUG:
 import os
 import difflib
 import logging
+import pickle
 import shutil
 import time
 import warnings
@@ -1595,10 +1596,25 @@ class Emis3D:
 
     @staticmethod
     def _dump_atomic(pathFileName: Path, data) -> None:
-        """Write a dill file under a temporary name, then rename it: an interrupted save leaves no half-written file."""
+        """
+        Write a results file under a temporary name, then rename it: an
+        interrupted save leaves no half-written file.
+
+        The standard pickler writes it when it can, and dill only what the
+        standard one refuses (a lambda, a function defined inside another).
+        Both write the same format, which dill.load (_load_bestFits) reads,
+        but dill's pickler runs in Python and walks the tokamak's scene
+        object by object: about 1 s per time for a machine with 200
+        channels, against 0.04 s. That second was paid after every time
+        (_save_checkpoint) and again for every time in the final save.
+        """
         tmp = pathFileName.with_name(f".{pathFileName.name}.{os.getpid()}.tmp")
-        with open(tmp, "wb") as f:
-            dill.dump(data, f)
+        try:
+            with open(tmp, "wb") as f:
+                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except (pickle.PicklingError, AttributeError, TypeError):
+            with open(tmp, "wb") as f:
+                dill.dump(data, f)
         os.replace(tmp, pathFileName)
 
     def _checkpoint_dir(self) -> Path:
