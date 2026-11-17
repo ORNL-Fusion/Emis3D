@@ -52,7 +52,8 @@ class RunConfig:
 
     # --- Channel errors (util_emis3D.channel_error). floor_relative:
     # sigma^2 = (error_floor * peak)^2 + (error_relative * signal)^2, with the
-    # floor raised per channel to the noise measured in noise_window, if given
+    # floor raised per channel to the noise measured in noise_window, if given,
+    # and to the error saved with the data, with use_data_errors
     error_definition: str = "floor_relative"  # or "constant", "poisson", "exponential"
     error_floor: float = 0.05  # additive error, as a fraction of the peak signal
     error_relative: float = 0.05  # relative error, as a fraction of each channel's signal
@@ -61,6 +62,10 @@ class RunConfig:
     # gets floors as large as its signals and drops out of the fit)
     error_floor_scope: str = "camera"
     noise_window: list | None = None  # [t_start, t_end], a quiet period before the event
+    # floor_relative: also raise each channel's floor to the error saved with the data
+    # (DATA_CALIBRATED_ERROR in the measurement files, as scripts/process_bolometer_data.py and the
+    # DIII-D saver write it), taken over the averaging window. Every data file must have it
+    use_data_errors: bool = False
 
     # --- Fitting
     fit_method: str = "least_squares"  # or "differential_evolution" (global, slower; for a fitted peak location)
@@ -99,8 +104,12 @@ class RunConfig:
             raise ValueError("error_floor and error_relative must be >= 0")
         if self.error_floor_scope not in ("camera", "global"):
             raise ValueError(f"error_floor_scope must be camera or global, got {self.error_floor_scope!r}")
-        if self.error_definition.lower() == "floor_relative" and self.error_floor == 0 and self.noise_window is None:
-            raise ValueError("floor_relative needs error_floor > 0 or a noise_window, or near-zero channels get zero error")
+        if not isinstance(self.use_data_errors, bool):
+            raise ValueError("use_data_errors must be true or false")
+        if self.use_data_errors and self.error_definition.lower() != "floor_relative":
+            raise ValueError(f"use_data_errors needs error_definition floor_relative (it raises that model's floor), not {self.error_definition!r}")
+        if self.error_definition.lower() == "floor_relative" and self.error_floor == 0 and self.noise_window is None and not self.use_data_errors:
+            raise ValueError("floor_relative needs error_floor > 0, a noise_window or use_data_errors, or near-zero channels get zero error")
         if self.noise_window is not None and (len(self.noise_window) != 2 or self.noise_window[0] >= self.noise_window[1]):
             raise ValueError("noise_window must be [t_start, t_end] with t_start < t_end")
         for name, bolo in self.BOLOMETERS.items():

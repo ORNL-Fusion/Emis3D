@@ -642,7 +642,9 @@ def channel_error(
         The floor is an additive error, so near-zero channels count in absolute
         terms and cannot dominate the fit; the relative term is the calibration
         uncertainty, so strong channels are fitted to about that fraction. If
-        noise is given (per channel, same units), the floor is raised to it.
+        noise is given (per channel, same units), the floor is raised to it:
+        the noise measured in the run config's noise_window and, with
+        use_data_errors, the error saved with the data.
     Other definitions (constant, poisson, exponential) keep
         their fractional form, sigma = signal * signal_error(...). They are not
         defined for signal <= 0, so those channels get an infinite error and are

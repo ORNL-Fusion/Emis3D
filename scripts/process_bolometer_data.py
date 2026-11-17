@@ -15,7 +15,8 @@ channels x time, channelOrder), and for each one:
                                                    time structure the other channels share)
      and optionally removes common-mode pickup    (common_mode)
   6b. estimates per-channel errors                (errors: noise plus the filtering residual, saved as
-                                                   DATA_CALIBRATED_ERROR)
+                                                   DATA_CALIBRATED_ERROR; a run uses them with
+                                                   use_data_errors: true in its run config)
   7. writes the processed file in the same format, with the bad channels zeroed
      (Emis3D treats a channel that is zero for the whole shot as bad), a report
      with the reasons and a ready-to-paste run-config block, and plots of every

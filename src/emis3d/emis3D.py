@@ -729,6 +729,18 @@ class Emis3D:
 
             temp_["DATA_CALIBRATED"] *= self.info["BOLOMETERS"][bolo_].get("scalingFactor", 1.0)
 
+            # --- The errors saved with the data (use_data_errors), scaled like the data
+            if "DATA_CALIBRATED_ERROR" in temp_:
+                saved_error = np.asarray(temp_["DATA_CALIBRATED_ERROR"], dtype=float)
+                if saved_error.shape != np.shape(temp_["DATA_CALIBRATED"]):
+                    if self.info.get("use_data_errors"):
+                        raise ValueError(f"{pathFileName}: DATA_CALIBRATED_ERROR has shape {saved_error.shape}, but DATA_CALIBRATED {np.shape(temp_['DATA_CALIBRATED'])}")
+                    del temp_["DATA_CALIBRATED_ERROR"]
+                else:
+                    temp_["DATA_CALIBRATED_ERROR"] = np.abs(saved_error * self.info["BOLOMETERS"][bolo_].get("scalingFactor", 1.0))
+            elif self.info.get("use_data_errors"):
+                raise ValueError(f"use_data_errors: {pathFileName} has no DATA_CALIBRATED_ERROR (scripts/process_bolometer_data.py saves it with errors: {{save: true}})")
+
             # --- Bad channels: listed under badChannels, or zero for the whole
             # shot (the DIII-D saver zeroes channels it was told are bad)
             chans = list(temp_["channelOrder"])
@@ -890,6 +902,31 @@ class Emis3D:
         end = np.abs(time_ - (evalTime + dt_)).argmin()
         return std / np.sqrt(end - start + 1)
 
+    def _data_error(self, arrayName: str, evalTime: float) -> np.ndarray | None:
+        """
+        Per-channel error of the averaged signal at evalTime from the error
+        traces saved with the data (DATA_CALIBRATED_ERROR), for the run
+        config's use_data_errors: their root mean square over the averaging
+        window [t - dt, t + dt]. It is not divided by sqrt(number of samples):
+        the traces usually come from filtered data (their neighbouring
+        samples are not independent) and include what filtering removed,
+        which averaging does not reduce. A channel without a saved error
+        (NaN) gets 0 here, so its floor stays the run's. None when
+        use_data_errors is off.
+        """
+        if not self.info.get("use_data_errors"):
+            return None
+        obs = self.data["observed"][arrayName]
+        time_ = np.asarray(obs["TIME"], dtype=float)
+        dt_ = self.info["dt"]
+        start = np.abs(time_ - (evalTime - dt_)).argmin()
+        end = np.abs(time_ - (evalTime + dt_)).argmin()
+        window = np.asarray(obs["DATA_CALIBRATED_ERROR"], dtype=float)[:, start : end + 1]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            rms = np.sqrt(np.nanmean(window**2, axis=1))
+        return np.nan_to_num(rms, nan=0.0, posinf=0.0)
+
     def _prepare_data_for_fit(self, evalTime: float) -> None:
         """
         Average and organise observed data for the minimization fit.
@@ -924,6 +961,9 @@ class Emis3D:
             temp = self._average_observed_data(arrayName=bolo_, evalTime=evalTime)
             data_.update(dict(zip(obs["channelOrder"], temp)))
             noise = self._channel_noise(bolo_, evalTime)
+            saved = self._data_error(bolo_, evalTime)  # the errors saved with the data (use_data_errors)
+            if saved is not None:
+                noise = saved if noise is None else np.maximum(noise, saved)
             if noise is not None:
                 noise_.update(dict(zip(obs["channelOrder"], noise)))
             bad_ |= set(obs.get("badChannels", ()))
