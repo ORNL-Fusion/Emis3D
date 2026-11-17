@@ -447,6 +447,8 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
         ok(f"{len(times)} evaluation time(s): {times[0]:g} to {times[-1]:g}")
     else:
         warn("no evaluation times: set tstart (and tend, Nt), or pass times when running")
+    if cfg.time_grid_problem():
+        warn(f"evaluation times: {cfg.time_grid_problem()}")
 
     # --- Machine and cameras
     if not ws.has_machine(cfg.tokamakName):

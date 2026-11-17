@@ -574,6 +574,11 @@ class Emis3D:
 
         self.info = asdict(self.config)
 
+        # --- A time range that will not be fitted as it reads (tend without Nt)
+        time_problem = self.config.time_grid_problem()
+        if time_problem:
+            logger.warning("Evaluation times: %s", time_problem)
+
         tokamakName = tokamakName or self.info.get("tokamakName")
         if tokamakName is None:
             raise ValueError("tokamakName must be given, or set in the run config")

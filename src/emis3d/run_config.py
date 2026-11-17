@@ -336,6 +336,21 @@ class RunConfig:
         n = int(self.Nt) if self.Nt is not None else 1
         return [float(t) for t in np.round(np.linspace(self.tstart, tend, n), 9)]
 
+    def time_grid_problem(self) -> str | None:
+        """
+        A message when tend lies after tstart but Nt is 1 (its default):
+        eval_times then gives tstart alone, and the rest of the range is
+        not fitted. None when the times are as they read. Emis3D logs it as
+        a warning when the config is loaded, and `emis3d check` reports it.
+        """
+        if self.tstart is None or self.tend is None or self.tend == self.tstart:
+            return None
+        if (int(self.Nt) if self.Nt is not None else 1) > 1:
+            return None
+        nt = "Nt is not set (it defaults to 1)" if self.Nt is None else "Nt is 1"
+        return (f"tend ({self.tend}) is after tstart ({self.tstart}) but {nt}: only t = {self.tstart} is fitted. "
+                "Set Nt to the number of times from tstart to tend (inclusive), or remove tend")
+
     @classmethod
     def from_dict(cls, d: dict) -> "RunConfig":
         known = {f.name for f in fields(cls)}
