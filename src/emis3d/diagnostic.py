@@ -78,25 +78,23 @@ class Bolometer(object):
 
         pathFileName = self._config_path(tokamakName, self.configFileName, required=False)
 
-        # --- Load the configuration file, if it exists
-        if pathFileName is not None and os.path.isfile(pathFileName):
-            self.config_path = pathFileName
-            self.info = config_loader(pathFileName)
-            if self.info is not None and "NAME" in self.info:
-                self.name = self.info["NAME"]
-            else:
-                self.name = None
-                print(f"Configuration file loaded but missing 'NAME' key: {pathFileName}")
-            if self.info is not None and "GROUP_NAME" in self.info:
-                self.group_name = self.info["GROUP_NAME"]
-            else:
-                self.group_name = None
-                print(f"Configuration file loaded but missing 'GROUP_NAME' key: {pathFileName}")
-        else:
-            self.info = None
-            self.name = None
-            self.group_name = None
-            print(f"Could not load the configuration file '{self.configFileName}' for " f"{tokamakName}; searched {[str(r) for r in self.ws.machine_roots(tokamakName)]}")
+        # --- Load the configuration file. A camera that cannot be loaded is an
+        # error here: carrying on without it (as this used to, after printing a
+        # message) failed later, somewhere else, with an AttributeError
+        if pathFileName is None or not os.path.isfile(pathFileName):
+            raise FileNotFoundError(
+                f"Camera configuration file '{self.configFileName}' not found for {tokamakName}; "
+                f"searched inputs/sxrInfo under {[str(r / str(tokamakName)) for r in self.ws.machine_roots(tokamakName)]}"
+            )
+        self.config_path = pathFileName
+        self.info = config_loader(pathFileName)
+        if not isinstance(self.info, dict):
+            raise ValueError(f"Camera configuration file {pathFileName} is empty or is not a mapping of settings")
+        missing = [key for key in ("NAME", "GROUP_NAME", "BUILD_TYPE") if key not in self.info]
+        if missing:
+            raise ValueError(f"Camera configuration file {pathFileName} lacks {missing}")
+        self.name = self.info["NAME"]
+        self.group_name = self.info["GROUP_NAME"]
 
         # --- Load SubArray configuration files
         if self.info is not None and "SUBARRAY_NAMES" in self.info:
@@ -113,13 +111,12 @@ class Bolometer(object):
         Definition to build the camera. This will call the correct definition based
         on the data within the bolometer configuration file
         """
-        if self.info is not None and "BUILD_TYPE" in self.info:
-            if self.info["BUILD_TYPE"] == "FROM PRIMITIVES":
-                self._build_from_primitives()
-            else:
-                print(f"Build type of {self.info['BUILD_TYPE']} not yet supported!")
+        if self.info is None:
+            raise RuntimeError("No camera configuration loaded; cannot build the camera")
+        if self.info["BUILD_TYPE"] == "FROM PRIMITIVES":
+            self._build_from_primitives()
         else:
-            print("Bolometer configuration info is missing or incomplete; cannot build camera.")
+            raise ValueError(f"Camera configuration file {self.config_path}: BUILD_TYPE {self.info['BUILD_TYPE']!r} is not supported (supported: 'FROM PRIMITIVES')")
 
     def _build_from_primitives(self) -> None:
         """
@@ -139,8 +136,7 @@ class Bolometer(object):
         """
 
         if self.info is None:
-            print("Bolometer configuration info is missing; cannot build from primitives.")
-            return
+            raise RuntimeError("No camera configuration loaded")
 
         # --- Convenient constants
         XAXIS = Vector3D(1, 0, 0)
@@ -342,8 +338,7 @@ class Bolometer(object):
         """
 
         if self.info is None:
-            print("Bolometer configuration info is missing; cannot build from primitives.")
-            return
+            raise RuntimeError("No camera configuration loaded")
 
         if "ETENDUE" in self.info:
             self.etendues = self.info["ETENDUE"]

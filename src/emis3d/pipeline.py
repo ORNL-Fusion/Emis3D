@@ -454,7 +454,11 @@ def check(run_config, workspace=None, sample: int = 3) -> list[Finding]:
         return out
     from emis3d.tokamak import Tokamak
 
-    tok = Tokamak(tokamakName=cfg.tokamakName, mode="Analysis", loadBolometers=True, workspace=ws)
+    try:
+        tok = Tokamak(tokamakName=cfg.tokamakName, mode="Analysis", loadBolometers=True, workspace=ws)
+    except (FileNotFoundError, ValueError) as e:  # a camera config that is missing or incomplete
+        err(f"machine {cfg.tokamakName}: {e}")
+        return out
     groups = {b.group_name for b in tok.bolometers}
     unknown = sorted(set(cfg.BOLOMETERS) - groups)
     if unknown:
