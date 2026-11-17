@@ -359,19 +359,23 @@ def run(run_config, workspace=None, workers: int | None = None, times=None, plot
     save the best fits and one figure per time. Returns the Emis3D object.
 
     The best fits are saved before the figures are drawn, so a figure that
-    fails does not lose the fits.
+    fails does not lose the fits. With save, every time is also saved on
+    its own as soon as it is finished (Emis3D._save_checkpoint), so a run
+    that stops part of the way through keeps the times it finished, in
+    results/<run_id>/checkpoints; Emis3D._load_bestFits reads that folder.
     """
     from emis3d.emis3D import Emis3D
 
     e = Emis3D(runConfigName=str(run_config), workspace=workspace)
     if workers is not None:
         e.info["numProcessorsFitting"] = int(workers)
+    after_each = e._save_checkpoint if save else None
     try:
         if times is None:
-            e._perform_fits()
+            e._perform_fits(after_each=after_each)
         else:
             for t in times:
-                e._perform_fits(evalTime=float(t), cleanup=True)
+                e._perform_fits(evalTime=float(t), cleanup=True, after_each=after_each)
     finally:
         e.close()
     if save:

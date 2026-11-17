@@ -186,21 +186,26 @@ class Emis3D:
         config = getattr(self, "config", None)
         return config.eval_times() if config is not None else []
 
-    def _perform_fits(self, evalTime: float | None = None, cleanup: bool | None = None) -> list[float]:
+    def _perform_fits(self, evalTime: float | None = None, cleanup: bool | None = None, after_each=None) -> list[float]:
         """
         Prepare the data, fit every radDist and post-process (best fit,
         profile, TPF, ranges).
 
-        evalTime : one time; by default every time from the run config
-                   (tstart, tend, Nt; see eval_times)
-        cleanup  : after each time, keep only the best fit's candidate
-                   (_cleanup_fits) to free memory. Default: on when looping
-                   over the config's times, off for a single evalTime.
+        evalTime   : one time; by default every time from the run config
+                     (tstart, tend, Nt; see eval_times)
+        cleanup    : after each time, keep only the best fit's candidate
+                     (_cleanup_fits) to free memory. Default: on when looping
+                     over the config's times, off for a single evalTime.
+        after_each : optional callable(time), called when a time is finished,
+                     e.g. self._save_checkpoint so an interrupted run keeps
+                     the times it finished (pipeline.run does this)
 
         Returns the times fitted.
         """
         if evalTime is not None:
             self._perform_fit(float(evalTime), cleanup=bool(cleanup))
+            if after_each is not None:
+                after_each(float(evalTime))
             return [float(evalTime)]
 
         times = self.eval_times()
@@ -209,6 +214,8 @@ class Emis3D:
         for k, t in enumerate(times, start=1):
             logger.info("→ Time %d of %d: %s", k, len(times), t)
             self._perform_fit(t, cleanup=True if cleanup is None else cleanup)
+            if after_each is not None:
+                after_each(t)
         return times
 
     def _perform_fit(self, evalTime: float, cleanup: bool = False) -> None:
@@ -1541,15 +1548,44 @@ class Emis3D:
         logger.info("Results folder: %s", out)
         return out
 
-    def _save_bestFits(self) -> None:
-        """Serialise bestFits and fitData to a dill file."""
+    @staticmethod
+    def _dump_atomic(pathFileName: Path, data) -> None:
+        """Write a dill file under a temporary name, then rename it: an interrupted save leaves no half-written file."""
+        tmp = pathFileName.with_name(f".{pathFileName.name}.{os.getpid()}.tmp")
+        with open(tmp, "wb") as f:
+            dill.dump(data, f)
+        os.replace(tmp, pathFileName)
 
-        def save_results(filename, data):
-            with open(filename, "wb") as f:
-                dill.dump(data, f)
+    def _checkpoint_dir(self) -> Path:
+        """Folder of the per-time checkpoints (_save_checkpoint), inside the run's results folder."""
+        return self._results_dir() / "checkpoints"
+
+    def _save_checkpoint(self, evalTime: float) -> Path | None:
+        """
+        Save one finished time on its own: results/<run_id>/checkpoints/
+        <shot>_bestFits_<time>.dill, in the format of _save_bestFits (so
+        _load_bestFits reads it, or the whole folder). A run that stops part
+        of the way through keeps the times it finished. _save_bestFits
+        removes the checkpoints once the complete file is written.
+        """
+        if not self.info or "shot" not in self.info or "tokamakName" not in self.info:
+            return None
+        folder = self._checkpoint_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        pathFileName = folder / f"{self.info['shot']}_bestFits_{evalTime:.4f}.dill"
+        self._dump_atomic(pathFileName, {"fit_data": {evalTime: self.fitData[evalTime]}, "bestFits": {evalTime: self.bestFits[evalTime]}})
+        logger.debug(f"→ Checkpoint saved to: {pathFileName}")
+        return pathFileName
+
+    def _save_bestFits(self) -> Path | None:
+        """
+        Serialise bestFits and fitData to a dill file (written under a
+        temporary name and renamed). Removes the per-time checkpoints of
+        _save_checkpoint, which this file replaces. Returns the file's path.
+        """
 
         if not self.info or "shot" not in self.info or "tokamakName" not in self.info:
-            return
+            return None
 
         keys = list(self.bestFits.keys())
         if len(keys) > 1:
@@ -1561,11 +1597,17 @@ class Emis3D:
 
         pathFileName = self._results_dir() / filename
 
-        save_results(pathFileName, {"fit_data": self.fitData, "bestFits": self.bestFits})
+        self._dump_atomic(pathFileName, {"fit_data": self.fitData, "bestFits": self.bestFits})
         logger.debug(f"→ Best fits and fitData saved to: {pathFileName}")
+        shutil.rmtree(self._checkpoint_dir(), ignore_errors=True)  # every time is in the file just written
+        return pathFileName
 
-    def _load_bestFits(self, path: str = "") -> None:
-        """Load bestFits and fitData from a previously saved dill file."""
+    def _load_bestFits(self, path: str | os.PathLike = "") -> None:
+        """
+        Load bestFits and fitData from a previously saved dill file, or from
+        every dill file in a folder (the checkpoints of an interrupted run:
+        results/<run_id>/checkpoints).
+        """
 
         def load_results(filename):
             with open(filename, "rb") as f:
@@ -1574,14 +1616,18 @@ class Emis3D:
         self.bestFits = {}
         self.fitData = {}
 
-        temp = load_results(path)
-        if isinstance(temp, dict):
-            for key in list(temp.keys()):
-                for evalTime in temp[key]:
-                    if key == "fit_data":
-                        self.fitData[evalTime] = temp[key][evalTime]
-                    elif key == "bestFits":
-                        self.bestFits[evalTime] = temp[key][evalTime]
+        files = sorted(Path(path).glob("*.dill")) if Path(path).is_dir() else [path]
+        if not files:
+            raise FileNotFoundError(f"No .dill files in {path}")
+        for file_ in files:
+            temp = load_results(file_)
+            if isinstance(temp, dict):
+                for key in list(temp.keys()):
+                    for evalTime in temp[key]:
+                        if key == "fit_data":
+                            self.fitData[evalTime] = temp[key][evalTime]
+                        elif key == "bestFits":
+                            self.bestFits[evalTime] = temp[key][evalTime]
 
     # ------------------------------------------------------------------
     # Plotting

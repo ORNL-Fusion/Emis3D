@@ -71,6 +71,9 @@ def test_run_saves_the_fits_before_drawing_the_figures(monkeypatch):
         def close(self):
             calls.append("close")
 
+        def _save_checkpoint(self, t):
+            calls.append("checkpoint")
+
         def _save_bestFits(self):
             calls.append("save")
 
