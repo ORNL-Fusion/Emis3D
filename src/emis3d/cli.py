@@ -319,7 +319,8 @@ def main(argv=None) -> int:
     pn = sub.add_parser("run", help="fit every evaluation time, save one figure per time and the best fits")
     pn.add_argument("config", help="run config")
     pn.add_argument("--times", nargs="+", help="override the run config's times, e.g. 50.949 or 50.949:50.96:0.002")
-    pn.add_argument("--workers", type=int, help="parallel fits (default: numProcessorsFitting)")
+    pn.add_argument("--workers", type=int, help="processes fitting at once: the radDists of a time (solver: library), "
+                    "or whole times (solver: parametric). Default: numProcessorsFitting")
     pn.add_argument("--no-plots", action="store_true", help="skip the figures")
     pn.add_argument("--workspace")
     pn.set_defaults(func=cmd_run)

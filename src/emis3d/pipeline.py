@@ -13,7 +13,9 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import os
-from concurrent.futures import ProcessPoolExecutor
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -372,10 +374,107 @@ def build_mapping(machine: str, matrix: str, equilibrium: str, injection_deg: fl
 # ---------------------------------------------------------------------------
 
 
+_TIME_WORKER: dict = {}  # a time-fitting worker process's own Emis3D object, and the time it is fitting
+
+
+class _TimePrefix(logging.Filter):
+    """Starts a worker's log messages with the time it is fitting: several workers write to the same terminal."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if _TIME_WORKER.get("time") is not None:
+            record.msg = f"[t = {_TIME_WORKER['time']:g}] {record.msg}"
+        return True
+
+
+def _init_time_worker(run_config: str, ws) -> None:
+    """
+    Start of a time-fitting worker process (run, with solver: parametric):
+    its own Emis3D object for the run config, made once and used for every
+    time the worker is given. What the object prints (the banner, the fit
+    reports) is dropped, since the workers would write through each other;
+    warnings are shown, with the time they belong to.
+    """
+    from emis3d.emis3D import Emis3D
+    from emis3d.workspace import set_workspace
+
+    set_workspace(ws)
+    sys.stdout = open(os.devnull, "w")  # noqa: SIM115 (open for the life of the process)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.WARNING)
+    handler.addFilter(_TimePrefix())
+    logging.getLogger().addHandler(handler)
+    e = Emis3D(runConfigName=run_config, workspace=ws)
+    e.info["numProcessorsFitting"] = 1  # the fitted shape's own amplitude fit stays in this process
+    _TIME_WORKER["emis3d"] = e
+
+
+def _fit_time(t: float) -> tuple[float, str, float]:
+    """Fit one time in a worker process and save it as a checkpoint: (time, checkpoint file, seconds)."""
+    e = _TIME_WORKER["emis3d"]
+    _TIME_WORKER["time"] = t
+    start = time.perf_counter()
+    e._perform_fits(evalTime=t, cleanup=True)
+    path = e._save_checkpoint(t)
+    if path is None:
+        raise RuntimeError("the run config needs a shot and a tokamakName to save a time")
+    for store in ("bestFits", "fitData", "fits", "parametric", "parametric_models", "_parametric_fits", "_parametric_radDist", "_scale_override"):
+        getattr(e, store, {}).pop(t, None)  # the time is in the file: free its memory for the next one
+    return t, str(path), time.perf_counter() - start
+
+
+def _fit_times_in_parallel(e, run_config: str, times: list, workers: int, keep_checkpoints: bool) -> None:
+    """
+    Fit the times of a parametric run in worker processes, one time each at a
+    time, and gather them into e.bestFits and e.fitData.
+
+    A time's fit depends on that time's data alone (the search starts from
+    the run config's seed at every time), so the results are those of the
+    serial loop. Each worker saves its time as a checkpoint
+    (Emis3D._save_checkpoint), which is how the result comes back: an
+    interrupted run keeps the finished times, as a serial one does. If a time
+    fails, the times not yet started are dropped, the ones being fitted are
+    finished and kept, and the error is raised.
+    """
+    e._build_parametric_mappings()  # once, here: not by every worker at the same moment
+    n = min(int(workers), len(times))
+    width = len(str(len(times)))
+    print(f"Fitting {len(times)} times in {n} worker processes", flush=True)
+    start, fitting = time.perf_counter(), 0.0
+    files: dict = {}
+    # Started fresh ("spawn"), as the radDist-building workers and Util_emis3D.FitPool are
+    with ProcessPoolExecutor(max_workers=n, mp_context=multiprocessing.get_context("spawn"),
+                             initializer=_init_time_worker, initargs=(run_config, e.ws)) as executor:
+        futures = {executor.submit(_fit_time, float(t)): float(t) for t in times}
+        try:
+            for done, fut in enumerate(as_completed(futures), start=1):
+                t, path, seconds = fut.result()
+                files[t] = path
+                fitting += seconds
+                left = fitting / done * (len(times) - done) / n  # the mean time of a fit, for what is left, shared by the workers
+                print(f"[{done:>{width}}/{len(times)}] t = {t:g}: fitted in {_clock(seconds)}"
+                      f" | elapsed {_clock(time.perf_counter() - start)}, left ~{_clock(left)}", flush=True)
+        except BaseException:
+            running = sum(f.running() for f in futures)
+            print(f"A time failed: finishing the {running} being fitted, dropping the rest", file=sys.stderr, flush=True)
+            executor.shutdown(wait=True, cancel_futures=True)
+            raise
+    for t in times:  # in the order of the times, as the serial loop leaves them
+        e._add_results(files[float(t)])
+        if not keep_checkpoints:
+            Path(files[float(t)]).unlink(missing_ok=True)
+
+
 def run(run_config, workspace=None, workers: int | None = None, times=None, plots: bool = True, save: bool = True):
     """
     Fit every evaluation time (the run config's tstart/tend/Nt, or `times`),
     save the best fits and one figure per time. Returns the Emis3D object.
+
+    workers (default: the run config's numProcessorsFitting) is the number
+    of processes fitting at once. With solver: library they share the
+    radDists of a time (Util_emis3D.FitPool); with solver: parametric each
+    fits a whole time, so several times are fitted at once
+    (_fit_times_in_parallel). One time, or one worker, is fitted in this
+    process.
 
     The best fits are saved before the figures are drawn, so a figure that
     fails does not lose the fits. With save, every time is also saved on
@@ -389,8 +488,14 @@ def run(run_config, workspace=None, workers: int | None = None, times=None, plot
     if workers is not None:
         e.info["numProcessorsFitting"] = int(workers)
     after_each = e._save_checkpoint if save else None
+    n_workers = int((e.info or {}).get("numProcessorsFitting", 1) or 1)
+    todo = []  # the times to share between worker processes, if this run does that
+    if n_workers > 1 and e.config is not None and e.config.solver == "parametric":
+        todo = e.eval_times() if times is None else [float(t) for t in times]
     try:
-        if times is None:
+        if len(todo) > 1:
+            _fit_times_in_parallel(e, str(run_config), todo, n_workers, keep_checkpoints=save)
+        elif times is None:
             e._perform_fits(after_each=after_each)
         else:
             for t in times:

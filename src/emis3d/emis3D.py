@@ -258,19 +258,11 @@ class Emis3D:
         self.parametric[evalTime] and copied into bestFits later.
         """
         import emis3d.radDist as radDist_module
-        from emis3d.geometry import cached_matrix, matrix_path
         from emis3d.parametric import CompositeFit, ParametricFit, comparison_table
         from emis3d.radDistFitting import RadDistFitting
 
         cfg = self.config.parametric
-        names = cfg.get("matrices") or ["medium"]
-        matrices = []
-        for name in names:
-            path = matrix_path(self.ws, self.info["tokamakName"], name)
-            if not path.is_file():
-                raise FileNotFoundError(f"no geometry matrix {name!r} for {self.info['tokamakName']} at {path}; "
-                                        f"build it with: emis3d build-matrix {self.info['tokamakName']} --resolution {name}")
-            matrices.append(cached_matrix(path))
+        names, matrices = self._parametric_matrices()
 
         # --- Only channels with a row in every matrix can be modelled. Channels in
         # the data files but not in the machine's camera configs (left out on
@@ -374,6 +366,48 @@ class Emis3D:
         candidate._map_signals()
         self.data["synthetic"] = {"locIndependent": {0: candidate}, "locDependent": {}}
 
+    def _parametric_matrices(self) -> tuple[list, list]:
+        """The names and the geometry matrices of the run config's parametric block, coarsest first."""
+        from emis3d.geometry import cached_matrix, matrix_path
+
+        names = self.config.parametric.get("matrices") or ["medium"]
+        matrices = []
+        for name in names:
+            path = matrix_path(self.ws, self.info["tokamakName"], name)
+            if not path.is_file():
+                raise FileNotFoundError(f"no geometry matrix {name!r} for {self.info['tokamakName']} at {path}; "
+                                        f"build it with: emis3d build-matrix {self.info['tokamakName']} --resolution {name}")
+            matrices.append(cached_matrix(path))
+        return names, matrices
+
+    def _parametric_map_paths(self, cfg: dict, names: list, matrices: list) -> list[str]:
+        """The field-line mapping of each matrix for this run's field-aligned models (built and cached when missing or stale)."""
+        from emis3d.fieldline_map import get_or_build
+
+        paths = []
+        for name, G in zip(names, matrices, strict=True):
+            _, mpath = get_or_build(self.ws, G, self.info["tokamakName"], name, cfg["equilibrium"], float(self.info["injectionLocation"]),
+                                    transits=int(cfg.get("transits", 1)), substeps=int(cfg.get("substeps", 2)),
+                                    psi_max=cfg.get("psi_max"), progress=lambda text: logger.info(text))
+            paths.append(str(mpath))
+        return paths
+
+    def _build_parametric_mappings(self) -> None:
+        """
+        Build now the field-line mappings the listed models need, where they
+        are missing or stale. pipeline.run calls this before it starts worker
+        processes for the times: each would otherwise trace the same field
+        lines and write the same file.
+        """
+        from emis3d.parametric import MODELS
+
+        cfg = self.config.parametric
+        composites = cfg.get("composites") or {}
+        models = {comp["model"] for name in cfg["models"] if name in composites for comp in composites[name]["components"]}
+        models |= {name for name in cfg["models"] if name not in composites}
+        if any(MODELS.get(model, {}).get("field_aligned") for model in models):
+            self._parametric_map_paths(cfg, *self._parametric_matrices())
+
     def _parametric_template(self, model: str, cfg: dict, names: list, matrices: list, fixed: dict):
         """A model's radDist template for the parametric search (its field-line mappings built once and cached)."""
         import emis3d.radDist as radDist_module
@@ -399,14 +433,7 @@ class Emis3D:
             template_cfg["injector"] = dataclasses.asdict(self.injector)
         template_cfg.update(fixed or {})
         if spec.get("field_aligned"):
-            from emis3d.fieldline_map import get_or_build
-
-            paths = []
-            for name, G in zip(names, matrices, strict=True):
-                _, mpath = get_or_build(self.ws, G, self.info["tokamakName"], name, cfg["equilibrium"], float(self.info["injectionLocation"]),
-                                        transits=int(cfg.get("transits", 1)), substeps=int(cfg.get("substeps", 2)),
-                                        psi_max=cfg.get("psi_max"), progress=lambda text: logger.info(text))
-                paths.append(str(mpath))
+            paths = self._parametric_map_paths(cfg, names, matrices)
             template_cfg["mapPath"], template_cfg["mapPaths"] = paths[-1], paths
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -1679,10 +1706,6 @@ class Emis3D:
         results/<run_id>/checkpoints).
         """
 
-        def load_results(filename):
-            with open(filename, "rb") as f:
-                return dill.load(f)
-
         self.bestFits = {}
         self.fitData = {}
 
@@ -1690,14 +1713,24 @@ class Emis3D:
         if not files:
             raise FileNotFoundError(f"No .dill files in {path}")
         for file_ in files:
-            temp = load_results(file_)
-            if isinstance(temp, dict):
-                for key in list(temp.keys()):
-                    for evalTime in temp[key]:
-                        if key == "fit_data":
-                            self.fitData[evalTime] = temp[key][evalTime]
-                        elif key == "bestFits":
-                            self.bestFits[evalTime] = temp[key][evalTime]
+            self._add_results(file_)
+
+    def _add_results(self, filename: str | os.PathLike) -> None:
+        """Add the times of one results file (a checkpoint, or a complete file) to bestFits and fitData."""
+        with open(filename, "rb") as f:
+            temp = dill.load(f)
+        if not hasattr(self, "bestFits"):
+            self.bestFits = {}
+        if not hasattr(self, "fitData"):
+            self.fitData = {}
+        if not isinstance(temp, dict):
+            return
+        for key in list(temp.keys()):
+            for evalTime in temp[key]:
+                if key == "fit_data":
+                    self.fitData[evalTime] = temp[key][evalTime]
+                elif key == "bestFits":
+                    self.bestFits[evalTime] = temp[key][evalTime]
 
     # ------------------------------------------------------------------
     # Plotting

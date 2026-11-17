@@ -69,7 +69,9 @@ class RunConfig:
 
     # --- Fitting
     fit_method: str = "least_squares"  # or "differential_evolution" (global, slower; for a fitted peak location)
-    numProcessorsFitting: int = 1  # parallel fits in scripts/run_emis3D.py
+    # Processes fitting at once (emis3d run, scripts/run_emis3D.py). solver: library: they share the radDists
+    # of a time. solver: parametric: each fits a whole time, so this many times are fitted at once
+    numProcessorsFitting: int = 1
 
     # --- Optional blocks
     paths: dict = field(default_factory=dict)  # override workspace locations for this run (see emis3d.workspace)
