@@ -21,7 +21,6 @@ dependencies = [
     "numdifftools>=0.10.1",
     "freeqdsk>=0.5.2",
     "h5py",
-    "pandas",
     "pyyaml",
     "dill",
 ]
